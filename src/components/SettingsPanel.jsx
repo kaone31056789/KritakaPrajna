@@ -10,7 +10,7 @@ function maskKey(key) {
   return key.slice(0, 5) + "••••" + key.slice(-4);
 }
 
-export default function SettingsPanel({ apiKey, onSaveKey, onRemoveKey, onClose, modelPref, onSaveModelPref, customCommands, onSaveCustomCommands, systemPrompt, onSaveSystemPrompt, defaultSystemPrompt }) {
+export default function SettingsPanel({ apiKey, onSaveKey, onRemoveKey, onClose, modelPref, onSaveModelPref, customCommands, onSaveCustomCommands, systemPrompt, onSaveSystemPrompt, defaultSystemPrompt, advisorPrefs, onSaveAdvisorPrefs }) {
   const [newKey, setNewKey] = useState("");
   const [validating, setValidating] = useState(false);
   const [status, setStatus] = useState({ type: "", message: "" });
@@ -153,6 +153,78 @@ export default function SettingsPanel({ apiKey, onSaveKey, onRemoveKey, onClose,
                   <span className="block text-[10px] opacity-60 mt-0.5">{desc}</span>
                 </motion.button>
               ))}
+            </div>
+          </section>
+
+          {/* Model Advisor Preferences */}
+          <section className="space-y-3">
+            <h3 className="text-xs font-semibold text-dark-300 uppercase tracking-wider">
+              Model Advisor
+            </h3>
+            <p className="text-xs text-dark-400">
+              The advisor card appears after each response with cost info and model suggestions.
+            </p>
+            <div className="space-y-2.5">
+              {/* Prefer Free toggle */}
+              <div className="flex items-center justify-between bg-dark-800 border border-dark-700/50 rounded-xl px-4 py-3">
+                <div>
+                  <span className="text-sm text-dark-200 font-medium">Prefer Free Models</span>
+                  <p className="text-[11px] text-dark-500 mt-0.5">Always suggest free alternatives first</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onSaveAdvisorPrefs?.({ ...advisorPrefs, preferFree: !advisorPrefs?.preferFree })}
+                  className={`relative w-10 h-5 rounded-full cursor-pointer transition-colors ${
+                    advisorPrefs?.preferFree ? "bg-emerald-500/60" : "bg-dark-700"
+                  }`}
+                >
+                  <motion.div
+                    animate={{ x: advisorPrefs?.preferFree ? 20 : 2 }}
+                    transition={{ duration: 0.15, ease }}
+                    className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow"
+                  />
+                </button>
+              </div>
+              {/* Prefer Best Quality toggle */}
+              <div className="flex items-center justify-between bg-dark-800 border border-dark-700/50 rounded-xl px-4 py-3">
+                <div>
+                  <span className="text-sm text-dark-200 font-medium">Prefer Best Quality</span>
+                  <p className="text-[11px] text-dark-500 mt-0.5">Prioritize highest-capability models</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onSaveAdvisorPrefs?.({ ...advisorPrefs, preferBest: !advisorPrefs?.preferBest })}
+                  className={`relative w-10 h-5 rounded-full cursor-pointer transition-colors ${
+                    advisorPrefs?.preferBest ? "bg-purple-500/60" : "bg-dark-700"
+                  }`}
+                >
+                  <motion.div
+                    animate={{ x: advisorPrefs?.preferBest ? 20 : 2 }}
+                    transition={{ duration: 0.15, ease }}
+                    className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow"
+                  />
+                </button>
+              </div>
+              {/* Show Advisor toggle */}
+              <div className="flex items-center justify-between bg-dark-800 border border-dark-700/50 rounded-xl px-4 py-3">
+                <div>
+                  <span className="text-sm text-dark-200 font-medium">Show Advisor Card</span>
+                  <p className="text-[11px] text-dark-500 mt-0.5">Display model advisor below each response</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onSaveAdvisorPrefs?.({ ...advisorPrefs, showAdvisor: !advisorPrefs?.showAdvisor })}
+                  className={`relative w-10 h-5 rounded-full cursor-pointer transition-colors ${
+                    advisorPrefs?.showAdvisor !== false ? "bg-saffron-500/60" : "bg-dark-700"
+                  }`}
+                >
+                  <motion.div
+                    animate={{ x: (advisorPrefs?.showAdvisor !== false) ? 20 : 2 }}
+                    transition={{ duration: 0.15, ease }}
+                    className="absolute top-0.5 w-4 h-4 bg-white rounded-full shadow"
+                  />
+                </button>
+              </div>
             </div>
           </section>
 

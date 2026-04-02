@@ -14,12 +14,14 @@ import { detectTaskType, selectSmartModel } from "../utils/smartModelSelect";
 import { calculateCost, isModelFree, formatCost, loadLifetimeCost, addLifetimeCost, calcSessionCost } from "../utils/costTracker";
 import { parseCommand, buildCommandPrompt, resolveFromAttachments, loadCustomCommands, saveCustomCommands, getAllCommandHints } from "../utils/commandParser";
 import { recordSuccess, recordFailure, isModelUnavailable, findFallbackModel, findCheapestModel, getModelHealth } from "../utils/rateLimiter";
+import { generateAdvisorData } from "../utils/modelAdvisor";
 
 const ease = [0.4, 0, 0.2, 1];
 const CHATS_KEY = "openrouter_chats";
 const ACTIVE_CHAT_KEY = "openrouter_active_chat";
 const MODEL_PREF_KEY = "openrouter_model_pref";
 const SYSTEM_PROMPT_KEY = "openrouter_system_prompt";
+const ADVISOR_PREFS_KEY = "openrouter_advisor_prefs";
 
 const DEFAULT_SYSTEM_PROMPT = `You are KritakaPrajna, an expert AI coding assistant. Follow this reasoning framework for every request:
 
@@ -102,6 +104,10 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [customCommands, setCustomCommands] = useState(loadCustomCommands);
   const [systemPrompt, setSystemPrompt] = useState(() => localStorage.getItem(SYSTEM_PROMPT_KEY) || DEFAULT_SYSTEM_PROMPT);
+  const [advisorPrefs, setAdvisorPrefs] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(ADVISOR_PREFS_KEY)) || { preferFree: false, preferBest: false, showAdvisor: true }; }
+    catch { return { preferFree: false, preferBest: false, showAdvisor: true }; }
+  });
   const abortRef = useRef(null);
 
   // ── Last request tracking (for retry/regenerate) ──
@@ -447,6 +453,18 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
         const responseTime = Date.now() - startTime;
         recordSuccess(selectedModel, responseTime);
 
+        // Generate advisor data
+        const taskTypeForAdvisor = detectTaskType(processedText || text, uploads, attachedFiles);
+        const advisor = generateAdvisorData({
+          models,
+          currentModelId: selectedModel,
+          taskType: taskTypeForAdvisor,
+          cost,
+          usage: result.usage,
+          pricing,
+          preference: advisorPrefs?.preferBest ? "best" : advisorPrefs?.preferFree ? "free" : modelPref,
+        });
+
         setChats((prev) =>
           prev.map((c) => {
             if (c.id !== chatId) return c;
@@ -458,6 +476,7 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
               isFree: free,
               usage: result.usage,
               _modelUsed: selectedModel,
+              _advisorData: advisor,
             };
             return { ...c, messages: next };
           })
@@ -514,7 +533,7 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
         setLoading(false);
       }
     },
-    [apiKey, selectedModel, activeChatId, chats, attachedFiles, uploads, models, systemPrompt]
+    [apiKey, selectedModel, activeChatId, chats, attachedFiles, uploads, models, systemPrompt, advisorPrefs, modelPref]
   );
 
   const handleStop = useCallback(() => {
@@ -581,6 +600,11 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
     (mode) => handleRetryOrRegenerate(mode),
     [handleRetryOrRegenerate]
   );
+
+  /** Called from ModelAdvisorCard — switch to a suggested model for next message */
+  const handleAdvisorSwitch = useCallback((modelId) => {
+    setSelectedModel(modelId);
+  }, []);
 
   const handleNewChat = () => {
     handleStop();
@@ -822,6 +846,8 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
           systemPrompt={systemPrompt}
           onSaveSystemPrompt={(p) => { setSystemPrompt(p); localStorage.setItem(SYSTEM_PROMPT_KEY, p); }}
           defaultSystemPrompt={DEFAULT_SYSTEM_PROMPT}
+          advisorPrefs={advisorPrefs}
+          onSaveAdvisorPrefs={(prefs) => { setAdvisorPrefs(prefs); localStorage.setItem(ADVISOR_PREFS_KEY, JSON.stringify(prefs)); }}
         />
         </motion.div>
       ) : (
@@ -906,6 +932,8 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
           lastError={lastError}
           onRetry={handleRetry}
           onRegenerate={handleRegenerate}
+          onSwitchModel={handleAdvisorSwitch}
+          showAdvisor={advisorPrefs?.showAdvisor}
           onRefine={(msgIdx) => {
             const aiMsg = messages[msgIdx];
             if (!aiMsg || aiMsg.role !== "assistant" || !aiMsg.content) return;
