@@ -225,6 +225,33 @@ export default function SettingsPanel({ apiKey, onSaveKey, onRemoveKey, onClose,
                   />
                 </button>
               </div>
+
+              {/* Monthly Budget */}
+              <div className="bg-dark-800 border border-dark-700/50 rounded-xl px-4 py-3 space-y-2">
+                <div>
+                  <span className="text-sm text-dark-200 font-medium">Monthly Budget</span>
+                  <p className="text-[11px] text-dark-500 mt-0.5">Set a spending limit — advisor suggests models that fit your budget</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-dark-300">$</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    placeholder="e.g. 5.00"
+                    value={advisorPrefs?.monthlyBudget || ""}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      onSaveAdvisorPrefs?.({ ...advisorPrefs, monthlyBudget: val === "" ? null : parseFloat(val) });
+                    }}
+                    className="flex-1 bg-dark-900 border border-dark-700/50 rounded-lg px-3 py-2 text-sm text-white placeholder-dark-500 focus:outline-none focus:ring-1 focus:ring-saffron-500/50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  />
+                  <span className="text-[11px] text-dark-500">/month</span>
+                </div>
+                {advisorPrefs?.monthlyBudget > 0 && (
+                  <p className="text-[10px] text-saffron-400/70">Budget: ${Number(advisorPrefs.monthlyBudget).toFixed(2)}/mo — paid suggestions will respect this limit</p>
+                )}
+              </div>
             </div>
           </section>
 

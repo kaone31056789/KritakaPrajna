@@ -4,7 +4,6 @@ import { formatCost } from "../utils/costTracker";
 import { extractAllCodeBlocks } from "../utils/diffEngine";
 import DiffViewer from "./DiffViewer";
 import MarkdownRenderer from "./MarkdownRenderer";
-import ModelAdvisorCard from "./ModelAdvisorCard";
 
 const ease = [0.4, 0, 0.2, 1];
 const msgVariants = {
@@ -65,7 +64,7 @@ function MessageContent({ content, isAssistant = false }) {
   });
 }
 
-export default function MessageList({ messages, loading, onRefine, onRetry, onRegenerate, lastError, onSwitchModel, showAdvisor }) {
+export default function MessageList({ messages, loading, onRefine, onRetry, onRegenerate, lastError }) {
   const bottomRef = useRef(null);
   const [dismissedDiffs, setDismissedDiffs] = useState(new Set());
   const [showDiff, setShowDiff] = useState(new Set());
@@ -249,14 +248,6 @@ export default function MessageList({ messages, loading, onRefine, onRetry, onRe
                         </button>
                       )}
                     </div>
-                  )}
-                  {/* Model Advisor Card */}
-                  {!isStreaming && msg.content && msg._advisorData && showAdvisor !== false && (
-                    <ModelAdvisorCard
-                      advisorData={msg._advisorData}
-                      onSwitchModel={onSwitchModel}
-                      loading={loading}
-                    />
                   )}
                   {/* Error with retry buttons */}
                   {!isStreaming && msg._error && (

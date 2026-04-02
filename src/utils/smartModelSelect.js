@@ -104,33 +104,37 @@ export function extractParamBillions(model) {
 
 const QUALITY_TIERS = [
   // High quality (well-known capable models)
+  { pattern: "claude-4", score: 96 },
+  { pattern: "claude-3-opus", score: 95 },
+  { pattern: "claude-3.5-sonnet", score: 92 },
   { pattern: "gpt-4o", score: 90 },
   { pattern: "gpt-4-turbo", score: 88 },
-  { pattern: "claude-3.5-sonnet", score: 92 },
-  { pattern: "claude-3-opus", score: 95 },
-  { pattern: "claude-4", score: 96 },
   { pattern: "gemini-2", score: 88 },
   { pattern: "gemini-1.5-pro", score: 86 },
   { pattern: "llama-3.1-405b", score: 85 },
-  { pattern: "llama-3.3-70b", score: 80 },
-  { pattern: "deepseek-chat", score: 78 },
+  { pattern: "deepseek-v3", score: 83 },
   { pattern: "deepseek-r1", score: 82 },
-  { pattern: "qwen-2.5-72b", score: 79 },
+  { pattern: "llama-3.3-70b", score: 80 },
   { pattern: "mistral-large", score: 80 },
+  { pattern: "qwen-2.5-72b", score: 79 },
+  { pattern: "deepseek-chat", score: 78 },
+  { pattern: "qwen3", score: 76 },
   // Mid quality
   { pattern: "llama-3", score: 65 },
-  { pattern: "gemma-2", score: 60 },
-  { pattern: "phi-3", score: 55 },
   { pattern: "mixtral", score: 62 },
+  { pattern: "gemma", score: 60 },
+  { pattern: "phi-4", score: 58 },
+  { pattern: "phi-3", score: 55 },
   { pattern: "qwen", score: 55 },
   { pattern: "mistral", score: 50 },
+  { pattern: "deepseek", score: 70 },
 ];
 
 /**
  * Composite quality score that combines tier matching with parameter size bonus.
  * Larger models get a significant boost (up to +20 points for 400B+ models).
  */
-function qualityScore(model) {
+export function qualityScore(model) {
   const id = model.id.toLowerCase();
   let base = 30; // unknown default
   for (const tier of QUALITY_TIERS) {

@@ -50,13 +50,32 @@ export function recordFailure(modelId, errorMessage = "") {
   h.failures.push(Date.now());
   h.failures = pruneOld(h.failures);
 
-  // Mark unavailable after repeated failures
-  if (h.failures.length >= MAX_FAILURES_BEFORE_UNAVAILABLE) {
+  const lower = errorMessage.toLowerCase();
+
+  // Instant unavailable on rate limit or server-side errors
+  const isRateLimit =
+    lower.includes("rate limit") ||
+    lower.includes("rate_limit") ||
+    errorMessage.includes("429");
+
+  const isBusyOrDown =
+    errorMessage.includes("503") ||
+    errorMessage.includes("502") ||
+    lower.includes("busy") ||
+    lower.includes("overloaded") ||
+    lower.includes("unavailable") ||
+    lower.includes("no endpoints") ||
+    lower.includes("capacity") ||
+    lower.includes("server error") ||
+    lower.includes("timed out") ||
+    lower.includes("timeout");
+
+  if (isRateLimit || isBusyOrDown) {
     h.unavailableSince = Date.now();
   }
 
-  // Instant unavailable on rate limit
-  if (errorMessage.toLowerCase().includes("rate limit") || errorMessage.includes("429")) {
+  // Mark unavailable after repeated failures of any kind
+  if (h.failures.length >= MAX_FAILURES_BEFORE_UNAVAILABLE) {
     h.unavailableSince = Date.now();
   }
 }
@@ -120,10 +139,21 @@ export function getModelHealth(modelId) {
  * @returns {object|null} Best available model or null
  */
 export function findFallbackModel(models, currentModelId, taskType, qualityScorer) {
+  const currentModel = models.find((m) => m.id === currentModelId);
+  const currentIsFree =
+    currentModel &&
+    Number(currentModel.pricing?.prompt) === 0 &&
+    Number(currentModel.pricing?.completion) === 0;
+
   const available = models.filter((m) => {
     if (m.id === currentModelId) return false;
     if (m.id.startsWith("openrouter/")) return false;
-    return !isModelUnavailable(m.id);
+    if (isModelUnavailable(m.id)) return false;
+    // Stay in the same pricing tier: free → free, paid → paid
+    const mIsFree = Number(m.pricing?.prompt) === 0 && Number(m.pricing?.completion) === 0;
+    if (currentIsFree && !mIsFree) return false;
+    if (!currentIsFree && mIsFree) return false;
+    return true;
   });
 
   if (available.length === 0) return null;

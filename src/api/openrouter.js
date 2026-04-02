@@ -12,6 +12,23 @@ export async function fetchModels(apiKey) {
 }
 
 /**
+ * Fetch account credits and usage from OpenRouter.
+ * Returns { total_credits, total_usage } or null on failure.
+ */
+export async function fetchCredits(apiKey) {
+  try {
+    const res = await fetch(`${API_BASE}/credits`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json.data || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Stream a chat completion. Calls `onChunk(text)` for each token.
  * Returns { text, usage } where usage is { prompt_tokens, completion_tokens } or null.
  * Pass an AbortController signal to allow cancellation.
@@ -88,6 +105,7 @@ export async function streamMessage(apiKey, model, messages, { onChunk, signal }
             usage = {
               prompt_tokens: json.usage.prompt_tokens || 0,
               completion_tokens: json.usage.completion_tokens || 0,
+              cost: json.usage.cost ?? null, // Actual cost from OpenRouter
             };
           }
         } catch {

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { fetchModels, streamMessage } from "../api/openrouter";
+import { fetchModels, streamMessage, fetchCredits } from "../api/openrouter";
 import ModelSelector from "./ModelSelector";
 import MessageList from "./MessageList";
 import MessageInput from "./MessageInput";
@@ -8,10 +8,11 @@ import SettingsPanel from "./SettingsPanel";
 import FileContext from "./FileContext";
 import SmartModelBanner from "./SmartModelBanner";
 import PromptBanners from "./PromptBanners";
+import ModelAdvisorPanel, { AdvisorToggle } from "./ModelAdvisorCard";
 import TitleBar from "./TitleBar";
 import KPLogo from "./KPLogo";
-import { detectTaskType, selectSmartModel } from "../utils/smartModelSelect";
-import { calculateCost, isModelFree, formatCost, loadLifetimeCost, addLifetimeCost, calcSessionCost } from "../utils/costTracker";
+import { detectTaskType, selectSmartModel, qualityScore } from "../utils/smartModelSelect";
+import { calculateCost, isModelFree, formatCost, calcSessionCost } from "../utils/costTracker";
 import { parseCommand, buildCommandPrompt, resolveFromAttachments, loadCustomCommands, saveCustomCommands, getAllCommandHints } from "../utils/commandParser";
 import { recordSuccess, recordFailure, isModelUnavailable, findFallbackModel, findCheapestModel, getModelHealth } from "../utils/rateLimiter";
 import { generateAdvisorData } from "../utils/modelAdvisor";
@@ -100,7 +101,7 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
   const [smartSuggestion, setSmartSuggestion] = useState(null);
   const [suggestionDismissed, setSuggestionDismissed] = useState(false);
   const [modelPref, setModelPref] = useState(() => localStorage.getItem(MODEL_PREF_KEY) || "auto");
-  const [lifetimeCost, setLifetimeCost] = useState(loadLifetimeCost);
+  const [lifetimeCost, setLifetimeCost] = useState(null); // { total_credits, total_usage } from API
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [customCommands, setCustomCommands] = useState(loadCustomCommands);
   const [systemPrompt, setSystemPrompt] = useState(() => localStorage.getItem(SYSTEM_PROMPT_KEY) || DEFAULT_SYSTEM_PROMPT);
@@ -118,10 +119,19 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
   const [rateLimitBanner, setRateLimitBanner] = useState(null); // { visible, modelId, fallbackModelId }
   const [cheapestBanner, setCheapestBanner] = useState(null); // { visible, cheapestLabel, cheapestModelId, currentModelId }
   const [lastError, setLastError] = useState(null);
+  const [advisorOpen, setAdvisorOpen] = useState(false);
 
   // Current chat's messages
   const activeChat = chats.find((c) => c.id === activeChatId);
   const messages = activeChat?.messages || [];
+
+  // Latest advisor data from the most recent AI message
+  const latestAdvisor = React.useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "assistant" && messages[i]._advisorData) return messages[i]._advisorData;
+    }
+    return null;
+  }, [messages]);
 
   // Persist chats to localStorage whenever they change
   useEffect(() => {
@@ -166,6 +176,12 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
     return () => {
       cancelled = true;
     };
+  }, [apiKey]);
+
+  // Fetch account credits from OpenRouter API
+  useEffect(() => {
+    if (!apiKey) return;
+    fetchCredits(apiKey).then((c) => { if (c) setLifetimeCost(c); });
   }, [apiKey]);
 
   // Helper: update messages for the active chat
@@ -319,7 +335,7 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
 
       // ── Check rate limit before sending ──
       if (isModelUnavailable(selectedModel)) {
-        const fallback = findFallbackModel(models, selectedModel, taskType, () => 50);
+        const fallback = findFallbackModel(models, selectedModel, taskType, qualityScore);
         setRateLimitBanner({
           visible: true,
           modelId: selectedModel,
@@ -446,7 +462,9 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
         // Calculate and store cost on the AI message
         const currentModelObj = models.find((m) => m.id === selectedModel);
         const pricing = currentModelObj?.pricing;
-        const cost = calculateCost(result.usage, pricing);
+        // Prefer actual cost from OpenRouter API, fall back to local calculation
+        const apiCost = result.usage?.cost;
+        const cost = (apiCost != null && apiCost >= 0) ? apiCost : calculateCost(result.usage, pricing);
         const free = isModelFree(pricing);
 
         // Record success for rate limiter
@@ -463,6 +481,7 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
           usage: result.usage,
           pricing,
           preference: advisorPrefs?.preferBest ? "best" : advisorPrefs?.preferFree ? "free" : modelPref,
+          monthlyBudget: advisorPrefs?.monthlyBudget || null,
         });
 
         setChats((prev) =>
@@ -482,10 +501,8 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
           })
         );
 
-        // Update lifetime cost
-        if (cost > 0) {
-          setLifetimeCost(addLifetimeCost(cost));
-        }
+        // Refresh credits from API
+        fetchCredits(apiKey).then((c) => { if (c) setLifetimeCost(c); });
       } catch (err) {
         if (err.name === "AbortError") {
           // keep partial response
@@ -497,16 +514,16 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
           // Record failure for rate limiter
           recordFailure(selectedModel, errMsg);
 
-          // Show rate limit banner with fallback suggestion
+          // Show rate limit banner with fallback suggestion on any model error
           const taskType = detectTaskType(text, uploads, attachedFiles);
-          if (isModelUnavailable(selectedModel)) {
-            const fallback = findFallbackModel(models, selectedModel, taskType, () => 50);
+          const fallback = findFallbackModel(models, selectedModel, taskType, qualityScore);
+          if (fallback) {
             setRateLimitBanner({
               visible: true,
               modelId: selectedModel,
-              fallbackModelId: fallback?.id || null,
+              fallbackModelId: fallback.id,
               onSwitch: () => {
-                if (fallback) setSelectedModel(fallback.id);
+                setSelectedModel(fallback.id);
                 setRateLimitBanner(null);
               },
               onDismiss: () => setRateLimitBanner(null),
@@ -570,7 +587,7 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
           setSelectedModel(suggestion.recommended.id);
         } else {
           // Fallback: find any available model that's not the current one
-          const fallback = findFallbackModel(models, selectedModel, taskType, () => 50);
+          const fallback = findFallbackModel(models, selectedModel, taskType, qualityScore);
           if (fallback) {
             setSelectedModel(fallback.id);
           }
@@ -792,10 +809,20 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
             <span className="text-dark-400">Session</span>
             <span className="text-dark-200 font-medium">{formatCost(calcSessionCost(chats))}</span>
           </div>
-          <div className="flex items-center justify-between text-[11px] mt-0.5">
-            <span className="text-dark-400">Lifetime</span>
-            <span className="text-dark-200 font-medium">{formatCost(lifetimeCost)}</span>
-          </div>
+          {lifetimeCost && (
+            <>
+              <div className="flex items-center justify-between text-[11px] mt-0.5">
+                <span className="text-dark-400">Total Used</span>
+                <span className="text-dark-200 font-medium">{formatCost(lifetimeCost.total_usage || 0)}</span>
+              </div>
+              {lifetimeCost.total_credits > 0 && (
+                <div className="flex items-center justify-between text-[11px] mt-0.5">
+                  <span className="text-dark-400">Credits Left</span>
+                  <span className="text-emerald-300 font-medium">{formatCost(Math.max(0, (lifetimeCost.total_credits || 0) - (lifetimeCost.total_usage || 0)))}</span>
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         <div className="px-3 py-3 border-t border-white/[0.06]">
@@ -866,11 +893,28 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
             selected={selectedModel}
             onSelect={setSelectedModel}
           />
-          {selectedModel && (
-            <span className="text-xs text-dark-400 truncate hidden sm:block max-w-[300px]">
-              {selectedModel}
-            </span>
-          )}
+          {selectedModel && (() => {
+            const m = models.find((mod) => mod.id === selectedModel);
+            const p = m?.pricing;
+            const promptCost = Number(p?.prompt) || 0;
+            const completionCost = Number(p?.completion) || 0;
+            const per1M = (promptCost + completionCost) * 1_000_000;
+            const currentIsFree = per1M === 0;
+            return (
+              <div className="flex items-center gap-2.5 min-w-0 hidden sm:flex">
+                <span className="text-xs text-dark-400 truncate max-w-[300px]">
+                  {selectedModel}
+                </span>
+                <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border shrink-0 ${
+                  currentIsFree
+                    ? "text-emerald-300 bg-emerald-500/10 border-emerald-500/20"
+                    : "text-saffron-300 bg-saffron-500/10 border-saffron-500/20"
+                }`}>
+                  {currentIsFree ? "Free" : `$${per1M < 0.01 ? per1M.toFixed(4) : per1M.toFixed(2)}/1M tokens`}
+                </span>
+              </div>
+            );
+          })()}
         </header>
 
         {/* Smart model suggestion */}
@@ -932,8 +976,6 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
           lastError={lastError}
           onRetry={handleRetry}
           onRegenerate={handleRegenerate}
-          onSwitchModel={handleAdvisorSwitch}
-          showAdvisor={advisorPrefs?.showAdvisor}
           onRefine={(msgIdx) => {
             const aiMsg = messages[msgIdx];
             if (!aiMsg || aiMsg.role !== "assistant" || !aiMsg.content) return;
@@ -1023,6 +1065,26 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
       </motion.div>
       )}
       </AnimatePresence>
+
+      {/* Right-side advisor slider */}
+      {!showSettings && advisorPrefs?.showAdvisor !== false && (
+        <>
+          <AdvisorToggle
+            open={advisorOpen}
+            onClick={() => setAdvisorOpen((v) => !v)}
+            hasData={!!latestAdvisor}
+          />
+          <ModelAdvisorPanel
+            advisorData={latestAdvisor}
+            onSwitchModel={handleAdvisorSwitch}
+            loading={loading}
+            open={advisorOpen}
+            onClose={() => setAdvisorOpen(false)}
+            models={models}
+            selectedModel={selectedModel}
+          />
+        </>
+      )}
       </div>
     </div>
   );

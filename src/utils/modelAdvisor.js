@@ -4,6 +4,7 @@
 // task-aware recommendations, and dual free+paid options.
 
 import { isFreeModel, extractParamBillions, supportsVision, detectTaskType } from "./smartModelSelect";
+import { isModelUnavailable } from "./rateLimiter";
 
 // ── Coding model patterns (prioritized for code tasks) ──────────────────────
 
@@ -38,17 +39,21 @@ const QUALITY_TIERS = [
   { pattern: "gemini-2", score: 88 },
   { pattern: "gemini-1.5-pro", score: 86 },
   { pattern: "llama-3.1-405b", score: 85 },
+  { pattern: "deepseek-v3", score: 83 },
   { pattern: "deepseek-r1", score: 82 },
   { pattern: "llama-3.3-70b", score: 80 },
   { pattern: "mistral-large", score: 80 },
   { pattern: "qwen-2.5-72b", score: 79 },
   { pattern: "deepseek-chat", score: 78 },
+  { pattern: "qwen3", score: 76 },
   { pattern: "llama-3", score: 65 },
   { pattern: "mixtral", score: 62 },
-  { pattern: "gemma-2", score: 60 },
+  { pattern: "gemma", score: 60 },
   { pattern: "phi-3", score: 55 },
+  { pattern: "phi-4", score: 58 },
   { pattern: "qwen", score: 55 },
   { pattern: "mistral", score: 50 },
+  { pattern: "deepseek", score: 70 },
 ];
 
 function capabilityScore(model) {
@@ -134,6 +139,7 @@ export function buildModelProfile(model) {
  * @param {object} params.usage - { prompt_tokens, completion_tokens }
  * @param {object} params.pricing - Model pricing object
  * @param {"auto"|"free"|"paid"|"best"} params.preference - User preference
+ * @param {number|null} params.monthlyBudget - Monthly spending limit in dollars
  * @returns {object} Advisor card data
  */
 export function generateAdvisorData({
@@ -144,11 +150,12 @@ export function generateAdvisorData({
   usage,
   pricing,
   preference = "auto",
+  monthlyBudget = null,
 }) {
   if (!models || models.length === 0) return null;
 
-  // Filter out meta/router models
-  const realModels = models.filter((m) => !m.id.startsWith("openrouter/"));
+  // Filter out meta/router models and unavailable (rate-limited/down) models
+  const realModels = models.filter((m) => !m.id.startsWith("openrouter/") && !isModelUnavailable(m.id));
 
   const currentModel = realModels.find((m) => m.id === currentModelId);
   if (!currentModel) return null;
@@ -229,6 +236,55 @@ export function generateAdvisorData({
     params: extractParamBillions(paidModels[0]),
   } : null;
 
+  // ── Cheapest paid option (decent capability for the task) ──
+  let cheapestPaid = null;
+  {
+    const minScore = Math.max(25, currentScore * 0.5); // At least half the current model's capability
+    const paidCapable = capable
+      .filter((m) => !isFreeModel(m) && m.id !== currentModelId && scorer(m) >= minScore)
+      .sort((a, b) => costPer1MTokens(a) - costPer1MTokens(b));
+    if (paidCapable.length > 0) {
+      const cp = paidCapable[0];
+      cheapestPaid = {
+        id: cp.id,
+        name: shortName(cp.id),
+        isFree: false,
+        costLabel: formatPricePer1M(cp),
+        capabilityScore: scorer(cp),
+      };
+    }
+  }
+
+  // ── Budget pick (best quality paid model within monthly budget) ──
+  let budgetPick = null;
+  let budgetEstMonthly = null; // estimated monthly cost for current model
+  if (monthlyBudget > 0) {
+    // Estimate: avg 800 tokens/message (300 prompt + 500 completion), ~500 msgs/month = 400K tokens/month
+    const MONTHLY_TOKENS = 400_000;
+    const maxCostPer1M = (monthlyBudget / MONTHLY_TOKENS) * 1_000_000; // max they can afford per 1M tokens
+
+    // Current model estimated monthly cost
+    const currentCostPer1M = costPer1MTokens(currentModel);
+    budgetEstMonthly = (currentCostPer1M / 1_000_000) * MONTHLY_TOKENS;
+
+    const budgetCandidates = capable
+      .filter((m) => !isFreeModel(m) && m.id !== currentModelId && costPer1MTokens(m) <= maxCostPer1M && costPer1MTokens(m) > 0)
+      .sort((a, b) => scorer(b) - scorer(a)); // best quality first
+
+    if (budgetCandidates.length > 0) {
+      const bp = budgetCandidates[0];
+      const bpMonthlyCost = (costPer1MTokens(bp) / 1_000_000) * MONTHLY_TOKENS;
+      budgetPick = {
+        id: bp.id,
+        name: shortName(bp.id),
+        isFree: false,
+        costLabel: formatPricePer1M(bp),
+        capabilityScore: scorer(bp),
+        estMonthlyCost: bpMonthlyCost,
+      };
+    }
+  }
+
   // ── Coding-specific suggestion ──
   let codingSuggestion = null;
   if (taskType === "coding") {
@@ -259,9 +315,14 @@ export function generateAdvisorData({
     // Suggestions (null if none better)
     cheaperAlternative,
     betterModel,
+    cheapestPaid,
     bestFree,
     bestPaid,
     codingSuggestion,
+    // Budget
+    budgetPick,
+    monthlyBudget: monthlyBudget > 0 ? monthlyBudget : null,
+    budgetEstMonthly,
     // Preference applied
     preference,
   };

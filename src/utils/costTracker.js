@@ -53,13 +53,22 @@ export function loadLifetimeCost() {
 
 /**
  * Add to lifetime cost and persist.
+ * Returns the new total.
  */
 export function addLifetimeCost(amount) {
-  if (!amount || amount <= 0) return;
+  if (!amount || amount <= 0) return loadLifetimeCost();
   const current = loadLifetimeCost();
   const updated = current + amount;
   localStorage.setItem(LIFETIME_COST_KEY, updated.toString());
   return updated;
+}
+
+/**
+ * Reset lifetime cost to 0 (or a specific value).
+ */
+export function resetLifetimeCost(value = 0) {
+  localStorage.setItem(LIFETIME_COST_KEY, value.toString());
+  return value;
 }
 
 /**
