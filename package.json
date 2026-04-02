@@ -1,0 +1,84 @@
+{
+  "name": "kritakaprajna",
+  "version": "1.0.0",
+  "description": "AI coding assistant powered by OpenRouter",
+  "author": "Parikshit",
+  "private": true,
+  "homepage": ".",
+  "main": "electron/main.js",
+  "dependencies": {
+    "electron-store": "^8.2.0",
+    "electron-updater": "^6.8.3",
+    "framer-motion": "^11.18.2",
+    "pdf-parse": "^2.4.5",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-scripts": "5.0.1",
+    "web-vitals": "^2.1.4"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.19",
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
+    "electron": "^28.1.0",
+    "electron-builder": "^26.8.1",
+    "png-to-ico": "^3.0.1",
+    "postcss": "^8.4.38",
+    "sharp": "^0.34.5",
+    "tailwindcss": "^3.4.1",
+    "wait-on": "^7.2.0"
+  },
+  "scripts": {
+    "start-react": "cross-env BROWSER=none react-scripts start",
+    "start-electron": "wait-on http://localhost:3000 && electron .",
+    "start": "concurrently \"npm:start-react\" \"npm:start-electron\"",
+    "build": "react-scripts build",
+    "dist": "npm run build && electron-builder",
+    "test": "react-scripts test"
+  },
+  "build": {
+    "appId": "com.kritakaprajna.app",
+    "productName": "KritakaPrajna",
+    "extends": null,
+    "publish": {
+      "provider": "github",
+      "owner": "kaone31056789",
+      "repo": "KritakaPrajna"
+    },
+    "directories": {
+      "buildResources": "assets"
+    },
+    "files": [
+      "build/**/*",
+      "electron/**/*",
+      "assets/**/*"
+    ],
+    "extraMetadata": {
+      "main": "electron/main.js"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "assets/logo.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "KritakaPrajna",
+      "uninstallDisplayName": "KritakaPrajna",
+      "deleteAppDataOnUninstall": true,
+      "installerIcon": "assets/logo.ico",
+      "uninstallerIcon": "assets/logo.ico",
+      "installerSidebar": null
+    }
+  },
+  "browserslist": {
+    "production": [
+      "last 1 electron version"
+    ],
+    "development": [
+      "last 1 electron version"
+    ]
+  }
+}
