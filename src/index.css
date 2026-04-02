@@ -65,3 +65,42 @@ input:focus, textarea:focus {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ── Markdown body styles ── */
+.markdown-body {
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.markdown-body pre {
+  margin: 0;
+}
+
+.markdown-body > *:first-child {
+  margin-top: 0 !important;
+}
+
+.markdown-body > *:last-child {
+  margin-bottom: 0 !important;
+}
+
+/* Ensure code blocks don't inherit the parent's white-space pre-wrap */
+.markdown-body .react-syntax-highlighter-line-number {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Smooth scrolling in code blocks */
+.markdown-body pre > div {
+  scrollbar-width: thin;
+  scrollbar-color: #1e293b transparent;
+}
+
+.markdown-body pre > div::-webkit-scrollbar {
+  height: 4px;
+}
+
+.markdown-body pre > div::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 2px;
+}

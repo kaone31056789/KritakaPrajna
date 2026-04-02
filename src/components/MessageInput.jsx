@@ -5,7 +5,7 @@ const ease = [0.4, 0, 0.2, 1];
 
 const ACCEPTED_TYPES = ".png,.jpg,.jpeg,.gif,.webp,.txt,.js,.jsx,.ts,.tsx,.py,.json,.md,.css,.html,.xml,.yaml,.yml,.csv,.pdf";
 
-export default function MessageInput({ onSend, onStop, onUpload, loading, disabled, commandHints: externalHints }) {
+export default function MessageInput({ onSend, onStop, onUpload, loading, disabled, commandHints: externalHints, onTextChange }) {
   const SLASH_COMMANDS = externalHints || [
     { cmd: "/explain", desc: "Explain a file", arg: "<file>" },
     { cmd: "/fix", desc: "Find & fix bugs", arg: "<file>" },
@@ -134,7 +134,7 @@ export default function MessageInput({ onSend, onStop, onUpload, loading, disabl
             rows={1}
             placeholder="Ask anything..."
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => { setText(e.target.value); onTextChange?.(e.target.value); }}
             onKeyDown={handleKeyDown}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}

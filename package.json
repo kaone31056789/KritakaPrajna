@@ -1,6 +1,6 @@
 {
   "name": "kritakaprajna",
-  "version": "1.0.1",
+  "version": "1.2.0",
   "description": "AI coding assistant powered by OpenRouter",
   "author": "Parikshit",
   "private": true,
@@ -13,7 +13,10 @@
     "pdf-parse": "^2.4.5",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-markdown": "^10.1.0",
     "react-scripts": "5.0.1",
+    "react-syntax-highlighter": "^16.1.1",
+    "remark-gfm": "^4.0.1",
     "web-vitals": "^2.1.4"
   },
   "devDependencies": {

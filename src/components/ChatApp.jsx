@@ -7,11 +7,13 @@ import MessageInput from "./MessageInput";
 import SettingsPanel from "./SettingsPanel";
 import FileContext from "./FileContext";
 import SmartModelBanner from "./SmartModelBanner";
+import PromptBanners from "./PromptBanners";
 import TitleBar from "./TitleBar";
 import KPLogo from "./KPLogo";
 import { detectTaskType, selectSmartModel } from "../utils/smartModelSelect";
 import { calculateCost, isModelFree, formatCost, loadLifetimeCost, addLifetimeCost, calcSessionCost } from "../utils/costTracker";
 import { parseCommand, buildCommandPrompt, resolveFromAttachments, loadCustomCommands, saveCustomCommands, getAllCommandHints } from "../utils/commandParser";
+import { recordSuccess, recordFailure, isModelUnavailable, findFallbackModel, findCheapestModel, getModelHealth } from "../utils/rateLimiter";
 
 const ease = [0.4, 0, 0.2, 1];
 const CHATS_KEY = "openrouter_chats";
@@ -101,6 +103,15 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
   const [customCommands, setCustomCommands] = useState(loadCustomCommands);
   const [systemPrompt, setSystemPrompt] = useState(() => localStorage.getItem(SYSTEM_PROMPT_KEY) || DEFAULT_SYSTEM_PROMPT);
   const abortRef = useRef(null);
+
+  // ── Last request tracking (for retry/regenerate) ──
+  const lastRequestRef = useRef(null); // { text, uploads, attachedFiles, modelUsed, chatId }
+
+  // ── Prompt-based banners state ──
+  const [taskBanner, setTaskBanner] = useState(null); // { visible, taskType, suggestedModelId }
+  const [rateLimitBanner, setRateLimitBanner] = useState(null); // { visible, modelId, fallbackModelId }
+  const [cheapestBanner, setCheapestBanner] = useState(null); // { visible, cheapestLabel, cheapestModelId, currentModelId }
+  const [lastError, setLastError] = useState(null);
 
   // Current chat's messages
   const activeChat = chats.find((c) => c.id === activeChatId);
@@ -262,14 +273,57 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
 
       // Run smart detection at send time (considers text for coding keywords)
       const taskType = detectTaskType(processedText, uploads, attachedFiles);
+
+      // ── Show task suggestion banner (coding/vision/document) ──
       if (taskType !== "general") {
         const suggestion = selectSmartModel(models, taskType, selectedModel, modelPref);
         if (!suggestion.currentOk && suggestion.recommended) {
+          setTaskBanner({
+            visible: true,
+            taskType,
+            suggestedModelId: suggestion.recommended.id,
+            onSwitch: () => {
+              setSelectedModel(suggestion.recommended.id);
+              setTaskBanner(null);
+            },
+            onIgnore: () => setTaskBanner(null),
+          });
           // Auto-switch to the recommended model if it's free, or if preference is paid
           if ((suggestion.free && suggestion.recommended.id === suggestion.free.id) || modelPref === "paid") {
             setSelectedModel(suggestion.recommended.id);
           }
         }
+      }
+
+      // ── Show cheapest model banner ──
+      const cheapest = findCheapestModel(models, taskType, null);
+      if (cheapest && cheapest.model.id !== selectedModel) {
+        setCheapestBanner({
+          visible: true,
+          cheapestLabel: cheapest.costLabel,
+          cheapestModelId: cheapest.model.id,
+          currentModelId: selectedModel,
+          onUseCheapest: () => {
+            setSelectedModel(cheapest.model.id);
+            setCheapestBanner(null);
+          },
+          onKeepCurrent: () => setCheapestBanner(null),
+        });
+      }
+
+      // ── Check rate limit before sending ──
+      if (isModelUnavailable(selectedModel)) {
+        const fallback = findFallbackModel(models, selectedModel, taskType, () => 50);
+        setRateLimitBanner({
+          visible: true,
+          modelId: selectedModel,
+          fallbackModelId: fallback?.id || null,
+          onSwitch: () => {
+            if (fallback) setSelectedModel(fallback.id);
+            setRateLimitBanner(null);
+          },
+          onDismiss: () => setRateLimitBanner(null),
+        });
       }
 
       let chatId = activeChatId;
@@ -346,8 +400,19 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
       );
 
       setError("");
+      setLastError(null);
       setLoading(true);
 
+      // ── Store last request for retry/regenerate ──
+      lastRequestRef.current = {
+        text,
+        uploads: [...uploads],
+        attachedFiles: [...attachedFiles],
+        modelUsed: selectedModel,
+        chatId,
+      };
+
+      const startTime = Date.now();
       const controller = new AbortController();
       abortRef.current = controller;
 
@@ -378,6 +443,10 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
         const cost = calculateCost(result.usage, pricing);
         const free = isModelFree(pricing);
 
+        // Record success for rate limiter
+        const responseTime = Date.now() - startTime;
+        recordSuccess(selectedModel, responseTime);
+
         setChats((prev) =>
           prev.map((c) => {
             if (c.id !== chatId) return c;
@@ -388,6 +457,7 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
               cost: cost,
               isFree: free,
               usage: result.usage,
+              _modelUsed: selectedModel,
             };
             return { ...c, messages: next };
           })
@@ -401,14 +471,38 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
         if (err.name === "AbortError") {
           // keep partial response
         } else {
-          setError(err.message || "Failed to get a response. Please try again.");
-          // Remove empty AI message on error
+          const errMsg = err.message || "Failed to get a response. Please try again.";
+          setError(errMsg);
+          setLastError(errMsg);
+
+          // Record failure for rate limiter
+          recordFailure(selectedModel, errMsg);
+
+          // Show rate limit banner with fallback suggestion
+          const taskType = detectTaskType(text, uploads, attachedFiles);
+          if (isModelUnavailable(selectedModel)) {
+            const fallback = findFallbackModel(models, selectedModel, taskType, () => 50);
+            setRateLimitBanner({
+              visible: true,
+              modelId: selectedModel,
+              fallbackModelId: fallback?.id || null,
+              onSwitch: () => {
+                if (fallback) setSelectedModel(fallback.id);
+                setRateLimitBanner(null);
+              },
+              onDismiss: () => setRateLimitBanner(null),
+            });
+          }
+
+          // Store error on the AI message (instead of removing it) for retry UI
           setChats((prev) =>
             prev.map((c) => {
               if (c.id !== chatId) return c;
               const last = c.messages[c.messages.length - 1];
               if (last?.role === "assistant" && !last.content) {
-                return { ...c, messages: c.messages.slice(0, -1) };
+                const next = [...c.messages];
+                next[next.length - 1] = { ...last, _error: errMsg };
+                return { ...c, messages: next };
               }
               return c;
             })
@@ -426,6 +520,67 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
   }, []);
+
+  /**
+   * Retry or regenerate last request.
+   * @param {"same"|"better"} mode - "same" retries with same model, "better" picks a better one
+   */
+  const handleRetryOrRegenerate = useCallback(
+    (mode) => {
+      const last = lastRequestRef.current;
+      if (!last) return;
+
+      // Remove the last AI message (error or completed)
+      setChats((prev) =>
+        prev.map((c) => {
+          if (c.id !== activeChatId) return c;
+          const msgs = [...c.messages];
+          // Remove last assistant message
+          if (msgs.length > 0 && msgs[msgs.length - 1].role === "assistant") {
+            msgs.pop();
+          }
+          return { ...c, messages: msgs };
+        })
+      );
+
+      // If "better", try to pick a better model
+      if (mode === "better") {
+        const taskType = detectTaskType(last.text, last.uploads, last.attachedFiles);
+        const suggestion = selectSmartModel(models, taskType, selectedModel, modelPref);
+        if (suggestion.recommended && suggestion.recommended.id !== selectedModel) {
+          setSelectedModel(suggestion.recommended.id);
+        } else {
+          // Fallback: find any available model that's not the current one
+          const fallback = findFallbackModel(models, selectedModel, taskType, () => 50);
+          if (fallback) {
+            setSelectedModel(fallback.id);
+          }
+        }
+      }
+
+      setError("");
+      setLastError(null);
+
+      // Re-send the original text (handleSend will rebuild everything)
+      // Use a small timeout to let state settle after model change
+      setTimeout(() => {
+        handleSend(last.text);
+      }, 50);
+    },
+    [activeChatId, models, selectedModel, modelPref, handleSend]
+  );
+
+  /** Called from MessageList retry buttons (on error messages) */
+  const handleRetry = useCallback(
+    (mode) => handleRetryOrRegenerate(mode),
+    [handleRetryOrRegenerate]
+  );
+
+  /** Called from MessageList regenerate buttons (on completed messages) */
+  const handleRegenerate = useCallback(
+    (mode) => handleRetryOrRegenerate(mode),
+    [handleRetryOrRegenerate]
+  );
 
   const handleNewChat = () => {
     handleStop();
@@ -451,6 +606,60 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
   const handleDismissSuggestion = useCallback(() => {
     setSuggestionDismissed(true);
   }, []);
+
+  /** Debounced live detection of task type from input text */
+  const inputDebounceRef = useRef(null);
+  const handleInputTextChange = useCallback((text) => {
+    clearTimeout(inputDebounceRef.current);
+    inputDebounceRef.current = setTimeout(() => {
+      if (!text || text.length < 10) {
+        setTaskBanner(null);
+        setCheapestBanner(null);
+        return;
+      }
+
+      const taskType = detectTaskType(text, uploads, attachedFiles);
+      if (taskType === "general") {
+        setTaskBanner(null);
+        setCheapestBanner(null);
+        return;
+      }
+
+      const suggestion = selectSmartModel(models, taskType, selectedModel, modelPref);
+      if (!suggestion.currentOk && suggestion.recommended) {
+        setTaskBanner({
+          visible: true,
+          taskType,
+          suggestedModelId: suggestion.recommended.id,
+          onSwitch: () => {
+            setSelectedModel(suggestion.recommended.id);
+            setTaskBanner(null);
+          },
+          onIgnore: () => setTaskBanner(null),
+        });
+      } else {
+        setTaskBanner(null);
+      }
+
+      // Show cheapest banner for detected task
+      const cheapest = findCheapestModel(models, taskType, null);
+      if (cheapest && cheapest.model.id !== selectedModel) {
+        setCheapestBanner({
+          visible: true,
+          cheapestLabel: cheapest.costLabel,
+          cheapestModelId: cheapest.model.id,
+          currentModelId: selectedModel,
+          onUseCheapest: () => {
+            setSelectedModel(cheapest.model.id);
+            setCheapestBanner(null);
+          },
+          onKeepCurrent: () => setCheapestBanner(null),
+        });
+      } else {
+        setCheapestBanner(null);
+      }
+    }, 500); // 500ms debounce
+  }, [models, selectedModel, modelPref, uploads, attachedFiles]);
 
   const handleDeleteChat = (id) => {
     setChats((prev) => prev.filter((c) => c.id !== id));
@@ -647,6 +856,13 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
           />
         )}
 
+        {/* Prompt-based banners: task suggestion, rate limit, cheapest model */}
+        <PromptBanners
+          taskSuggestion={taskBanner}
+          rateLimitWarning={rateLimitBanner}
+          cheapestModel={cheapestBanner}
+        />
+
         {/* Error banner */}
         <AnimatePresence>
         {error && (
@@ -655,19 +871,47 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.2, ease }}
-            className="bg-red-500/10 border-b border-red-500/20 text-red-400 text-sm px-5 py-2.5 shrink-0 overflow-hidden"
+            className="bg-red-500/10 border-b border-red-500/20 text-red-400 text-sm px-5 py-2.5 shrink-0 overflow-hidden flex items-center gap-3"
           >
-            {error}
+            <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+            </svg>
+            <span className="flex-1">{error}</span>
+            {lastRequestRef.current && (
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => handleRetry("same")}
+                  disabled={loading}
+                  className="text-xs font-medium text-saffron-300 bg-saffron-500/15 hover:bg-saffron-500/25 rounded-lg px-2.5 py-1 cursor-pointer disabled:opacity-30 transition-colors"
+                >
+                  Retry
+                </button>
+                <button
+                  onClick={() => handleRetry("better")}
+                  disabled={loading}
+                  className="text-xs font-medium text-purple-300 bg-purple-500/15 hover:bg-purple-500/25 rounded-lg px-2.5 py-1 cursor-pointer disabled:opacity-30 transition-colors"
+                >
+                  Try Better Model
+                </button>
+              </div>
+            )}
           </motion.div>
         )}
         </AnimatePresence>
 
         {/* Messages */}
-        <MessageList messages={messages} loading={loading} onRefine={(msgIdx) => {
-          const aiMsg = messages[msgIdx];
-          if (!aiMsg || aiMsg.role !== "assistant" || !aiMsg.content) return;
-          handleSend("Refine your previous answer: be more precise, fix any issues, and improve the code quality. Keep the same format.");
-        }} />
+        <MessageList
+          messages={messages}
+          loading={loading}
+          lastError={lastError}
+          onRetry={handleRetry}
+          onRegenerate={handleRegenerate}
+          onRefine={(msgIdx) => {
+            const aiMsg = messages[msgIdx];
+            if (!aiMsg || aiMsg.role !== "assistant" || !aiMsg.content) return;
+            handleSend("Refine your previous answer: be more precise, fix any issues, and improve the code quality. Keep the same format.");
+          }}
+        />
 
         {/* Attached files & uploads preview */}
         <AnimatePresence>
@@ -747,7 +991,7 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
         </AnimatePresence>
 
         {/* Input */}
-        <MessageInput onSend={handleSend} onUpload={handleUpload} loading={loading} onStop={handleStop} disabled={loading || !selectedModel} commandHints={getAllCommandHints(customCommands)} />
+        <MessageInput onSend={handleSend} onUpload={handleUpload} loading={loading} onStop={handleStop} disabled={loading || !selectedModel} commandHints={getAllCommandHints(customCommands)} onTextChange={handleInputTextChange} />
       </motion.div>
       )}
       </AnimatePresence>

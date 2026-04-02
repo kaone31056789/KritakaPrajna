@@ -36,6 +36,17 @@ export function detectTaskType(text, uploads = [], attachedFiles = []) {
   const isCoding = CODING_KEYWORDS.some((kw) => lower.includes(kw.toLowerCase()));
   if (isCoding) return "coding";
 
+  // Detect large code blocks (fenced or indented) — suggest coding model
+  const codeBlockMatch = text.match(/```[\s\S]*?```/g);
+  if (codeBlockMatch) {
+    const totalCodeLen = codeBlockMatch.reduce((sum, b) => sum + b.length, 0);
+    if (totalCodeLen > 200) return "coding";
+  }
+
+  // Long text that looks code-heavy (lots of braces, semicolons, indentation)
+  const codeChars = (text.match(/[{};()=><]/g) || []).length;
+  if (text.length > 300 && codeChars / text.length > 0.03) return "coding";
+
   return "general";
 }
 

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { formatCost } from "../utils/costTracker";
 import { extractAllCodeBlocks } from "../utils/diffEngine";
 import DiffViewer from "./DiffViewer";
+import MarkdownRenderer from "./MarkdownRenderer";
 
 const ease = [0.4, 0, 0.2, 1];
 const msgVariants = {
@@ -36,12 +37,17 @@ function AiIcon() {
 }
 
 /** Render message content — handles both plain strings and multimodal arrays */
-function MessageContent({ content }) {
-  if (typeof content === "string") return content;
+function MessageContent({ content, isAssistant = false }) {
+  if (typeof content === "string") {
+    // Use markdown renderer for assistant messages
+    if (isAssistant) return <MarkdownRenderer content={content} />;
+    return content;
+  }
   if (!Array.isArray(content)) return String(content || "");
 
   return content.map((part, idx) => {
     if (part.type === "text") {
+      if (isAssistant) return <MarkdownRenderer key={idx} content={part.text} />;
       return <span key={idx}>{part.text}</span>;
     }
     if (part.type === "image_url" && part.image_url?.url) {
@@ -58,7 +64,7 @@ function MessageContent({ content }) {
   });
 }
 
-export default function MessageList({ messages, loading, onRefine }) {
+export default function MessageList({ messages, loading, onRefine, onRetry, onRegenerate, lastError }) {
   const bottomRef = useRef(null);
   const [dismissedDiffs, setDismissedDiffs] = useState(new Set());
   const [showDiff, setShowDiff] = useState(new Set());
@@ -158,10 +164,10 @@ export default function MessageList({ messages, loading, onRefine }) {
                   <div className="flex items-start gap-2.5">
                     <AiIcon />
                     <div
-                      className="bg-dark-800/70 text-dark-100 border border-dark-700/30 rounded-2xl rounded-tl-sm px-4 py-2.5 min-w-[56px] text-sm leading-relaxed whitespace-pre-wrap break-words"
+                      className="bg-dark-800/70 text-dark-100 border border-dark-700/30 rounded-2xl rounded-tl-sm px-4 py-2.5 min-w-[56px] text-sm leading-relaxed break-words markdown-body"
                     >
                       {(typeof msg.content === "string" ? msg.content : msg.content?.length) ? (
-                        <MessageContent content={msg.content} />
+                        <MessageContent content={msg.content} isAssistant />
                       ) : (
                         <span className="inline-flex gap-1 text-saffron-400/60">
                           <motion.span animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.2, repeat: Infinity, ease }}>●</motion.span>
@@ -189,9 +195,9 @@ export default function MessageList({ messages, loading, onRefine }) {
                       )}
                     </span>
                   )}
-                  {/* Action buttons: Copy + Refine */}
+                  {/* Action buttons: Copy + Refine + Regenerate + Retry */}
                   {!isStreaming && msg.content && (
-                    <div className="flex items-center gap-1 mt-0.5" style={{ marginLeft: '34px' }}>
+                    <div className="flex items-center gap-1 mt-0.5 flex-wrap" style={{ marginLeft: '34px' }}>
                       <button
                         onClick={() => {
                           const text = typeof msg.content === "string" ? msg.content : "";
@@ -215,6 +221,65 @@ export default function MessageList({ messages, loading, onRefine }) {
                         </svg>
                         Refine
                       </button>
+                      {/* Regenerate — re-send same prompt with same model */}
+                      {i === messages.length - 1 && (
+                        <button
+                          onClick={() => onRegenerate?.("same")}
+                          disabled={loading}
+                          className="flex items-center gap-1 text-[10px] text-dark-500 hover:text-emerald-400 disabled:opacity-30 cursor-pointer px-1.5 py-1 rounded-md hover:bg-emerald-500/[0.06] transition-colors"
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                          Regenerate
+                        </button>
+                      )}
+                      {/* Retry with better model */}
+                      {i === messages.length - 1 && (
+                        <button
+                          onClick={() => onRegenerate?.("better")}
+                          disabled={loading}
+                          className="flex items-center gap-1 text-[10px] text-dark-500 hover:text-purple-400 disabled:opacity-30 cursor-pointer px-1.5 py-1 rounded-md hover:bg-purple-500/[0.06] transition-colors"
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                          </svg>
+                          Retry Better Model
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {/* Error with retry buttons */}
+                  {!isStreaming && msg._error && (
+                    <div className="mt-1.5" style={{ marginLeft: '34px' }}>
+                      <div className="flex items-center gap-2 text-xs text-red-400 mb-2">
+                        <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                        </svg>
+                        <span>{msg._error}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => onRetry?.("same")}
+                          disabled={loading}
+                          className="flex items-center gap-1.5 text-[11px] font-medium text-saffron-300 bg-saffron-500/10 hover:bg-saffron-500/20 border border-saffron-500/20 rounded-lg px-3 py-1.5 cursor-pointer disabled:opacity-30 transition-colors"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                            <path strokeLinecap="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                          Retry Same Model
+                        </button>
+                        <button
+                          onClick={() => onRetry?.("better")}
+                          disabled={loading}
+                          className="flex items-center gap-1.5 text-[11px] font-medium text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 rounded-lg px-3 py-1.5 cursor-pointer disabled:opacity-30 transition-colors"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                          </svg>
+                          Retry Better Model
+                        </button>
+                      </div>
                     </div>
                   )}
                   {/* Diff viewer for /fix and code-containing responses */}
