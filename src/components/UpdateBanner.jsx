@@ -16,10 +16,11 @@ export default function UpdateBanner() {
   useEffect(() => {
     if (!window.electronAPI?.onUpdateStatus) return;
     const unsub = window.electronAPI.onUpdateStatus(({ status, data }) => {
-      if (status === "not-available" || status === "error") {
-        // auto-dismiss after a brief flash
+      // Silently ignore errors — update failures are not actionable by the user
+      if (status === "error") return;
+      if (status === "not-available") {
         setUpdate({ status, data });
-        const t = setTimeout(() => setUpdate(null), 3000);
+        const t = setTimeout(() => setUpdate(null), 2000);
         return () => clearTimeout(t);
       }
       setUpdate({ status, data });
@@ -36,7 +37,7 @@ export default function UpdateBanner() {
       : update.status === "available"
         ? `Update v${update.data} available — downloading…`
         : update.status === "error"
-          ? "Update check failed"
+          ? null
           : STATUS_MESSAGES[update.status]
     : null;
 
