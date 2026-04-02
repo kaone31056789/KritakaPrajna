@@ -61,7 +61,8 @@
     },
     "win": {
       "target": "nsis",
-      "icon": "assets/logo.ico"
+      "icon": "assets/logo.ico",
+      "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
