@@ -584,6 +584,10 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
             Settings
           </motion.button>
         </div>
+
+        <div className="px-3 pb-3 text-center">
+          <span className="text-[10px] text-dark-500">Made by Parikshit</span>
+        </div>
       </motion.aside>
 
       {/* ── Main area ── */}
