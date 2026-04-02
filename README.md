@@ -1,129 +1,151 @@
-# KritakaPrajna
+<div align="center">
 
-AI coding assistant desktop app powered by [OpenRouter](https://openrouter.ai/).
+<img src="assets/logo.png" width="80" />
 
-Built with Electron, React, and Tailwind CSS.
+# ✨ KritakaPrajna
 
-**Made by Parikshit**
+### *Artificial Intelligence, Refined*
 
----
+> Your personal AI coding companion — one app, 100+ models, zero friction.
 
-## Features
-
-- Multi-model AI chat (GPT-4o, Claude, Gemini, DeepSeek, and more)
-- Streaming responses with Server-Sent Events
-- File & image upload with multimodal support
-- Project folder context for code-aware conversations
-- Slash commands (`/fix`, `/explain`, `/refactor`, and custom commands)
-- Diff viewer for code fixes with one-click accept
-- Smart model selection based on task type
-- Cost tracking per message
-- System prompt editor
-- Multi-chat history with localStorage
-- Secure API key storage (encrypted via electron-store)
-- Auto-updates via GitHub Releases
-- Custom frameless window with lotus logo
+[![Release](https://img.shields.io/github/v/release/kaone31056789/KritakaPrajna?style=for-the-badge&color=d4a017)](https://github.com/kaone31056789/KritakaPrajna/releases)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
+[![Made by](https://img.shields.io/badge/made%20by-Parikshit-ff6b6b?style=for-the-badge)](#)
 
 ---
 
-## Getting Started
+<img src="Screenshots/splash.png" width="700" />
 
-### 1. Get an OpenRouter API Key
+*The splash screen that greets you every launch*
 
-1. Go to [https://openrouter.ai/](https://openrouter.ai/)
-2. Sign up or log in
-3. Navigate to **Keys** → [https://openrouter.ai/keys](https://openrouter.ai/keys)
-4. Click **Create Key**
-5. Give it a name (e.g., "KritakaPrajna") and click **Create**
-6. Copy the key — it starts with `sk-or-v1-...`
+<br/>
 
-> **Tip:** OpenRouter gives free credits to new accounts. You can also add credits via the dashboard to use premium models.
+<img src="Screenshots/chat.png" width="700" />
 
-### 2. Install the App
+*Clean, dark interface — sidebar, model picker, file context, and chat*
 
-Download the latest installer from [GitHub Releases](https://github.com/kaone31056789/KritakaPrajna/releases).
-
-Run `KritakaPrajna Setup x.x.x.exe` and follow the installer prompts.
-
-### 3. Enter Your API Key
-
-On first launch, the app will prompt you to paste your OpenRouter API key. It is stored securely on your machine (encrypted, never sent anywhere except OpenRouter).
+</div>
 
 ---
 
-## Development
+## 🚀 What is this?
 
-### Prerequisites
+**KritakaPrajna** (कृतक प्रज्ञा — "Artificial Intelligence" in Sanskrit) is a sleek desktop app that lets you chat with **100+ AI models** through [OpenRouter](https://openrouter.ai/) — GPT-4o, Claude, Gemini, DeepSeek, Llama, and way more.
 
-- Node.js 18+
-- npm
+No subscriptions. No browser tabs. Just **one app** to rule them all.
 
-### Setup
+---
+
+## 🎯 Features That Slap
+
+| Feature | What it does |
+|---------|-------------|
+| 🧠 **100+ AI Models** | Switch between GPT-4o, Claude, Gemini, DeepSeek & more in one click |
+| ⚡ **Streaming Responses** | Watch AI think in real-time, token by token |
+| 📁 **File Context** | Open a project folder and feed files directly into the conversation |
+| 🖼️ **Image Upload** | Drop images for multimodal models to analyze |
+| ⌨️ **Slash Commands** | `/fix`, `/explain`, `/refactor` + create your own custom commands |
+| 🔀 **Diff Viewer** | See code changes side-by-side with one-click accept |
+| 🧭 **Smart Model Select** | Auto-picks the best model for your task |
+| 💰 **Cost Tracking** | Know exactly what you're spending per session & lifetime |
+| 🔐 **Encrypted Key Storage** | API key stored locally with encryption — never leaves your machine |
+| 🔄 **Auto-Updates** | App updates itself from GitHub Releases |
+| 🪷 **Beautiful UI** | Custom frameless window with lotus logo, dark theme, smooth animations |
+
+---
+
+## 🔑 Getting Your API Key
+
+1. Head to **[openrouter.ai](https://openrouter.ai/)**
+2. Sign up (it's free — you even get free credits!)
+3. Go to **[Keys](https://openrouter.ai/keys)** → Click **Create Key**
+4. Name it whatever you want → **Copy the key** (starts with `sk-or-v1-...`)
+5. Paste it into KritakaPrajna on first launch — done!
+
+> 💡 **Pro tip:** Many models on OpenRouter are completely free. You can start chatting without spending a single penny.
+
+---
+
+## 📥 Installation
+
+### The Easy Way (Recommended)
+
+1. Go to [**Releases**](https://github.com/kaone31056789/KritakaPrajna/releases)
+2. Download `KritakaPrajna-Setup-X.X.X.exe`
+3. Run the installer → Choose your install location
+4. Launch from Desktop or Start Menu
+5. Paste your OpenRouter API key → **Start chatting!**
+
+### The Dev Way
 
 ```bash
 git clone https://github.com/kaone31056789/KritakaPrajna.git
 cd KritakaPrajna
 npm install
-```
-
-### Run in Development
-
-```bash
 npm start
 ```
 
-This starts the React dev server and Electron concurrently.
+---
 
-### Build Installer
+## 🛠️ Slash Commands
 
-```bash
-npm run dist
+Type these in the chat input for quick actions:
+
+| Command | What happens |
+|---------|-------------|
+| `/fix <code>` | Fixes bugs and shows a diff viewer |
+| `/explain <code>` | Explains code in plain English |
+| `/refactor <code>` | Suggests cleaner code structure |
+| `/custom` | Create your own slash commands! |
+
+---
+
+## 🏗️ Built With
+
+```
+Electron 28     →  Desktop wrapper
+React 18        →  UI framework
+Tailwind CSS 3  →  Styling
+Framer Motion   →  Buttery smooth animations
+OpenRouter API  →  100+ AI models
+electron-store  →  Encrypted local storage
+electron-updater → Auto-updates from GitHub
 ```
 
-Outputs the NSIS installer to `dist/KritakaPrajna Setup x.x.x.exe`.
+---
+
+## 🔄 Auto-Updates
+
+KritakaPrajna updates itself! When a new version drops:
+
+1. App detects the update on launch
+2. Asks you to download
+3. Downloads in the background (progress bar shown)
+4. Prompts to restart
+5. Installs and you're on the latest version ✅
 
 ---
 
-## Auto-Updates
+## 📂 Project Structure
 
-The app checks for updates automatically on launch via GitHub Releases.
-
-When a new version is available:
-1. A dialog appears asking to download
-2. The update downloads in the background (progress shown in-app)
-3. Once downloaded, a dialog prompts to restart
-4. The app restarts and installs the update
-
-### Releasing a New Version
-
-1. Bump the version in `package.json`
-2. Build: `npm run dist`
-3. Create a new GitHub Release with tag `vX.X.X`
-4. Upload these files from `dist/`:
-   - `KritakaPrajna Setup X.X.X.exe`
-   - `latest.yml`
-5. Publish the release
+```
+KritakaPrajna/
+├── electron/          # Main process + preload
+├── src/
+│   ├── components/    # React components (ChatApp, ModelSelector, etc.)
+│   ├── api/           # OpenRouter API integration
+│   └── utils/         # Commands, cost tracking, diff engine
+├── assets/            # Logo & icons
+├── Screenshots/       # App screenshots
+└── package.json       # Config & build settings
+```
 
 ---
 
-## Tech Stack
+<div align="center">
 
-| Layer       | Technology                    |
-| ----------- | ----------------------------- |
-| Desktop     | Electron 28                   |
-| Frontend    | React 18, Tailwind CSS 3      |
-| Animations  | Framer Motion 11              |
-| AI Backend  | OpenRouter API (100+ models)  |
-| Key Storage | electron-store (encrypted)    |
-| Updates     | electron-updater + GitHub     |
-| Installer   | electron-builder (NSIS)       |
+### 🪷 Made with ❤️ by **Parikshit**
 
----
+*KritakaPrajna — because you deserve better than a browser tab.*
 
-## License
-
-MIT
-
----
-
-**Made with ❤️ by Parikshit**
+</div>
