@@ -1,26 +1,40 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { fetchModels, streamMessage, fetchCredits } from "../api/openrouter";
+import { fetchAllModels, routeStream, fetchCredits, suggestFallbackAcrossProviders, findModelBySelection, toSelectionId } from "../api/providerRouter";
 import ModelSelector from "./ModelSelector";
 import MessageList from "./MessageList";
 import MessageInput from "./MessageInput";
 import SettingsPanel from "./SettingsPanel";
-import FileContext from "./FileContext";
 import SmartModelBanner from "./SmartModelBanner";
 import PromptBanners from "./PromptBanners";
 import ModelAdvisorPanel, { AdvisorToggle } from "./ModelAdvisorCard";
 import TitleBar from "./TitleBar";
 import KPLogo from "./KPLogo";
-import { detectTaskType, selectSmartModel, qualityScore } from "../utils/smartModelSelect";
-import { calculateCost, isModelFree, formatCost, calcSessionCost } from "../utils/costTracker";
+import { detectTaskType, detectUiTask, selectSmartModel, qualityScore, filterModelsForTask, supportsTask, uiTaskToAdvisorTask } from "../utils/smartModelSelect";
+import { calculateCost, isModelFree, formatCost, calcSessionCost, estimateUsageFromMessages } from "../utils/costTracker";
 import { parseCommand, buildCommandPrompt, resolveFromAttachments, loadCustomCommands, saveCustomCommands, getAllCommandHints } from "../utils/commandParser";
 import { recordSuccess, recordFailure, isModelUnavailable, findFallbackModel, findCheapestModel, getModelHealth } from "../utils/rateLimiter";
 import { generateAdvisorData } from "../utils/modelAdvisor";
+import { loadAdvisorRankingSignals } from "../utils/advisorRanking";
+import { loadProviderUsage, providerUsageRows, recordProviderUsage } from "../utils/usageTracker";
+import { supportsReasoningModel } from "../utils/reasoningControls";
+import { DEFAULT_SHORTCUTS, eventToShortcut, mergeShortcuts, normalizeShortcutString } from "../utils/keyboardShortcuts";
+import {
+  USER_MEMORY_STORAGE_KEY,
+  DEFAULT_USER_MEMORY,
+  normalizeUserMemory,
+  mergeUserMemory,
+  detectMemoryFromMessage,
+  buildSystemPromptWithMemory,
+  hasUserMemory,
+} from "../utils/userMemory";
 
 const ease = [0.4, 0, 0.2, 1];
 const CHATS_KEY = "openrouter_chats";
 const ACTIVE_CHAT_KEY = "openrouter_active_chat";
 const MODEL_PREF_KEY = "openrouter_model_pref";
+const TASK_PREF_KEY = "openrouter_task_pref";
+const REASONING_DEPTH_KEY = "openrouter_reasoning_depth";
 const SYSTEM_PROMPT_KEY = "openrouter_system_prompt";
 const ADVISOR_PREFS_KEY = "openrouter_advisor_prefs";
 
@@ -88,9 +102,25 @@ function formatSize(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
-export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
+function modelSelectionId(model) {
+  return model?._selectionId || model?.id || "";
+}
+
+function providerLabel(provider) {
+  switch (provider) {
+    case "openrouter": return "OpenRouter";
+    case "huggingface": return "Hugging Face";
+    case "openai": return "OpenAI";
+    case "anthropic": return "Anthropic";
+    default: return provider || "Unknown";
+  }
+}
+
+export default function ChatApp({ providers, onSaveProviderKey, onRemoveProviderKey, onResetAll }) {
   const [models, setModels] = useState([]);
   const [selectedModel, setSelectedModel] = useState("");
+  const [selectedTask, setSelectedTask] = useState(() => localStorage.getItem(TASK_PREF_KEY) || "text-generation");
+  const [reasoningDepth, setReasoningDepth] = useState(() => localStorage.getItem(REASONING_DEPTH_KEY) || "balanced");
   const [chats, setChats] = useState(loadChats);
   const [activeChatId, setActiveChatId] = useState(loadActiveId);
   const [loading, setLoading] = useState(false);
@@ -120,6 +150,11 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
   const [cheapestBanner, setCheapestBanner] = useState(null); // { visible, cheapestLabel, cheapestModelId, currentModelId }
   const [lastError, setLastError] = useState(null);
   const [advisorOpen, setAdvisorOpen] = useState(false);
+  const [advisorSignals, setAdvisorSignals] = useState({});
+  const [providerUsage, setProviderUsage] = useState(() => loadProviderUsage());
+  const [shortcuts, setShortcuts] = useState(() => mergeShortcuts({}));
+  const [modelSelectorOpenSignal, setModelSelectorOpenSignal] = useState(0);
+  const [userMemory, setUserMemory] = useState(DEFAULT_USER_MEMORY);
 
   // Current chat's messages
   const activeChat = chats.find((c) => c.id === activeChatId);
@@ -142,9 +177,52 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
     saveActiveId(activeChatId);
   }, [activeChatId]);
 
+  useEffect(() => {
+    localStorage.setItem(TASK_PREF_KEY, selectedTask);
+  }, [selectedTask]);
+
+  useEffect(() => {
+    localStorage.setItem(REASONING_DEPTH_KEY, reasoningDepth);
+  }, [reasoningDepth]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadShortcuts = async () => {
+      try {
+        const raw = window.electronAPI?.getAllShortcuts
+          ? await window.electronAPI.getAllShortcuts()
+          : JSON.parse(localStorage.getItem("openrouter_keyboard_shortcuts") || "{}");
+        if (!cancelled) setShortcuts(mergeShortcuts(raw));
+      } catch {
+        if (!cancelled) setShortcuts(mergeShortcuts({}));
+      }
+    };
+    loadShortcuts();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadUserMemoryState = async () => {
+      try {
+        const raw = window.electronAPI?.getMemory
+          ? await window.electronAPI.getMemory()
+          : JSON.parse(localStorage.getItem(USER_MEMORY_STORAGE_KEY) || "null");
+        const normalized = normalizeUserMemory(raw);
+        if (!cancelled) setUserMemory(normalized);
+        localStorage.setItem(USER_MEMORY_STORAGE_KEY, JSON.stringify(normalized));
+      } catch {
+        const normalized = normalizeUserMemory(DEFAULT_USER_MEMORY);
+        if (!cancelled) setUserMemory(normalized);
+      }
+    };
+    loadUserMemoryState();
+    return () => { cancelled = true; };
+  }, []);
+
   // Recompute smart suggestion when uploads/attachments/model change
   useEffect(() => {
-    const taskType = detectTaskType("", uploads, attachedFiles);
+    const taskType = uiTaskToAdvisorTask(selectedTask, "", uploads, attachedFiles);
     if (taskType === "general" && uploads.length === 0 && attachedFiles.length === 0) {
       setSmartSuggestion(null);
       return;
@@ -152,37 +230,73 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
     const suggestion = selectSmartModel(models, taskType, selectedModel, modelPref);
     setSmartSuggestion(suggestion);
     setSuggestionDismissed(false);
-  }, [uploads, attachedFiles, models, selectedModel, modelPref]);
+  }, [uploads, attachedFiles, models, selectedModel, modelPref, selectedTask]);
 
-  // Fetch models on mount
+  // Fetch models from all active providers on mount / when providers change
   useEffect(() => {
     let cancelled = false;
     setError("");
-    fetchModels(apiKey)
+    fetchAllModels(providers)
       .then((data) => {
         if (cancelled) return;
-        const sorted = data.sort((a, b) => a.id.localeCompare(b.id));
+        const sorted = [...data];
         setModels(sorted);
+        // Default to the first free model, or first model overall
         const free = sorted.find((m) => {
           const p = m.pricing;
           return p && Number(p.prompt) === 0 && Number(p.completion) === 0;
         });
-        setSelectedModel(free ? free.id : sorted[0]?.id || "");
+        setSelectedModel(free ? toSelectionId(free) : toSelectionId(sorted[0]) || "");
       })
       .catch((err) => {
-        if (!cancelled) setError("Failed to load models. Check your API key.");
+        if (!cancelled) setError("Failed to load models. Check your API keys.");
         console.error(err);
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [apiKey]);
+    return () => { cancelled = true; };
+  }, [providers]);
 
-  // Fetch account credits from OpenRouter API
   useEffect(() => {
-    if (!apiKey) return;
-    fetchCredits(apiKey).then((c) => { if (c) setLifetimeCost(c); });
-  }, [apiKey]);
+    let cancelled = false;
+    if (models.length === 0) {
+      setAdvisorSignals({});
+      return;
+    }
+
+    loadAdvisorRankingSignals(models)
+      .then((signals) => {
+        if (!cancelled) setAdvisorSignals(signals || {});
+      })
+      .catch(() => {
+        if (!cancelled) setAdvisorSignals({});
+      });
+
+    return () => { cancelled = true; };
+  }, [models]);
+
+  // Fetch account credits (OpenRouter only)
+  useEffect(() => {
+    const orKey = providers?.openrouter;
+    if (!orKey) return;
+    fetchCredits(orKey).then((c) => { if (c) setLifetimeCost(c); });
+  }, [providers?.openrouter]);
+
+  useEffect(() => {
+    const autoTask = detectUiTask("", uploads, attachedFiles);
+    if (autoTask !== selectedTask && (uploads.length > 0 || attachedFiles.length > 0)) {
+      setSelectedTask(autoTask);
+    }
+  }, [uploads, attachedFiles, selectedTask]);
+
+  useEffect(() => {
+    const taskModels = filterModelsForTask(models, selectedTask);
+    if (taskModels.length === 0) return;
+
+    const current = findModelBySelection(models, selectedModel);
+    if (current && taskModels.some((m) => modelSelectionId(m) === modelSelectionId(current))) return;
+
+    const freeTaskModel = taskModels.find((m) => Number(m.pricing?.prompt) === 0 && Number(m.pricing?.completion) === 0);
+    setSelectedModel(toSelectionId(freeTaskModel || taskModels[0]));
+  }, [models, selectedTask, selectedModel]);
 
   // Helper: update messages for the active chat
   const updateActiveMessages = useCallback(
@@ -259,6 +373,24 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
     }
   }, []);
 
+  const handleSaveMemory = useCallback(async (nextMemory) => {
+    const normalized = normalizeUserMemory(nextMemory);
+    setUserMemory(normalized);
+    localStorage.setItem(USER_MEMORY_STORAGE_KEY, JSON.stringify(normalized));
+    if (window.electronAPI?.setMemory) {
+      await window.electronAPI.setMemory(normalized);
+    }
+  }, []);
+
+  const handleResetMemory = useCallback(async () => {
+    const normalized = normalizeUserMemory(DEFAULT_USER_MEMORY);
+    setUserMemory(normalized);
+    localStorage.removeItem(USER_MEMORY_STORAGE_KEY);
+    if (window.electronAPI?.resetMemory) {
+      await window.electronAPI.resetMemory();
+    }
+  }, []);
+
   const handleSend = useCallback(
     async (text) => {
       if (!text.trim() || !selectedModel) return;
@@ -294,7 +426,9 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
       }
 
       // Run smart detection at send time (considers text for coding keywords)
-      const taskType = detectTaskType(processedText, uploads, attachedFiles);
+      const autoTask = detectUiTask(processedText, uploads, attachedFiles);
+      if (autoTask !== selectedTask) setSelectedTask(autoTask);
+      const taskType = uiTaskToAdvisorTask(autoTask, processedText, uploads, attachedFiles);
 
       // ── Show task suggestion banner (coding/vision/document) ──
       if (taskType !== "general") {
@@ -305,28 +439,28 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
             taskType,
             suggestedModelId: suggestion.recommended.id,
             onSwitch: () => {
-              setSelectedModel(suggestion.recommended.id);
+              setSelectedModel(toSelectionId(suggestion.recommended));
               setTaskBanner(null);
             },
             onIgnore: () => setTaskBanner(null),
           });
           // Auto-switch to the recommended model if it's free, or if preference is paid
           if ((suggestion.free && suggestion.recommended.id === suggestion.free.id) || modelPref === "paid") {
-            setSelectedModel(suggestion.recommended.id);
+            setSelectedModel(toSelectionId(suggestion.recommended));
           }
         }
       }
 
       // ── Show cheapest model banner ──
-      const cheapest = findCheapestModel(models, taskType, null);
-      if (cheapest && cheapest.model.id !== selectedModel) {
+      const cheapest = findCheapestModel(models, taskType, (m) => supportsTask(m, autoTask));
+      if (cheapest && toSelectionId(cheapest.model) !== selectedModel) {
         setCheapestBanner({
           visible: true,
           cheapestLabel: cheapest.costLabel,
           cheapestModelId: cheapest.model.id,
           currentModelId: selectedModel,
           onUseCheapest: () => {
-            setSelectedModel(cheapest.model.id);
+            setSelectedModel(toSelectionId(cheapest.model));
             setCheapestBanner(null);
           },
           onKeepCurrent: () => setCheapestBanner(null),
@@ -341,7 +475,7 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
           modelId: selectedModel,
           fallbackModelId: fallback?.id || null,
           onSwitch: () => {
-            if (fallback) setSelectedModel(fallback.id);
+            if (fallback) setSelectedModel(toSelectionId(fallback));
             setRateLimitBanner(null);
           },
           onDismiss: () => setRateLimitBanner(null),
@@ -395,6 +529,16 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
         content = textContent;
       }
 
+      const autoMemory = userMemory.autoMode ? detectMemoryFromMessage(text.trim()) : DEFAULT_USER_MEMORY;
+      const effectiveMemory =
+        userMemory.autoMode && hasUserMemory(autoMemory)
+          ? mergeUserMemory(userMemory, autoMemory)
+          : userMemory;
+
+      if (userMemory.autoMode && hasUserMemory(autoMemory)) {
+        handleSaveMemory(effectiveMemory).catch(() => {});
+      }
+
       // Clear all attachments
       setAttachedFiles([]);
       setUploads([]);
@@ -440,48 +584,63 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
 
       // Build the messages to send (without the empty AI placeholder)
       const history = [...(chats.find((c) => c.id === chatId)?.messages || []), userMsg];
-      const systemMsg = { role: "system", content: systemPrompt };
+      const systemMsg = {
+        role: "system",
+        content: buildSystemPromptWithMemory(systemPrompt, effectiveMemory),
+      };
       const toSend = [systemMsg, ...history];
 
       try {
-        const result = await streamMessage(apiKey, selectedModel, toSend, {
-          signal: controller.signal,
-          onChunk: (fullText) => {
-            setChats((prev) =>
-              prev.map((c) => {
-                if (c.id !== chatId) return c;
-                const next = [...c.messages];
-                const last = next[next.length - 1];
-                next[next.length - 1] = { ...last, content: fullText };
-                return { ...c, messages: next };
-              })
-            );
-          },
-        });
+        const currentModelObj = findModelBySelection(models, selectedModel);
+        const result = await routeStream(
+          providers,
+          currentModelObj || { id: selectedModel.includes("::") ? selectedModel.split("::").slice(1).join("::") : selectedModel, _provider: "openrouter" },
+          toSend,
+          {
+            signal: controller.signal,
+            reasoningDepth,
+            onChunk: (fullText) => {
+              setChats((prev) =>
+                prev.map((c) => {
+                  if (c.id !== chatId) return c;
+                  const next = [...c.messages];
+                  const last = next[next.length - 1];
+                  next[next.length - 1] = { ...last, content: fullText };
+                  return { ...c, messages: next };
+                })
+              );
+            },
+          }
+        );
 
         // Calculate and store cost on the AI message
-        const currentModelObj = models.find((m) => m.id === selectedModel);
         const pricing = currentModelObj?.pricing;
+        const resolvedUsage = result.usage && ((result.usage.prompt_tokens || 0) > 0 || (result.usage.completion_tokens || 0) > 0)
+          ? result.usage
+          : estimateUsageFromMessages(toSend, result.text);
         // Prefer actual cost from OpenRouter API, fall back to local calculation
         const apiCost = result.usage?.cost;
-        const cost = (apiCost != null && apiCost >= 0) ? apiCost : calculateCost(result.usage, pricing);
+        const cost = (apiCost != null && apiCost >= 0) ? apiCost : calculateCost(resolvedUsage, pricing);
         const free = isModelFree(pricing);
+        const usageSnapshot = recordProviderUsage(currentModelObj?._provider || "openrouter", resolvedUsage, cost);
+        setProviderUsage(usageSnapshot);
 
         // Record success for rate limiter
         const responseTime = Date.now() - startTime;
         recordSuccess(selectedModel, responseTime);
 
         // Generate advisor data
-        const taskTypeForAdvisor = detectTaskType(processedText || text, uploads, attachedFiles);
+        const taskTypeForAdvisor = uiTaskToAdvisorTask(autoTask, processedText || text, uploads, attachedFiles);
         const advisor = generateAdvisorData({
           models,
-          currentModelId: selectedModel,
+          currentModelId: currentModelObj?._selectionId || selectedModel,
           taskType: taskTypeForAdvisor,
           cost,
-          usage: result.usage,
+          usage: resolvedUsage,
           pricing,
           preference: advisorPrefs?.preferBest ? "best" : advisorPrefs?.preferFree ? "free" : modelPref,
           monthlyBudget: advisorPrefs?.monthlyBudget || null,
+          rankingSignals: advisorSignals,
         });
 
         setChats((prev) =>
@@ -493,16 +652,18 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
               ...lastMsg,
               cost: cost,
               isFree: free,
-              usage: result.usage,
-              _modelUsed: selectedModel,
+              usage: resolvedUsage,
+              _modelUsed: currentModelObj?._selectionId || selectedModel,
               _advisorData: advisor,
             };
             return { ...c, messages: next };
           })
         );
 
-        // Refresh credits from API
-        fetchCredits(apiKey).then((c) => { if (c) setLifetimeCost(c); });
+        // Refresh OpenRouter credits if key is present
+        if (providers?.openrouter) {
+          fetchCredits(providers.openrouter).then((c) => { if (c) setLifetimeCost(c); });
+        }
       } catch (err) {
         if (err.name === "AbortError") {
           // keep partial response
@@ -514,16 +675,22 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
           // Record failure for rate limiter
           recordFailure(selectedModel, errMsg);
 
-          // Show rate limit banner with fallback suggestion on any model error
-          const taskType = detectTaskType(text, uploads, attachedFiles);
-          const fallback = findFallbackModel(models, selectedModel, taskType, qualityScore);
+          // Show rate limit banner — prefer same-provider fallback, then cross-provider
+          const taskType = uiTaskToAdvisorTask(selectedTask, text, uploads, attachedFiles);
+          const sameProviderFallback = findFallbackModel(models.filter((m) => supportsTask(m, selectedTask)), selectedModel, taskType, qualityScore);
+          const crossProviderFallback = !sameProviderFallback
+            ? suggestFallbackAcrossProviders(models, selectedModel, providers)
+            : null;
+          const fallback = sameProviderFallback || crossProviderFallback?.model;
+          const fallbackMsg = crossProviderFallback?.message;
           if (fallback) {
             setRateLimitBanner({
               visible: true,
               modelId: selectedModel,
               fallbackModelId: fallback.id,
+              crossProviderMessage: fallbackMsg || null,
               onSwitch: () => {
-                setSelectedModel(fallback.id);
+                setSelectedModel(toSelectionId(fallback));
                 setRateLimitBanner(null);
               },
               onDismiss: () => setRateLimitBanner(null),
@@ -550,7 +717,7 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
         setLoading(false);
       }
     },
-    [apiKey, selectedModel, activeChatId, chats, attachedFiles, uploads, models, systemPrompt, advisorPrefs, modelPref]
+    [providers, selectedModel, activeChatId, chats, attachedFiles, uploads, models, systemPrompt, advisorPrefs, modelPref, advisorSignals, reasoningDepth, userMemory, handleSaveMemory]
   );
 
   const handleStop = useCallback(() => {
@@ -581,15 +748,16 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
 
       // If "better", try to pick a better model
       if (mode === "better") {
-        const taskType = detectTaskType(last.text, last.uploads, last.attachedFiles);
+        const retryTask = detectUiTask(last.text, last.uploads, last.attachedFiles);
+        const taskType = uiTaskToAdvisorTask(retryTask, last.text, last.uploads, last.attachedFiles);
         const suggestion = selectSmartModel(models, taskType, selectedModel, modelPref);
-        if (suggestion.recommended && suggestion.recommended.id !== selectedModel) {
-          setSelectedModel(suggestion.recommended.id);
+        if (suggestion.recommended && toSelectionId(suggestion.recommended) !== selectedModel) {
+          setSelectedModel(toSelectionId(suggestion.recommended));
         } else {
           // Fallback: find any available model that's not the current one
-          const fallback = findFallbackModel(models, selectedModel, taskType, qualityScore);
+          const fallback = findFallbackModel(models.filter((m) => supportsTask(m, retryTask)), selectedModel, taskType, qualityScore);
           if (fallback) {
-            setSelectedModel(fallback.id);
+            setSelectedModel(toSelectionId(fallback));
           }
         }
       }
@@ -659,7 +827,9 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
         return;
       }
 
-      const taskType = detectTaskType(text, uploads, attachedFiles);
+      const nextTask = detectUiTask(text, uploads, attachedFiles);
+      if (nextTask !== selectedTask) setSelectedTask(nextTask);
+      const taskType = uiTaskToAdvisorTask(nextTask, text, uploads, attachedFiles);
       if (taskType === "general") {
         setTaskBanner(null);
         setCheapestBanner(null);
@@ -673,7 +843,7 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
           taskType,
           suggestedModelId: suggestion.recommended.id,
           onSwitch: () => {
-            setSelectedModel(suggestion.recommended.id);
+            setSelectedModel(toSelectionId(suggestion.recommended));
             setTaskBanner(null);
           },
           onIgnore: () => setTaskBanner(null),
@@ -683,15 +853,15 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
       }
 
       // Show cheapest banner for detected task
-      const cheapest = findCheapestModel(models, taskType, null);
-      if (cheapest && cheapest.model.id !== selectedModel) {
+      const cheapest = findCheapestModel(models, taskType, (m) => supportsTask(m, nextTask));
+      if (cheapest && toSelectionId(cheapest.model) !== selectedModel) {
         setCheapestBanner({
           visible: true,
           cheapestLabel: cheapest.costLabel,
           cheapestModelId: cheapest.model.id,
           currentModelId: selectedModel,
           onUseCheapest: () => {
-            setSelectedModel(cheapest.model.id);
+            setSelectedModel(toSelectionId(cheapest.model));
             setCheapestBanner(null);
           },
           onKeepCurrent: () => setCheapestBanner(null),
@@ -700,7 +870,7 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
         setCheapestBanner(null);
       }
     }, 500); // 500ms debounce
-  }, [models, selectedModel, modelPref, uploads, attachedFiles]);
+  }, [models, selectedModel, modelPref, uploads, attachedFiles, selectedTask]);
 
   const handleDeleteChat = (id) => {
     setChats((prev) => prev.filter((c) => c.id !== id));
@@ -710,9 +880,79 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
     }
   };
 
+  const handleSaveShortcuts = useCallback(async (nextShortcuts) => {
+    const merged = mergeShortcuts(nextShortcuts);
+    setShortcuts(merged);
+    if (window.electronAPI?.setAllShortcuts) {
+      await window.electronAPI.setAllShortcuts(merged);
+    } else {
+      localStorage.setItem("openrouter_keyboard_shortcuts", JSON.stringify(merged));
+    }
+  }, []);
+
+  const handleResetShortcuts = useCallback(async () => {
+    setShortcuts(DEFAULT_SHORTCUTS);
+    if (window.electronAPI?.resetAllShortcuts) {
+      await window.electronAPI.resetAllShortcuts();
+    } else {
+      localStorage.removeItem("openrouter_keyboard_shortcuts");
+    }
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      const shortcut = eventToShortcut(event);
+      if (!shortcut) return;
+
+      const matches = (actionId) => normalizeShortcutString(shortcuts[actionId]) === shortcut;
+      const target = event.target;
+      const typingTarget = target instanceof HTMLElement && (
+        target.tagName === "TEXTAREA" ||
+        target.tagName === "INPUT" ||
+        target.isContentEditable
+      );
+
+      if (matches("openSettings")) {
+        event.preventDefault();
+        setShowSettings(true);
+        setSidebarOpen(false);
+        return;
+      }
+
+      if (matches("toggleSidebar")) {
+        event.preventDefault();
+        if (!showSettings) setSidebarOpen((v) => !v);
+        return;
+      }
+
+      if (matches("newChat")) {
+        event.preventDefault();
+        if (!loading) handleNewChat();
+        return;
+      }
+
+      if (matches("retryResponse")) {
+        event.preventDefault();
+        if (!loading && lastRequestRef.current) handleRetry("same");
+        return;
+      }
+
+      if (matches("openModelSelector")) {
+        event.preventDefault();
+        if (!showSettings) setModelSelectorOpenSignal((v) => v + 1);
+        return;
+      }
+
+      if (typingTarget) return;
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [shortcuts, showSettings, loading, handleRetry]);
+
   return (
     <div className="h-full flex flex-col bg-dark-950">
-      <TitleBar sidebarOpen={sidebarOpen} onToggleSidebar={() => setSidebarOpen((v) => !v)} />
+      <TitleBar sidebarOpen={sidebarOpen} onToggleSidebar={() => setSidebarOpen((v) => !v)} toggleShortcut={shortcuts.toggleSidebar} />
       <div className="flex flex-1 min-h-0">
       {/* ── Sidebar ── */}
       <motion.aside
@@ -736,6 +976,7 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
             whileTap={{ scale: 0.98 }}
             transition={{ duration: 0.15, ease }}
             onClick={handleNewChat}
+            title={`New Chat (${shortcuts.newChat})`}
             className="w-full flex items-center gap-2.5 text-sm text-dark-100 bg-dark-800/60 hover:bg-dark-800 rounded-xl px-3 py-2.5 cursor-pointer border border-dark-700/40 hover:border-dark-600/60"
           >
             <svg className="w-4 h-4 text-dark-300" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -792,37 +1033,113 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
           </div>
         </div>
 
-        {/* Bottom: file context + cost + settings */}
-        <div className="border-t border-white/[0.06]">
-          <FileContext onAttach={handleAttachFile} />
-        </div>
+        {/* Usage panel */}
+        <div className="px-3 pt-3 pb-2 border-t border-white/[0.06] space-y-3">
 
-        {/* Cost tracker */}
-        <div className="px-3 py-2.5 border-t border-white/[0.06]">
-          <div className="flex items-center gap-2 mb-1.5">
-            <svg className="w-3.5 h-3.5 text-dark-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <span className="text-[10px] uppercase tracking-wider text-dark-500 font-semibold">Usage</span>
-          </div>
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="text-dark-400">Session</span>
-            <span className="text-dark-200 font-medium">{formatCost(calcSessionCost(chats))}</span>
-          </div>
-          {lifetimeCost && (
-            <>
-              <div className="flex items-center justify-between text-[11px] mt-0.5">
-                <span className="text-dark-400">Total Used</span>
-                <span className="text-dark-200 font-medium">{formatCost(lifetimeCost.total_usage || 0)}</span>
-              </div>
-              {lifetimeCost.total_credits > 0 && (
-                <div className="flex items-center justify-between text-[11px] mt-0.5">
-                  <span className="text-dark-400">Credits Left</span>
-                  <span className="text-emerald-300 font-medium">{formatCost(Math.max(0, (lifetimeCost.total_credits || 0) - (lifetimeCost.total_usage || 0)))}</span>
+          {/* Section label */}
+          <p
+            className="text-[10px] uppercase tracking-wider font-semibold text-amber-300"
+            style={{ textShadow: "0 0 8px rgba(251,191,36,0.7), 0 0 20px rgba(251,191,36,0.35)" }}
+          >
+            Usage
+          </p>
+
+          {/* ── Session ── */}
+          <div className="space-y-1.5">
+            <p className="text-[10px] text-dark-500 uppercase tracking-wider">Session</p>
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-dark-400">Cost</span>
+              <span className={`font-medium ${calcSessionCost(chats) > 0 ? "text-emerald-400" : "text-dark-400"}`}>
+                {formatCost(calcSessionCost(chats))}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-dark-400">Model</span>
+              <span className="text-dark-200 font-medium truncate max-w-[110px] text-right">
+                {selectedModel
+                  ? providerLabel(selectedModel.split("/")[0]) || selectedModel.split("/")[0]
+                  : "—"}
+              </span>
+            </div>
+            {/* ── Monthly estimate ── */}
+            {(() => {
+              const currentModelObj = findModelBySelection(models, selectedModel);
+              const pricing = currentModelObj?.pricing;
+              if (!pricing) return null;
+              const promptPrice  = Number(pricing.prompt)     || 0;
+              const completionPrice = Number(pricing.completion) || 0;
+              if (promptPrice === 0 && completionPrice === 0) return (
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-dark-400">~Monthly</span>
+                  <span className="text-dark-500 font-medium">Free</span>
                 </div>
-              )}
-            </>
+              );
+              // Use recorded avg cost/request if available, else estimate from pricing
+              const allRows = providerUsageRows(
+                providerUsage,
+                Object.entries(providers || {}).filter(([, k]) => !!k).map(([p]) => p)
+              );
+              const totalCost = allRows.reduce((s, r) => s + r.cost, 0);
+              const totalReqs = allRows.reduce((s, r) => s + r.requests, 0);
+              const MSGS_PER_DAY = 20;
+              let monthly;
+              if (totalReqs > 0) {
+                monthly = (totalCost / totalReqs) * MSGS_PER_DAY * 30;
+              } else {
+                // ~500 prompt + ~800 completion tokens per message
+                monthly = ((promptPrice * 500) + (completionPrice * 800)) * MSGS_PER_DAY * 30;
+              }
+              const label = monthly < 0.001
+                ? "<$0.01"
+                : monthly < 1
+                  ? `$${monthly.toFixed(2)}`
+                  : `$${monthly.toFixed(1)}`;
+              return (
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-dark-400">~Monthly</span>
+                  <span className="text-amber-300 font-medium" title="Estimate: 20 msgs/day × 30 days">{label}/mo</span>
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* ── Providers ── */}
+          {(() => {
+            const rows = providerUsageRows(
+              providerUsage,
+              Object.entries(providers || {}).filter(([, key]) => !!key).map(([provider]) => provider)
+            ).filter((row) => row.requests > 0);
+            if (!rows.length) return null;
+            return (
+              <div className="space-y-1.5">
+                <div className="border-t border-white/[0.04] pt-2">
+                  <p className="text-[10px] text-dark-500 uppercase tracking-wider mb-1.5">Providers</p>
+                  {rows.map((row) => (
+                    <div key={row.provider} className="flex items-center justify-between text-[11px] py-0.5">
+                      <span className="text-dark-400">{providerLabel(row.provider)}</span>
+                      <span className={`font-medium ${row.cost > 0 ? "text-emerald-400" : "text-dark-500"}`}>
+                        {row.cost > 0 ? formatCost(row.cost) : "Free"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── Credits ── */}
+          {lifetimeCost && lifetimeCost.total_credits > 0 && (
+            <div className="border-t border-white/[0.04] pt-2 space-y-1.5">
+              <p className="text-[10px] text-dark-500 uppercase tracking-wider">Credits</p>
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-dark-400">OpenRouter</span>
+                <span className="text-emerald-400 font-medium">
+                  {formatCost(Math.max(0, (lifetimeCost.total_credits || 0) - (lifetimeCost.total_usage || 0)))}
+                </span>
+              </div>
+            </div>
           )}
+
         </div>
 
         <div className="px-3 py-3 border-t border-white/[0.06]">
@@ -831,6 +1148,7 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
             whileTap={{ scale: 0.98 }}
             transition={{ duration: 0.15, ease }}
             onClick={() => { setShowSettings(true); setSidebarOpen(false); }}
+            title={`Settings (${shortcuts.openSettings})`}
             className={`w-full flex items-center gap-2.5 text-xs rounded-xl px-3 py-2.5 cursor-pointer ${
               showSettings
                 ? "text-saffron-400 bg-saffron-500/10"
@@ -846,7 +1164,12 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
         </div>
 
         <div className="px-3 pb-3 text-center">
-          <span className="text-[10px] text-dark-500">Made by Parikshit</span>
+          <span
+            className="text-[10px] font-medium text-saffron-400"
+            style={{ textShadow: "0 0 8px rgba(251,191,36,0.8), 0 0 20px rgba(251,191,36,0.4), 0 0 40px rgba(251,191,36,0.15)" }}
+          >
+            Made by Parikshit
+          </span>
         </div>
       </motion.aside>
 
@@ -862,9 +1185,10 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
           className="flex-1 flex flex-col min-w-0"
         >
         <SettingsPanel
-          apiKey={apiKey}
-          onSaveKey={onSaveKey}
-          onRemoveKey={onResetKey}
+          providers={providers}
+          onSaveProviderKey={onSaveProviderKey}
+          onRemoveProviderKey={onRemoveProviderKey}
+          onResetAll={onResetAll}
           onClose={() => { setShowSettings(false); setSidebarOpen(true); }}
           modelPref={modelPref}
           onSaveModelPref={(v) => { setModelPref(v); localStorage.setItem(MODEL_PREF_KEY, v); }}
@@ -875,6 +1199,12 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
           defaultSystemPrompt={DEFAULT_SYSTEM_PROMPT}
           advisorPrefs={advisorPrefs}
           onSaveAdvisorPrefs={(prefs) => { setAdvisorPrefs(prefs); localStorage.setItem(ADVISOR_PREFS_KEY, JSON.stringify(prefs)); }}
+          shortcuts={shortcuts}
+          onSaveShortcuts={handleSaveShortcuts}
+          onResetShortcuts={handleResetShortcuts}
+          memory={userMemory}
+          onSaveMemory={handleSaveMemory}
+          onResetMemory={handleResetMemory}
         />
         </motion.div>
       ) : (
@@ -891,26 +1221,26 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
           <ModelSelector
             models={models}
             selected={selectedModel}
+            selectedModel={findModelBySelection(models, selectedModel)}
             onSelect={setSelectedModel}
+            selectedTask={selectedTask}
+            onTaskChange={setSelectedTask}
+            openSignal={modelSelectorOpenSignal}
+            monthlyBudget={advisorPrefs?.monthlyBudget || null}
+            providerUsage={providerUsage}
           />
           {selectedModel && (() => {
-            const m = models.find((mod) => mod.id === selectedModel);
-            const p = m?.pricing;
-            const promptCost = Number(p?.prompt) || 0;
-            const completionCost = Number(p?.completion) || 0;
-            const per1M = (promptCost + completionCost) * 1_000_000;
-            const currentIsFree = per1M === 0;
+            const health = getModelHealth(selectedModel);
             return (
-              <div className="flex items-center gap-2.5 min-w-0 hidden sm:flex">
-                <span className="text-xs text-dark-400 truncate max-w-[300px]">
-                  {selectedModel}
-                </span>
-                <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border shrink-0 ${
-                  currentIsFree
-                    ? "text-emerald-300 bg-emerald-500/10 border-emerald-500/20"
-                    : "text-saffron-300 bg-saffron-500/10 border-saffron-500/20"
+              <div className="hidden md:flex shrink-0">
+                <span className={`text-[11px] font-medium px-3 py-2 rounded-xl border ${
+                  !health.available
+                    ? "text-red-300 bg-red-500/10 border-red-500/20"
+                    : health.slow
+                      ? "text-amber-300 bg-amber-500/10 border-amber-500/20"
+                      : "text-emerald-300 bg-emerald-500/10 border-emerald-500/20"
                 }`}>
-                  {currentIsFree ? "Free" : `$${per1M < 0.01 ? per1M.toFixed(4) : per1M.toFixed(2)}/1M tokens`}
+                  {!health.available ? "Limited" : health.slow ? "Slow" : "Ready"}
                 </span>
               </div>
             );
@@ -1061,7 +1391,19 @@ export default function ChatApp({ apiKey, onSaveKey, onResetKey }) {
         </AnimatePresence>
 
         {/* Input */}
-        <MessageInput onSend={handleSend} onUpload={handleUpload} loading={loading} onStop={handleStop} disabled={loading || !selectedModel} commandHints={getAllCommandHints(customCommands)} onTextChange={handleInputTextChange} />
+        <MessageInput
+          onSend={handleSend}
+          onUpload={handleUpload}
+          loading={loading}
+          onStop={handleStop}
+          disabled={loading || !selectedModel}
+          commandHints={getAllCommandHints(customCommands)}
+          onTextChange={handleInputTextChange}
+          showReasoningControl={supportsReasoningModel(findModelBySelection(models, selectedModel))}
+          reasoningDepth={reasoningDepth}
+          onReasoningDepthChange={setReasoningDepth}
+          sendShortcut={shortcuts.sendMessage}
+        />
       </motion.div>
       )}
       </AnimatePresence>

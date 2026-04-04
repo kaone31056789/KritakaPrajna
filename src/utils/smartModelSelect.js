@@ -17,6 +17,43 @@ const CODING_KEYWORDS = [
   "React", "Vue", "Angular", "Node", "Express", "Django", "Flask",
 ];
 
+export const TASK_OPTIONS = [
+  { id: "text-generation", label: "Text Generation", capability: "text" },
+  { id: "any-to-any", label: "Any-to-Any", capability: "multimodal" },
+  { id: "image-to-text", label: "Image-to-Text", capability: "vision" },
+  { id: "image-to-image", label: "Image-to-Image", capability: "image-edit" },
+  { id: "text-to-image", label: "Text-to-Image", capability: "image-gen" },
+  { id: "text-to-video", label: "Text-to-Video", capability: "video" },
+  { id: "text-to-speech", label: "Text-to-Speech", capability: "audio" },
+  { id: "more", label: "More", capability: "specialized" },
+];
+
+const TEXT_TO_IMAGE_PATTERNS = [
+  "flux", "stable-diffusion", "sdxl", "ideogram", "imagen", "dall-e", "dalle", "recraft", "kandinsky",
+];
+const TEXT_TO_VIDEO_PATTERNS = ["video", "veo", "sora", "hunyuanvideo", "wan-", "kling"];
+const AUDIO_PATTERNS = ["tts", "text-to-speech", "speech", "voice", "audio", "bark", "kokoro"];
+const IMAGE_EDIT_PATTERNS = ["image-to-image", "img2img", "inpaint", "controlnet", "edit"];
+const MULTIMODAL_PATTERNS = ["omni", "multimodal", "any-to-any", "gpt-4o", "gemini", "qwen-vl", "glm-4.5v", "claude"];
+
+export function taskLabel(taskId) {
+  return TASK_OPTIONS.find((t) => t.id === taskId)?.label || "Text Generation";
+}
+
+export function detectUiTask(text, uploads = [], attachedFiles = []) {
+  const lower = (text || "").toLowerCase();
+
+  if (uploads.some((u) => u.type === "image")) return "image-to-text";
+  if (/(generate|create|make).*(image|logo|poster|art|photo|picture)/.test(lower)) return "text-to-image";
+  if (/(generate|create|make).*(video|clip|animation)/.test(lower)) return "text-to-video";
+  if (/(text to speech|tts|voiceover|narrate|read aloud|speak this)/.test(lower)) return "text-to-speech";
+  if (/(edit image|modify image|restyle image|image to image|img2img)/.test(lower)) return "image-to-image";
+  if (/(any to any|multimodal|audio and image|video and text)/.test(lower)) return "any-to-any";
+  if (uploads.some((u) => u.type === "pdf") || uploads.some((u) => u.type === "file") || attachedFiles.length > 0) return "text-generation";
+
+  return "text-generation";
+}
+
 /**
  * Detect the task type from the current context.
  * @param {string} text - The user's message text
@@ -73,6 +110,74 @@ export function supportsVision(model) {
 /** All text models support text — this is a convenience check for non-image tasks */
 export function supportsText(model) {
   return true; // All chat models support text
+}
+
+export function supportsImageGeneration(model) {
+  const id = model.id.toLowerCase();
+  const modality = model.architecture?.modality || "";
+  if (modality.includes("text->image")) return true;
+  return TEXT_TO_IMAGE_PATTERNS.some((p) => id.includes(p));
+}
+
+export function supportsImageEditing(model) {
+  const id = model.id.toLowerCase();
+  const modality = model.architecture?.modality || "";
+  if (modality.includes("image->image")) return true;
+  return IMAGE_EDIT_PATTERNS.some((p) => id.includes(p));
+}
+
+export function supportsVideo(model) {
+  const id = model.id.toLowerCase();
+  const modality = model.architecture?.modality || "";
+  if (modality.includes("video")) return true;
+  return TEXT_TO_VIDEO_PATTERNS.some((p) => id.includes(p));
+}
+
+export function supportsAudio(model) {
+  const id = model.id.toLowerCase();
+  const modality = model.architecture?.modality || "";
+  if (modality.includes("audio") || modality.includes("speech")) return true;
+  return AUDIO_PATTERNS.some((p) => id.includes(p));
+}
+
+export function supportsAnyToAny(model) {
+  const id = model.id.toLowerCase();
+  const modality = model.architecture?.modality || "";
+  if (modality.includes("image") && (modality.includes("audio") || modality.includes("video"))) return true;
+  return MULTIMODAL_PATTERNS.some((p) => id.includes(p));
+}
+
+export function supportsTask(model, taskId) {
+  switch (taskId) {
+    case "text-generation":
+      return supportsText(model);
+    case "image-to-text":
+      return supportsVision(model);
+    case "text-to-image":
+      return supportsImageGeneration(model);
+    case "image-to-image":
+      return supportsImageEditing(model);
+    case "text-to-video":
+      return supportsVideo(model);
+    case "text-to-speech":
+      return supportsAudio(model);
+    case "any-to-any":
+      return supportsAnyToAny(model) || (supportsVision(model) && supportsText(model));
+    case "more":
+      return true;
+    default:
+      return supportsText(model);
+  }
+}
+
+export function filterModelsForTask(models, taskId) {
+  return models.filter((m) => supportsTask(m, taskId));
+}
+
+export function uiTaskToAdvisorTask(taskId, text = "", uploads = [], attachedFiles = []) {
+  if (taskId === "image-to-text" || taskId === "any-to-any") return "vision";
+  if (taskId === "text-generation") return detectTaskType(text, uploads, attachedFiles);
+  return "general";
 }
 
 // ── Cost helpers ────────────────────────────────────────────────────────────
@@ -174,6 +279,8 @@ export function selectSmartModel(models, taskType, currentModelId, preference = 
   let capable;
   if (taskType === "vision") {
     capable = models.filter(supportsVision);
+  } else if (TASK_OPTIONS.some((t) => t.id === taskType)) {
+    capable = models.filter((m) => supportsTask(m, taskType));
   } else {
     capable = [...models]; // all models handle text/document/coding
   }
@@ -191,9 +298,13 @@ export function selectSmartModel(models, taskType, currentModelId, preference = 
   const bestPaid = paidModels[0] || null;
 
   // 3. Check if current model is capable
-  const currentModel = models.find((m) => m.id === currentModelId);
+  const currentModel = models.find((m) => (m._selectionId || m.id) === currentModelId || m.id === currentModelId);
   const currentCapable = currentModel
-    ? (taskType === "vision" ? supportsVision(currentModel) : true)
+    ? (taskType === "vision"
+        ? supportsVision(currentModel)
+        : TASK_OPTIONS.some((t) => t.id === taskType)
+          ? supportsTask(currentModel, taskType)
+          : true)
     : false;
 
   // 4. Determine recommendation based on preference

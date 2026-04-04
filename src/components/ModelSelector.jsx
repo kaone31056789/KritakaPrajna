@@ -1,12 +1,40 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { TASK_OPTIONS, filterModelsForTask } from "../utils/smartModelSelect";
 
 const ease = [0.4, 0, 0.2, 1];
-
-// --- Helpers ----------------------------------------------------------------
-
 const FAVORITES_KEY = "openrouter_favorites";
 const MAX_FAVORITES = 10;
+const SOURCE_PROVIDER_ORDER = ["openrouter", "huggingface", "openai", "anthropic"];
+
+const SOURCE_LABELS = {
+  openrouter: "OpenRouter",
+  huggingface: "Hugging Face",
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+};
+
+const SOURCE_COLORS = {
+  openrouter: "#60a5fa",
+  huggingface: "#c084fc",
+  openai: "#34d399",
+  anthropic: "#fb923c",
+};
+
+const FAMILY_PATTERNS = [
+  { key: "qwen", label: "Qwen", patterns: ["qwen"] },
+  { key: "gemma", label: "Gemma", patterns: ["gemma"] },
+  { key: "llama", label: "LLaMA", patterns: ["llama"] },
+  { key: "mixtral", label: "Mixtral", patterns: ["mixtral"] },
+  { key: "mistral", label: "Mistral", patterns: ["mistral", "ministral", "magistral"] },
+  { key: "deepseek", label: "DeepSeek", patterns: ["deepseek"] },
+  { key: "claude", label: "Claude", patterns: ["claude"] },
+  { key: "gpt", label: "GPT", patterns: ["gpt", "o1", "o3", "o4"] },
+  { key: "gemini", label: "Gemini", patterns: ["gemini"] },
+  { key: "phi", label: "Phi", patterns: ["phi"] },
+  { key: "glm", label: "GLM", patterns: ["glm"] },
+  { key: "kimi", label: "Kimi", patterns: ["kimi", "moonshot"] },
+];
 
 function loadFavorites() {
   try {
@@ -21,6 +49,25 @@ function saveFavorites(ids) {
   localStorage.setItem(FAVORITES_KEY, JSON.stringify(ids.slice(0, MAX_FAVORITES)));
 }
 
+function selectionId(model) {
+  return model?._selectionId || model?.id || "";
+}
+
+function sourceLabel(key) {
+  return SOURCE_LABELS[key] || key;
+}
+
+function shortName(model) {
+  if (model.name) return model.name;
+  const id = model.id;
+  const slash = id.indexOf("/");
+  return slash > 0 ? id.slice(slash + 1) : id;
+}
+
+function displayName(model) {
+  return shortName(model).replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function highlightMatch(text, query) {
   if (!query) return text;
   const idx = text.toLowerCase().indexOf(query.toLowerCase());
@@ -28,85 +75,76 @@ function highlightMatch(text, query) {
   return (
     <>
       {text.slice(0, idx)}
-      <span className="bg-saffron-500/30 text-saffron-300 rounded-sm">
-        {text.slice(idx, idx + query.length)}
-      </span>
+      <span className="bg-saffron-500/30 text-saffron-300 rounded-sm">{text.slice(idx, idx + query.length)}</span>
       {text.slice(idx + query.length)}
     </>
   );
 }
 
-/** Returns true if both prompt and completion pricing are "0" or 0 */
 function isFreeModel(model) {
   const p = model?.pricing;
   if (!p) return false;
   return Number(p.prompt) === 0 && Number(p.completion) === 0;
 }
 
-const KNOWN_PROVIDERS = ["openai", "anthropic", "mistralai", "google"];
-
-function getProvider(model) {
-  const slash = model.id.indexOf("/");
-  if (slash > 0) return model.id.slice(0, slash);
-  return null;
+function supportsMeaningfulPricing(provider) {
+  return provider === "openrouter" || provider === "huggingface";
 }
 
-function providerLabel(key) {
-  const labels = {
-    openai: "OpenAI",
-    anthropic: "Anthropic",
-    mistralai: "Mistral AI",
-    google: "Google",
-    others: "Others",
-  };
-  return labels[key] || key;
+function familyForModel(model) {
+  const text = `${model.id} ${model.name || ""}`.toLowerCase();
+  const match = FAMILY_PATTERNS.find((family) => family.patterns.some((pattern) => text.includes(pattern)));
+  return match || { key: "other", label: "Other Models" };
 }
 
-/** Strip "provider/" prefix to get the short model name */
-function shortName(id) {
-  const slash = id.indexOf("/");
-  return slash > 0 ? id.slice(slash + 1) : id;
+function sortModels(provider, models) {
+  return [...models].sort((a, b) => {
+    if (supportsMeaningfulPricing(provider)) {
+      const aFree = isFreeModel(a) ? 0 : 1;
+      const bFree = isFreeModel(b) ? 0 : 1;
+      if (aFree !== bFree) return aFree - bFree;
+    }
+    if (provider === "huggingface") {
+      const aDownloads = typeof a._downloads === "number" ? a._downloads : -1;
+      const bDownloads = typeof b._downloads === "number" ? b._downloads : -1;
+      if (aDownloads !== bDownloads) return bDownloads - aDownloads;
+    }
+    return displayName(a).localeCompare(displayName(b));
+  });
 }
 
-/**
- * Group an array of models into { key, label, models[] }[]
- * Known providers appear first in a fixed order, then "others".
- */
-function groupModels(models) {
-  const buckets = {};
-  for (const m of models) {
-    const provider = getProvider(m) || "others";
-    const key = KNOWN_PROVIDERS.includes(provider) ? provider : "others";
-    if (!buckets[key]) buckets[key] = [];
-    buckets[key].push(m);
+function buildProviderGroups(models) {
+  const providerBuckets = {};
+  for (const model of models) {
+    const provider = model._provider || "openrouter";
+    if (!providerBuckets[provider]) providerBuckets[provider] = [];
+    providerBuckets[provider].push(model);
   }
 
-  const order = [...KNOWN_PROVIDERS, "others"];
-  return order
-    .filter((k) => buckets[k]?.length)
-    .map((k) => ({
-      key: k,
-      label: providerLabel(k),
-      models: buckets[k].sort((a, b) => {
-        const aFree = isFreeModel(a) ? 0 : 1;
-        const bFree = isFreeModel(b) ? 0 : 1;
-        if (aFree !== bFree) return aFree - bFree;
-        return a.id.localeCompare(b.id);
-      }),
-    }));
-}
+  return SOURCE_PROVIDER_ORDER
+    .filter((provider) => providerBuckets[provider]?.length)
+    .map((provider) => {
+      const families = {};
+      for (const model of sortModels(provider, providerBuckets[provider])) {
+        const family = familyForModel(model);
+        if (!families[family.key]) families[family.key] = { ...family, models: [] };
+        families[family.key].models.push(model);
+      }
 
-// --- Icons ------------------------------------------------------------------
+      return {
+        key: provider,
+        label: sourceLabel(provider),
+        color: SOURCE_COLORS[provider] || "#888",
+        showPricing: supportsMeaningfulPricing(provider),
+        families: Object.values(families),
+        count: providerBuckets[provider].length,
+      };
+    });
+}
 
 function ChevronIcon({ className }) {
   return (
-    <svg
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      viewBox="0 0 24 24"
-    >
+    <svg className={className} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
     </svg>
   );
@@ -130,59 +168,123 @@ function StarIcon({ filled, className, onClick }) {
   );
 }
 
-// --- Model item -------------------------------------------------------------
+// Estimate monthly cost — uses real avg tokens/msg when available, falls back to 500+800
+function modelEstMonthly(model, avgTokens) {
+  const p = model?.pricing;
+  if (!p) return null;
+  const prompt     = Number(p.prompt)     || 0;
+  const completion = Number(p.completion) || 0;
+  if (prompt === 0 && completion === 0) return 0;
+  const avgPrompt     = avgTokens?.prompt     || 500;
+  const avgCompletion = avgTokens?.completion || 800;
+  const costPerMsg = prompt * avgPrompt + completion * avgCompletion;
+  return costPerMsg * 600; // 20 msgs/day × 30 days
+}
 
-function PricingBadge({ model }) {
+function fmtPerMillion(pricePerToken) {
+  const m = Number(pricePerToken) * 1_000_000;
+  if (!m) return null;
+  if (m < 0.01) return `$${m.toFixed(4)}`;
+  if (m < 1)   return `$${m.toFixed(3)}`;
+  if (m < 10)  return `$${m.toFixed(2)}`;
+  return `$${m.toFixed(1)}`;
+}
+
+function PricingBadge({ model, compact = false, showCost = false }) {
+  if (!model) return null;
+  const provider = model._provider || "openrouter";
+  if (!supportsMeaningfulPricing(provider)) return null;
+
   const free = isFreeModel(model);
+
+  if (!free && showCost && model.pricing) {
+    const inp = fmtPerMillion(model.pricing.prompt);
+    const out = fmtPerMillion(model.pricing.completion);
+    const label = (inp && out) ? `${inp} · ${out} /1M` : inp ? `${inp}/1M` : "Paid";
+    return (
+      <span className="shrink-0 text-[10px] px-2 py-0.5 font-medium rounded-full leading-none bg-amber-500/15 text-amber-300 whitespace-nowrap">
+        {label}
+      </span>
+    );
+  }
+
   return (
-    <span
-      className={`shrink-0 text-[10px] font-medium rounded-full px-1.5 py-0.5 leading-none ${
-        free
-          ? "bg-emerald-500/15 text-emerald-400"
-          : "bg-dark-600/60 text-dark-300"
-      }`}
-    >
+    <span className={`shrink-0 text-[10px] px-2 py-0.5 font-medium rounded-full leading-none ${free ? "bg-emerald-500/15 text-emerald-400" : "bg-amber-500/15 text-amber-300"}`}>
       {free ? "Free" : "Paid"}
     </span>
   );
 }
 
-function ModelItem({ model, isSelected, isFavorite, search, onSelect, onToggleFav, selectedItemRef }) {
+function FavoriteItem({ model, selected, search, isFavorite, onSelect, onToggleFav, selectedItemRef, monthlyBudget, avgMsgTokens }) {
+  const provider = model._provider || "openrouter";
   return (
     <li
-      ref={isSelected ? selectedItemRef : null}
+      ref={selected ? selectedItemRef : null}
       onClick={onSelect}
-      className={`pl-8 pr-3 py-2 cursor-pointer text-sm flex items-center gap-2 transition-colors ${
-        isSelected
-          ? "bg-saffron-500/15 text-saffron-300"
-          : "text-dark-200 hover:bg-dark-700"
-      }`}
+      className={`px-3 py-2.5 cursor-pointer flex items-center gap-2 border-b border-white/[0.03] ${selected ? "bg-saffron-500/12 text-saffron-300" : "text-dark-200 hover:bg-dark-700/70"}`}
     >
-      <div className="flex flex-col gap-0.5 min-w-0 flex-1 overflow-hidden">
-        <span className="truncate font-medium flex items-center gap-1.5">
-          <span className="truncate">{highlightMatch(shortName(model.id), search)}</span>
-          <PricingBadge model={model} />
-        </span>
-        <span className="text-xs text-dark-400 truncate block">
-          {highlightMatch(model.id, search)}
-        </span>
+      <div className="flex flex-col min-w-0 flex-1 gap-1">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="truncate text-sm font-medium">{highlightMatch(displayName(model), search)}</span>
+          <PricingBadge model={model} compact />
+        </div>
+        <div className="flex items-center gap-2 text-xs text-dark-400 min-w-0">
+          <span className="truncate">{sourceLabel(provider)}</span>
+          <span className="truncate">{highlightMatch(model.id, search)}</span>
+        </div>
       </div>
-      <StarIcon
-        filled={isFavorite}
-        className={isFavorite ? "text-saffron-400" : "text-dark-500 hover:text-saffron-400"}
-        onClick={onToggleFav}
-      />
+      <BudgetIndicator model={model} monthlyBudget={monthlyBudget} avgMsgTokens={avgMsgTokens} />
+      <StarIcon filled={isFavorite} className={isFavorite ? "text-saffron-400" : "text-dark-500 hover:text-saffron-400"} onClick={onToggleFav} />
     </li>
   );
 }
 
-// --- Component --------------------------------------------------------------
+function BudgetIndicator({ model, monthlyBudget, avgMsgTokens }) {
+  if (!monthlyBudget || monthlyBudget <= 0) return null;
+  // Show for any model — free ones always fit, paid ones need pricing data
+  if (isFreeModel(model)) return (
+    <span className="shrink-0 text-[11px] font-bold text-emerald-400" title="Free — fits any budget">✓</span>
+  );
+  const p = model?.pricing;
+  if (!p || (Number(p.prompt) === 0 && Number(p.completion) === 0)) return null;
+  const est = modelEstMonthly(model, avgMsgTokens);
+  if (est === null) return null;
+  const fits = est <= monthlyBudget;
+  const estLabel = est < 0.01 ? "<$0.01" : `$${est.toFixed(2)}`;
+  return (
+    <span
+      className={`shrink-0 text-[11px] font-bold ${fits ? "text-emerald-400" : "text-red-400"}`}
+      title={`~${estLabel}/mo · budget $${monthlyBudget}/mo`}
+    >
+      {fits ? "✓" : "✗"}
+    </span>
+  );
+}
 
-export default function ModelSelector({ models, selected, onSelect }) {
+function ModelRow({ model, selected, search, isFavorite, onSelect, onToggleFav, selectedItemRef, monthlyBudget, avgMsgTokens }) {
+  return (
+    <li
+      ref={selected ? selectedItemRef : null}
+      onClick={onSelect}
+      className={`px-4 py-2 cursor-pointer flex items-center gap-2 ${selected ? "bg-saffron-500/12 text-saffron-300" : "text-dark-200 hover:bg-dark-700/60"}`}
+    >
+      <div className="flex items-center gap-2 min-w-0 flex-1">
+        <span className="truncate text-sm">{highlightMatch(displayName(model), search)}</span>
+        <PricingBadge model={model} compact />
+      </div>
+      <BudgetIndicator model={model} monthlyBudget={monthlyBudget} avgMsgTokens={avgMsgTokens} />
+      <StarIcon filled={isFavorite} className={isFavorite ? "text-saffron-400" : "text-dark-500 hover:text-saffron-400"} onClick={onToggleFav} />
+    </li>
+  );
+}
+
+export default function ModelSelector({ models, selected, onSelect, selectedModel, selectedTask = "text-generation", onTaskChange, openSignal = 0, monthlyBudget = null, providerUsage = null }) {
   const [open, setOpen] = useState(false);
+  const [taskOpen, setTaskOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [pricingFilter, setPricingFilter] = useState("all"); // "all" | "free" | "paid"
-  const [collapsed, setCollapsed] = useState({});
+  const [pricingFilter, setPricingFilter] = useState("all");
+  const [warnModel, setWarnModel] = useState(null); // { id, name, est }
+  const [collapsedProviders, setCollapsedProviders] = useState({});
   const [favorites, setFavorites] = useState(loadFavorites);
   const containerRef = useRef(null);
   const searchRef = useRef(null);
@@ -192,216 +294,319 @@ export default function ModelSelector({ models, selected, onSelect }) {
 
   const toggleFavorite = useCallback((modelId) => {
     setFavorites((prev) => {
-      let next;
-      if (prev.includes(modelId)) {
-        next = prev.filter((id) => id !== modelId);
-      } else {
-        next = [modelId, ...prev].slice(0, MAX_FAVORITES);
-      }
+      const next = prev.includes(modelId) ? prev.filter((id) => id !== modelId) : [modelId, ...prev].slice(0, MAX_FAVORITES);
       saveFavorites(next);
       return next;
     });
   }, []);
 
-  // Close on outside click
   useEffect(() => {
     const handler = (e) => {
       if (containerRef.current && !containerRef.current.contains(e.target)) {
         setOpen(false);
+        setTaskOpen(false);
       }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // Focus search input & scroll to selected item when dropdown opens
   useEffect(() => {
     if (open) {
       searchRef.current?.focus();
-      setTimeout(() => {
-        selectedItemRef.current?.scrollIntoView({ block: "nearest" });
-      }, 0);
+      setTimeout(() => selectedItemRef.current?.scrollIntoView({ block: "nearest" }), 0);
     } else {
       setSearch("");
       setPricingFilter("all");
     }
   }, [open]);
 
-  // Filter models by search + pricing
-  const filtered = useMemo(
-    () =>
-      models.filter((m) => {
-        if (!m.id.toLowerCase().includes(search.toLowerCase())) return false;
-        if (pricingFilter === "free" && !isFreeModel(m)) return false;
-        if (pricingFilter === "paid" && isFreeModel(m)) return false;
-        return true;
-      }),
-    [models, search, pricingFilter]
-  );
+  useEffect(() => {
+    if (openSignal > 0) setOpen(true);
+  }, [openSignal]);
 
-  const groups = useMemo(() => groupModels(filtered), [filtered]);
+  // Derive avg tokens/msg from real usage data so budget indicator reflects actual behaviour
+  const avgMsgTokens = useMemo(() => {
+    if (!providerUsage) return null;
+    let totalReqs = 0, totalPrompt = 0, totalCompletion = 0;
+    for (const row of Object.values(providerUsage)) {
+      totalReqs       += row.requests         || 0;
+      totalPrompt     += row.promptTokens     || 0;
+      totalCompletion += row.completionTokens || 0;
+    }
+    if (totalReqs === 0) return null;
+    return {
+      prompt:     Math.round(totalPrompt     / totalReqs),
+      completion: Math.round(totalCompletion / totalReqs),
+    };
+  }, [providerUsage]);
 
-  // Favorites list: only show models that still exist in the full model list and match the search
+  const taskFiltered = useMemo(() => filterModelsForTask(models, selectedTask), [models, selectedTask]);
+
+  const filtered = useMemo(() => {
+    const term = search.toLowerCase();
+    return taskFiltered.filter((model) => {
+      const provider = model._provider || "openrouter";
+      const family = familyForModel(model).label.toLowerCase();
+      const haystack = `${model.id} ${displayName(model)} ${sourceLabel(provider)} ${family}`.toLowerCase();
+      if (term && !haystack.includes(term)) return false;
+      if (pricingFilter === "free") return supportsMeaningfulPricing(provider) && isFreeModel(model);
+      if (pricingFilter === "paid") return supportsMeaningfulPricing(provider) && !isFreeModel(model);
+      return true;
+    });
+  }, [taskFiltered, search, pricingFilter]);
+
+  const providerGroups = useMemo(() => buildProviderGroups(filtered), [filtered]);
+
   const favoriteModels = useMemo(() => {
-    const filteredSet = new Set(filtered.map((m) => m.id));
+    const filteredSet = new Set(filtered.map((m) => selectionId(m)));
     return favorites
       .filter((id) => filteredSet.has(id))
-      .map((id) => filtered.find((m) => m.id === id));
+      .map((id) => filtered.find((m) => selectionId(m) === id))
+      .filter(Boolean);
   }, [favorites, filtered]);
 
-  const isSearching = search.length > 0;
+  const selectedObj = selectedModel || models.find((m) => selectionId(m) === selected || m.id === selected);
+  const currentProvider = selectedObj?._provider || "openrouter";
+  const currentTask = TASK_OPTIONS.find((task) => task.id === selectedTask);
+  const taskMenuOptions = [
+    { id: "text-generation", label: "Text to Text" },
+    { id: "text-to-image", label: "Image Generation" },
+    { id: "image-to-text", label: "Image to Text" },
+    { id: "any-to-any", label: "Any to Any" },
+    { id: "image-to-image", label: "Image to Image" },
+    { id: "text-to-video", label: "Text to Video" },
+    { id: "text-to-speech", label: "Text to Speech" },
+    { id: "more", label: "More" },
+  ];
 
-  const toggleGroup = (key) => {
-    setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
+  const handleSelect = (id) => {
+    onSelect(id);
+    setWarnModel(null);
+    setOpen(false);
   };
 
-  const selectedLabel = selected || "Select a model…";
+  const trySelect = (model) => {
+    if (monthlyBudget > 0 && !isFreeModel(model)) {
+      const est = modelEstMonthly(model, avgMsgTokens);
+      if (est !== null && est > monthlyBudget) {
+        setWarnModel({ id: selectionId(model), name: displayName(model), est });
+        return;
+      }
+    }
+    handleSelect(selectionId(model));
+  };
 
   return (
-    <div ref={containerRef} className="relative min-w-[320px] max-w-md">
-      {/* Trigger button */}
-      <motion.button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        whileHover={{ scale: 1.01 }}
-        whileTap={{ scale: 0.99 }}
-        transition={{ duration: 0.15, ease }}
-        className="w-full flex items-center justify-between gap-2 border border-dark-700/50 rounded-xl px-4 py-2.5 text-sm bg-dark-800/60 hover:bg-dark-800 hover:border-dark-600/60 focus:outline-none focus:ring-2 focus:ring-saffron-500/40 cursor-pointer"
-      >
-        <span className="truncate text-left text-dark-100">
-          {models.length === 0 ? "Loading models…" : selectedLabel}
-        </span>
-        <motion.span
-          animate={{ rotate: open ? 180 : 0 }}
-          transition={{ duration: 0.2, ease }}
+    <div ref={containerRef} className="flex items-center gap-2 min-w-0 flex-1">
+      <div className="relative w-[180px] shrink-0">
+        <button
+          type="button"
+          onClick={() => setTaskOpen((v) => !v)}
+          className="h-10 w-full flex items-center justify-between gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2 cursor-pointer"
         >
-          <ChevronIcon className="w-4 h-4 shrink-0 text-dark-400" />
-        </motion.span>
-      </motion.button>
+          <span className="truncate text-sm font-medium text-dark-100">{currentTask?.label || "Text to Text"}</span>
+          <motion.span animate={{ rotate: taskOpen ? 180 : 0 }} transition={{ duration: 0.2, ease }} className="text-dark-400">
+            <ChevronIcon className="w-4 h-4" />
+          </motion.span>
+        </button>
 
-      {/* Dropdown */}
-      <AnimatePresence>
-      {open && (
-        <motion.div
-          initial={{ opacity: 0, y: -8 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -8 }}
-          transition={{ duration: 0.2, ease }}
-          className="absolute z-50 mt-1 w-[420px] bg-dark-800 border border-dark-600/50 rounded-xl shadow-2xl shadow-black/40 flex flex-col overflow-hidden"
-        >
-          {/* Search + pricing filter */}
-          <div className="p-2 border-b border-dark-700 space-y-2">
-            <input
-              ref={searchRef}
-              type="text"
-              placeholder="Search models…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full bg-dark-700 border border-dark-600/50 rounded-lg px-3 py-1.5 text-sm text-dark-100 placeholder-dark-400 focus:outline-none focus:ring-2 focus:ring-saffron-500 focus:border-transparent"
-            />
-            <div className="flex gap-1">
-              {["all", "free", "paid"].map((f) => (
+        <AnimatePresence>
+          {taskOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.18, ease }}
+              className="absolute z-50 mt-2 w-full bg-dark-800 border border-white/[0.08] rounded-xl shadow-xl shadow-black/30 overflow-hidden"
+            >
+              {taskMenuOptions.map((task) => (
                 <button
-                  key={f}
+                  key={task.id}
                   type="button"
-                  onClick={() => setPricingFilter(f)}
-                  className={`px-2.5 py-1 text-[11px] font-medium rounded-md cursor-pointer transition-colors ${
-                    pricingFilter === f
-                      ? "bg-saffron-500/20 text-saffron-300 border border-saffron-500/30"
-                      : "bg-dark-700/60 text-dark-400 border border-transparent hover:text-dark-200 hover:bg-dark-700"
+                  onClick={() => {
+                    onTaskChange?.(task.id);
+                    setTaskOpen(false);
+                  }}
+                  className={`w-full text-left px-3 py-2.5 text-sm transition-colors cursor-pointer ${
+                    selectedTask === task.id
+                      ? "bg-saffron-500/16 text-saffron-300"
+                      : "text-dark-200 hover:bg-dark-700/70"
                   }`}
                 >
-                  {f === "all" ? "All" : f === "free" ? "🟢 Free" : "💰 Paid"}
+                  {task.label}
                 </button>
               ))}
-            </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      <div className="relative min-w-0 flex-1 max-w-[560px]">
+        <motion.button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          whileHover={{ scale: 1.005 }}
+          whileTap={{ scale: 0.995 }}
+          transition={{ duration: 0.15, ease }}
+          className="h-10 w-full flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2 cursor-pointer"
+        >
+          <div className="min-w-0 flex-1 flex items-center gap-2">
+            <span className="text-sm font-semibold text-dark-100 truncate">{selectedObj ? displayName(selectedObj) : "Select a model"}</span>
+            <span className="text-xs text-dark-400 truncate">{sourceLabel(currentProvider)}</span>
           </div>
+          <PricingBadge model={selectedObj} compact showCost />
+          <motion.span animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.2, ease }} className="text-dark-400">
+            <ChevronIcon className="w-4 h-4" />
+          </motion.span>
+        </motion.button>
 
-          {/* Scrollable list */}
-          <div className="max-h-80 overflow-y-auto py-1">
-            {filtered.length === 0 && (
-              <div className="px-3 py-4 text-sm text-dark-400 text-center">
-                No results found
-              </div>
-            )}
-
-            {/* ★ Favorites section */}
-            {favoriteModels.length > 0 && (
-              <div>
-                <div className="w-full flex items-center gap-2 px-3 py-2 bg-saffron-500/10 border-b border-saffron-500/20">
-                  <span className="text-saffron-400 text-sm">★</span>
-                  <span className="text-xs font-semibold text-saffron-400 uppercase tracking-wide">
-                    Favorites
-                  </span>
-                  <span className="text-[10px] text-saffron-500/60 ml-auto">
-                    {favoriteModels.length}
-                  </span>
+        <AnimatePresence>
+          {open && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.2, ease }}
+              className="absolute z-50 mt-2 w-full min-w-[420px] max-w-[720px] bg-dark-800 border border-white/[0.08] rounded-2xl shadow-2xl shadow-black/40 overflow-hidden"
+            >
+              <div className="p-3 border-b border-white/[0.06] space-y-2">
+                <input
+                  ref={searchRef}
+                  type="text"
+                  placeholder="Search models, families, providers..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="w-full bg-dark-700 border border-dark-600/50 rounded-xl px-3 py-2 text-sm text-dark-100 placeholder-dark-400 focus:outline-none focus:ring-2 focus:ring-saffron-500 focus:border-transparent"
+                />
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] text-dark-500">Task: {currentTask?.label || "Text Generation"}</span>
+                  <div className="flex gap-1">
+                    {["all", "free", "paid"].map((filterValue) => (
+                      <button
+                        key={filterValue}
+                        type="button"
+                        onClick={() => setPricingFilter(filterValue)}
+                        className={`px-2.5 py-1 text-[11px] font-medium rounded-md cursor-pointer transition-colors ${pricingFilter === filterValue ? "bg-saffron-500/20 text-saffron-300 border border-saffron-500/30" : "bg-dark-700/60 text-dark-400 border border-transparent hover:text-dark-200 hover:bg-dark-700"}`}
+                      >
+                        {filterValue === "all" ? "All" : filterValue === "free" ? "Free" : "Paid"}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <ul>
-                  {favoriteModels.map((m) => (
-                    <ModelItem
-                      key={`fav-${m.id}`}
-                      model={m}
-                      isSelected={m.id === selected}
-                      isFavorite={true}
-                      search={search}
-                      onSelect={() => { onSelect(m.id); setOpen(false); }}
-                      onToggleFav={() => toggleFavorite(m.id)}
-                      selectedItemRef={selectedItemRef}
-                    />
-                  ))}
-                </ul>
-                <div className="border-b border-dark-700 mx-3 my-1" />
-              </div>
-            )}
 
-            {/* Provider groups */}
-            {groups.map((group) => {
-              const isCollapsed = !isSearching && collapsed[group.key];
-
-              return (
-                <div key={group.key}>
-                  {/* Group header */}
-                  <button
-                    type="button"
-                    onClick={() => toggleGroup(group.key)}
-                    className="w-full flex items-center gap-2 px-3 py-2 bg-dark-700/50 hover:bg-dark-700 transition-colors cursor-pointer sticky top-0 z-10"
+                {/* Budget warning banner */}
+                {warnModel && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="rounded-xl bg-red-500/10 border border-red-500/25 px-3 py-2.5 space-y-2"
                   >
-                    <ChevronIcon
-                      className={`w-3.5 h-3.5 text-dark-400 transition-transform ${isCollapsed ? "-rotate-90" : ""}`}
-                    />
-                    <span className="text-xs font-semibold text-dark-300 uppercase tracking-wide">
-                      {group.label}
-                    </span>
-                    <span className="text-[10px] text-dark-500 ml-auto">
-                      {group.models.length}
-                    </span>
-                  </button>
+                    <div className="flex items-start gap-2">
+                      <span className="text-red-400 text-sm shrink-0">⚠️</span>
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-red-300">{warnModel.name}</p>
+                        <p className="text-[11px] text-red-400/80 mt-0.5">
+                          ~${warnModel.est.toFixed(2)}/mo estimated — exceeds your ${monthlyBudget}/mo budget
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setWarnModel(null)}
+                        className="flex-1 text-[11px] text-dark-300 bg-dark-700 hover:bg-dark-600 rounded-lg py-1.5 cursor-pointer transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSelect(warnModel.id)}
+                        className="flex-1 text-[11px] text-red-200 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded-lg py-1.5 cursor-pointer transition-colors font-medium"
+                      >
+                        Use Anyway
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </div>
 
-                  {/* Group items */}
-                  {!isCollapsed && (
+              <div className="max-h-[520px] overflow-y-auto py-2">
+                {filtered.length === 0 && <div className="px-4 py-6 text-sm text-dark-400 text-center">No models available for this task</div>}
+
+                {favoriteModels.length > 0 && (
+                  <div className="mb-3 px-2">
+                    <div className="flex items-center gap-2 px-2 py-2 border-b border-white/[0.05]">
+                      <span className="text-saffron-400 text-sm">★</span>
+                      <span className="text-sm font-semibold text-saffron-400">Favorites</span>
+                    </div>
                     <ul>
-                      {group.models.map((m) => (
-                        <ModelItem
-                          key={m.id}
-                          model={m}
-                          isSelected={m.id === selected}
-                          isFavorite={favSet.has(m.id)}
+                      {favoriteModels.map((model) => (
+                        <FavoriteItem
+                          key={`fav-${selectionId(model)}`}
+                          model={model}
+                          selected={selectionId(model) === selected}
                           search={search}
-                          onSelect={() => { onSelect(m.id); setOpen(false); }}
-                          onToggleFav={() => toggleFavorite(m.id)}
+                          isFavorite={true}
+                          onSelect={() => trySelect(model)}
+                          onToggleFav={() => toggleFavorite(selectionId(model))}
                           selectedItemRef={selectedItemRef}
+                          monthlyBudget={monthlyBudget}
+                          avgMsgTokens={avgMsgTokens}
                         />
                       ))}
                     </ul>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </motion.div>
-      )}
-      </AnimatePresence>
+                  </div>
+                )}
+
+                {providerGroups.map((provider) => {
+                  const isCollapsed = collapsedProviders[provider.key] && !search;
+                  return (
+                    <div key={provider.key} className="mb-3 px-2">
+                      <button
+                        type="button"
+                        onClick={() => setCollapsedProviders((prev) => ({ ...prev, [provider.key]: !prev[provider.key] }))}
+                        className="w-full flex items-center gap-2 px-2 py-2.5 border-b border-white/[0.05] hover:bg-dark-700/40 rounded-t-xl cursor-pointer"
+                      >
+                        <ChevronIcon className={`w-4 h-4 text-dark-400 transition-transform ${isCollapsed ? "-rotate-90" : ""}`} />
+                        <span className="w-2.5 h-2.5 rounded-full" style={{ background: provider.color }} />
+                        <span className="text-sm font-semibold text-dark-200">{provider.label}</span>
+                        <span className="text-[11px] text-dark-500 ml-auto">{provider.count}</span>
+                      </button>
+
+                      {!isCollapsed && (
+                        <div className="rounded-b-xl overflow-hidden border-x border-b border-white/[0.03] bg-dark-900/20">
+                          {provider.families.map((family) => (
+                            <div key={`${provider.key}-${family.key}`} className="border-t border-white/[0.03] first:border-t-0">
+                              <div className="px-4 py-2 text-xs font-semibold text-dark-400 bg-dark-900/40">{family.label}</div>
+                              <ul>
+                                {family.models.map((model) => (
+                                  <ModelRow
+                                    key={selectionId(model)}
+                                    model={model}
+                                    selected={selectionId(model) === selected}
+                                    search={search}
+                                    isFavorite={favSet.has(selectionId(model))}
+                                    onSelect={() => trySelect(model)}
+                                    onToggleFav={() => toggleFavorite(selectionId(model))}
+                                    selectedItemRef={selectedItemRef}
+                                    monthlyBudget={monthlyBudget}
+                                    avgMsgTokens={avgMsgTokens}
+                                  />
+                                ))}
+                              </ul>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     </div>
   );
 }

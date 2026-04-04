@@ -152,7 +152,7 @@ export default function MarkdownRenderer({ content }) {
         // Link
         a: ({ href, children }) => (
           <a
-            href={href}
+            href={/^(https?:|mailto:)/i.test(href || "") ? href : "#"}
             target="_blank"
             rel="noopener noreferrer"
             className="text-saffron-400 hover:text-saffron-300 underline underline-offset-2 transition-colors"

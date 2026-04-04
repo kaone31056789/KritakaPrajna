@@ -1,12 +1,6 @@
-// ── Model Advisor: scoring, ranking & suggestions ────────────────────────────
-//
-// Provides per-response advisor data: cost info, cheaper/better alternatives,
-// task-aware recommendations, and dual free+paid options.
-
-import { isFreeModel, extractParamBillions, supportsVision, detectTaskType } from "./smartModelSelect";
+import { isFreeModel, extractParamBillions, supportsVision } from "./smartModelSelect";
 import { isModelUnavailable } from "./rateLimiter";
-
-// ── Coding model patterns (prioritized for code tasks) ──────────────────────
+import { buildUnifiedModelProfile, rankModelsForTask, bestValueForTask } from "./advisorRanking";
 
 const CODING_MODELS = [
   "deepseek-coder", "deepseek-chat", "deepseek-r1", "codellama", "code-llama",
@@ -15,80 +9,11 @@ const CODING_MODELS = [
   "gemini-1.5-pro", "qwen-2.5-coder", "yi-coder",
 ];
 
-// ── Speed tiers (heuristic: smaller = faster) ───────────────────────────────
-
-function speedScore(model) {
-  const params = extractParamBillions(model);
-  if (params === 0) return 50; // unknown
-  if (params <= 7) return 90;
-  if (params <= 14) return 80;
-  if (params <= 34) return 65;
-  if (params <= 72) return 50;
-  if (params <= 180) return 35;
-  return 20; // 400B+
-}
-
-// ── Capability scoring ──────────────────────────────────────────────────────
-
-const QUALITY_TIERS = [
-  { pattern: "claude-4", score: 96 },
-  { pattern: "claude-3-opus", score: 95 },
-  { pattern: "claude-3.5-sonnet", score: 92 },
-  { pattern: "gpt-4o", score: 90 },
-  { pattern: "gpt-4-turbo", score: 88 },
-  { pattern: "gemini-2", score: 88 },
-  { pattern: "gemini-1.5-pro", score: 86 },
-  { pattern: "llama-3.1-405b", score: 85 },
-  { pattern: "deepseek-v3", score: 83 },
-  { pattern: "deepseek-r1", score: 82 },
-  { pattern: "llama-3.3-70b", score: 80 },
-  { pattern: "mistral-large", score: 80 },
-  { pattern: "qwen-2.5-72b", score: 79 },
-  { pattern: "deepseek-chat", score: 78 },
-  { pattern: "qwen3", score: 76 },
-  { pattern: "llama-3", score: 65 },
-  { pattern: "mixtral", score: 62 },
-  { pattern: "gemma", score: 60 },
-  { pattern: "phi-3", score: 55 },
-  { pattern: "phi-4", score: 58 },
-  { pattern: "qwen", score: 55 },
-  { pattern: "mistral", score: 50 },
-  { pattern: "deepseek", score: 70 },
-];
-
-function capabilityScore(model) {
-  const id = model.id.toLowerCase();
-  let base = 30;
-  for (const tier of QUALITY_TIERS) {
-    if (id.includes(tier.pattern)) { base = tier.score; break; }
-  }
-  const params = extractParamBillions(model);
-  let paramBonus = 0;
-  if (params >= 200) paramBonus = 20;
-  else if (params >= 65) paramBonus = 15;
-  else if (params >= 30) paramBonus = 10;
-  else if (params >= 10) paramBonus = 5;
-  else if (params >= 1) paramBonus = 2;
-  return base + paramBonus;
-}
-
-// ── Coding capability boost ─────────────────────────────────────────────────
-
-function codingScore(model) {
-  const id = model.id.toLowerCase();
-  let bonus = 0;
-  if (CODING_MODELS.some((p) => id.includes(p))) bonus = 15;
-  return capabilityScore(model) + bonus;
-}
-
-// ── Cost per 1M tokens (combined prompt + completion) ───────────────────────
-
 function costPer1MTokens(model) {
   const p = model?.pricing;
   if (!p) return 0;
   const prompt = Number(p.prompt) || 0;
   const completion = Number(p.completion) || 0;
-  // OpenRouter pricing is per-token, multiply by 1M
   return (prompt + completion) * 1_000_000;
 }
 
@@ -105,43 +30,43 @@ function shortName(id) {
   return slash > 0 ? id.slice(slash + 1) : id;
 }
 
-// ── Model profile builder ───────────────────────────────────────────────────
+function providerLabel(provider) {
+  switch (provider) {
+    case "openrouter": return "OpenRouter";
+    case "huggingface": return "Hugging Face";
+    case "openai": return "OpenAI";
+    case "anthropic": return "Anthropic";
+    default: return provider || "Unknown";
+  }
+}
 
-/**
- * Build a profile object for a model with all scores.
- */
-export function buildModelProfile(model) {
+function selectionId(model) {
+  return model?._selectionId || model?.id || "";
+}
+
+export function buildModelProfile(model, taskType = "general", rankingSignals = {}) {
+  const unified = buildUnifiedModelProfile(model, taskType, rankingSignals);
   return {
-    id: model.id,
+    id: selectionId(model),
+    rawId: model.id,
     name: shortName(model.id),
-    capabilityScore: capabilityScore(model),
-    codingScore: codingScore(model),
-    speedScore: speedScore(model),
+    capabilityScore: unified.qualityScore,
+    codingScore: buildUnifiedModelProfile(model, "coding", rankingSignals).finalScore,
+    speedScore: unified.speedScore,
     costPer1M: costPer1MTokens(model),
     costLabel: formatPricePer1M(model),
-    isFree: isFreeModel(model),
+    isFree: unified.isFree,
     supportsVision: supportsVision(model),
     supportsCode: CODING_MODELS.some((p) => model.id.toLowerCase().includes(p)),
     params: extractParamBillions(model),
+    provider: unified.provider,
+    qualityScore: unified.qualityScore,
+    availabilityScore: unified.availabilityScore,
+    contextLength: unified.contextLength,
+    finalScore: unified.finalScore,
   };
 }
 
-// ── Main advisor logic ──────────────────────────────────────────────────────
-
-/**
- * Generate advisor data for a completed response.
- *
- * @param {object} params
- * @param {Array} params.models - All available models
- * @param {string} params.currentModelId - Model that was used
- * @param {string} params.taskType - "coding"|"general"|"vision"|"document"
- * @param {number} params.cost - Cost of this response
- * @param {object} params.usage - { prompt_tokens, completion_tokens }
- * @param {object} params.pricing - Model pricing object
- * @param {"auto"|"free"|"paid"|"best"} params.preference - User preference
- * @param {number|null} params.monthlyBudget - Monthly spending limit in dollars
- * @returns {object} Advisor card data
- */
 export function generateAdvisorData({
   models,
   currentModelId,
@@ -151,179 +76,204 @@ export function generateAdvisorData({
   pricing,
   preference = "auto",
   monthlyBudget = null,
+  rankingSignals = {},
 }) {
   if (!models || models.length === 0) return null;
 
-  // Filter out meta/router models and unavailable (rate-limited/down) models
-  const realModels = models.filter((m) => !m.id.startsWith("openrouter/") && !isModelUnavailable(m.id));
-
-  const currentModel = realModels.find((m) => m.id === currentModelId);
+  const realModels = models.filter((m) => !m.id.startsWith("openrouter/") && !isModelUnavailable(selectionId(m)));
+  const currentModel = realModels.find((m) => selectionId(m) === currentModelId || m.id === currentModelId);
   if (!currentModel) return null;
 
-  const currentProfile = buildModelProfile(currentModel);
-  const isFree = currentProfile.isFree;
+  const capable = taskType === "vision" ? realModels.filter(supportsVision) : [...realModels];
+  const ranked = rankModelsForTask(capable, taskType, rankingSignals);
+  const currentProfile = buildModelProfile(currentModel, taskType, rankingSignals);
+  const currentScore = currentProfile.finalScore;
 
-  // Scorer selection based on task
-  const scorer = taskType === "coding" ? codingScore : capabilityScore;
+  const bestOverall = ranked[0] || null;
+  const bestFreeRanked = ranked.find(({ profile }) => profile.isFree) || null;
+  const bestPaidRanked = ranked.find(({ profile }) => !profile.isFree) || null;
+  const bestValueRanked = bestValueForTask(capable, taskType, rankingSignals);
+  const providerPicks = [];
+  const providerSeen = new Set();
+  ranked.forEach(({ model, profile }) => {
+    if (providerSeen.has(profile.provider)) return;
+    providerSeen.add(profile.provider);
+    providerPicks.push({
+      id: selectionId(model),
+      name: shortName(model.id),
+      provider: providerLabel(profile.provider),
+      isFree: profile.isFree,
+      costLabel: formatPricePer1M(model),
+    });
+  });
 
-  // Filter capable models
-  let capable;
-  if (taskType === "vision") {
-    capable = realModels.filter(supportsVision);
-  } else {
-    capable = [...realModels];
-  }
-
-  // ── Find cheaper alternative (similar capability, lower cost) ──
   let cheaperAlternative = null;
-  if (!isFree) {
-    const currentScore = scorer(currentModel);
+  if (!currentProfile.isFree) {
     const cheaper = capable
-      .filter((m) => {
-        if (m.id === currentModelId) return false;
-        const mScore = scorer(m);
-        // At least 70% of current capability
-        return mScore >= currentScore * 0.7;
-      })
-      .sort((a, b) => costPer1MTokens(a) - costPer1MTokens(b));
+      .map((model) => ({ model, profile: buildUnifiedModelProfile(model, taskType, rankingSignals) }))
+      .filter(({ model, profile }) =>
+        selectionId(model) !== currentModelId &&
+        model.id !== currentModelId &&
+        profile.finalScore >= currentScore * 0.82 &&
+        costPer1MTokens(model) < costPer1MTokens(currentModel)
+      )
+      .sort((a, b) => costPer1MTokens(a.model) - costPer1MTokens(b.model));
 
-    const best = cheaper.find((m) => costPer1MTokens(m) < costPer1MTokens(currentModel));
-    if (best) {
+    if (cheaper[0]) {
       cheaperAlternative = {
-        id: best.id,
-        name: shortName(best.id),
-        isFree: isFreeModel(best),
-        costLabel: formatPricePer1M(best),
-        capabilityScore: scorer(best),
+        id: selectionId(cheaper[0].model),
+        name: shortName(cheaper[0].model.id),
+        provider: providerLabel(cheaper[0].profile.provider),
+        isFree: cheaper[0].profile.isFree,
+        costLabel: formatPricePer1M(cheaper[0].model),
+        capabilityScore: cheaper[0].profile.finalScore,
       };
     }
   }
 
-  // ── Find better model (higher capability) ──
-  let betterModel = null;
-  const currentScore = scorer(currentModel);
-  const betterCandidates = capable
-    .filter((m) => m.id !== currentModelId && scorer(m) > currentScore + 5)
-    .sort((a, b) => scorer(b) - scorer(a));
+  const betterRanked = ranked.find(({ model, profile }) =>
+    selectionId(model) !== currentModelId &&
+    model.id !== currentModelId &&
+    profile.finalScore > currentScore + 5
+  );
 
-  if (betterCandidates.length > 0) {
-    const best = betterCandidates[0];
-    betterModel = {
-      id: best.id,
-      name: shortName(best.id),
-      isFree: isFreeModel(best),
-      costLabel: formatPricePer1M(best),
-      capabilityScore: scorer(best),
-    };
-  }
-
-  // ── Best free option ──
-  const freeModels = capable.filter(isFreeModel).sort((a, b) => scorer(b) - scorer(a));
-  const bestFree = freeModels[0] ? {
-    id: freeModels[0].id,
-    name: shortName(freeModels[0].id),
-    capabilityScore: scorer(freeModels[0]),
-    params: extractParamBillions(freeModels[0]),
+  const betterModel = betterRanked ? {
+    id: selectionId(betterRanked.model),
+    name: shortName(betterRanked.model.id),
+    provider: providerLabel(betterRanked.profile.provider),
+    isFree: betterRanked.profile.isFree,
+    costLabel: formatPricePer1M(betterRanked.model),
+    capabilityScore: betterRanked.profile.finalScore,
   } : null;
 
-  // ── Best paid option ──
-  const paidModels = capable.filter((m) => !isFreeModel(m)).sort((a, b) => scorer(b) - scorer(a));
-  const bestPaid = paidModels[0] ? {
-    id: paidModels[0].id,
-    name: shortName(paidModels[0].id),
-    costLabel: formatPricePer1M(paidModels[0]),
-    capabilityScore: scorer(paidModels[0]),
-    params: extractParamBillions(paidModels[0]),
+  const bestFree = bestFreeRanked ? {
+    id: selectionId(bestFreeRanked.model),
+    name: shortName(bestFreeRanked.model.id),
+    provider: providerLabel(bestFreeRanked.profile.provider),
+    capabilityScore: bestFreeRanked.profile.finalScore,
+    params: extractParamBillions(bestFreeRanked.model),
   } : null;
 
-  // ── Cheapest paid option (decent capability for the task) ──
-  let cheapestPaid = null;
-  {
-    const minScore = Math.max(25, currentScore * 0.5); // At least half the current model's capability
-    const paidCapable = capable
-      .filter((m) => !isFreeModel(m) && m.id !== currentModelId && scorer(m) >= minScore)
-      .sort((a, b) => costPer1MTokens(a) - costPer1MTokens(b));
-    if (paidCapable.length > 0) {
-      const cp = paidCapable[0];
-      cheapestPaid = {
-        id: cp.id,
-        name: shortName(cp.id),
-        isFree: false,
-        costLabel: formatPricePer1M(cp),
-        capabilityScore: scorer(cp),
-      };
-    }
-  }
+  const bestPaid = bestPaidRanked ? {
+    id: selectionId(bestPaidRanked.model),
+    name: shortName(bestPaidRanked.model.id),
+    provider: providerLabel(bestPaidRanked.profile.provider),
+    costLabel: formatPricePer1M(bestPaidRanked.model),
+    capabilityScore: bestPaidRanked.profile.finalScore,
+    params: extractParamBillions(bestPaidRanked.model),
+  } : null;
 
-  // ── Budget pick (best quality paid model within monthly budget) ──
+  const cheapestPaidCandidate = capable
+    .map((model) => ({ model, profile: buildUnifiedModelProfile(model, taskType, rankingSignals) }))
+    .filter(({ model, profile }) =>
+      !profile.isFree &&
+      selectionId(model) !== currentModelId &&
+      model.id !== currentModelId &&
+      profile.finalScore >= Math.max(30, currentScore * 0.6)
+    )
+    .sort((a, b) => costPer1MTokens(a.model) - costPer1MTokens(b.model))[0];
+
+  const cheapestPaid = cheapestPaidCandidate ? {
+    id: selectionId(cheapestPaidCandidate.model),
+    name: shortName(cheapestPaidCandidate.model.id),
+    provider: providerLabel(cheapestPaidCandidate.profile.provider),
+    isFree: false,
+    costLabel: formatPricePer1M(cheapestPaidCandidate.model),
+    capabilityScore: cheapestPaidCandidate.profile.finalScore,
+  } : null;
+
+  // Always-on monthly estimate for current model (20 msgs/day × 30 days, ~500 in + ~800 out tokens each)
+  const MONTHLY_MSGS = 600; // 20/day × 30
+  const AVG_TOKENS = 1300;  // 500 prompt + 800 completion
+  const currentRawCost = costPer1MTokens(currentModel);
+  const estMonthlyCost = currentRawCost > 0 ? (currentRawCost / 1_000_000) * (MONTHLY_MSGS * AVG_TOKENS) : 0;
+
   let budgetPick = null;
-  let budgetEstMonthly = null; // estimated monthly cost for current model
+  let budgetEstMonthly = null;
   if (monthlyBudget > 0) {
-    // Estimate: avg 800 tokens/message (300 prompt + 500 completion), ~500 msgs/month = 400K tokens/month
     const MONTHLY_TOKENS = 400_000;
-    const maxCostPer1M = (monthlyBudget / MONTHLY_TOKENS) * 1_000_000; // max they can afford per 1M tokens
-
-    // Current model estimated monthly cost
+    const maxCostPer1M = (monthlyBudget / MONTHLY_TOKENS) * 1_000_000;
     const currentCostPer1M = costPer1MTokens(currentModel);
     budgetEstMonthly = (currentCostPer1M / 1_000_000) * MONTHLY_TOKENS;
 
     const budgetCandidates = capable
-      .filter((m) => !isFreeModel(m) && m.id !== currentModelId && costPer1MTokens(m) <= maxCostPer1M && costPer1MTokens(m) > 0)
-      .sort((a, b) => scorer(b) - scorer(a)); // best quality first
+      .map((model) => ({ model, profile: buildUnifiedModelProfile(model, taskType, rankingSignals) }))
+      .filter(({ model, profile }) =>
+        !profile.isFree &&
+        selectionId(model) !== currentModelId &&
+        model.id !== currentModelId &&
+        costPer1MTokens(model) <= maxCostPer1M &&
+        costPer1MTokens(model) > 0
+      )
+      .sort((a, b) => b.profile.finalScore - a.profile.finalScore);
 
-    if (budgetCandidates.length > 0) {
-      const bp = budgetCandidates[0];
-      const bpMonthlyCost = (costPer1MTokens(bp) / 1_000_000) * MONTHLY_TOKENS;
+    if (budgetCandidates[0]) {
+      const chosen = budgetCandidates[0];
       budgetPick = {
-        id: bp.id,
-        name: shortName(bp.id),
+        id: selectionId(chosen.model),
+        name: shortName(chosen.model.id),
+        provider: providerLabel(chosen.profile.provider),
         isFree: false,
-        costLabel: formatPricePer1M(bp),
-        capabilityScore: scorer(bp),
-        estMonthlyCost: bpMonthlyCost,
+        costLabel: formatPricePer1M(chosen.model),
+        capabilityScore: chosen.profile.finalScore,
+        estMonthlyCost: (costPer1MTokens(chosen.model) / 1_000_000) * MONTHLY_TOKENS,
       };
     }
   }
 
-  // ── Coding-specific suggestion ──
   let codingSuggestion = null;
   if (taskType === "coding") {
-    const codingModels = capable
-      .filter((m) => CODING_MODELS.some((p) => m.id.toLowerCase().includes(p)))
-      .sort((a, b) => codingScore(b) - codingScore(a));
-
-    const bestCodingFree = codingModels.filter(isFreeModel)[0] || null;
-    const bestCodingPaid = codingModels.filter((m) => !isFreeModel(m))[0] || null;
+    const codingRanked = rankModelsForTask(
+      capable.filter((m) => CODING_MODELS.some((p) => m.id.toLowerCase().includes(p))),
+      "coding",
+      rankingSignals
+    );
+    const bestCodingFree = codingRanked.find(({ profile }) => profile.isFree) || null;
+    const bestCodingPaid = codingRanked.find(({ profile }) => !profile.isFree) || null;
 
     codingSuggestion = {
-      bestFree: bestCodingFree ? { id: bestCodingFree.id, name: shortName(bestCodingFree.id) } : null,
-      bestPaid: bestCodingPaid ? { id: bestCodingPaid.id, name: shortName(bestCodingPaid.id), costLabel: formatPricePer1M(bestCodingPaid) } : null,
+      bestFree: bestCodingFree ? { id: selectionId(bestCodingFree.model), name: shortName(bestCodingFree.model.id) } : null,
+      bestPaid: bestCodingPaid ? { id: selectionId(bestCodingPaid.model), name: shortName(bestCodingPaid.model.id), provider: providerLabel(bestCodingPaid.profile.provider), costLabel: formatPricePer1M(bestCodingPaid.model) } : null,
     };
   }
 
   return {
-    // Cost of this response
     cost,
-    isFree,
+    isFree: currentProfile.isFree,
     costLabel: cost === 0 ? "Free" : (cost < 0.0001 ? "$" + cost.toFixed(6) : cost < 0.01 ? "$" + cost.toFixed(4) : "$" + cost.toFixed(2)),
     costPer1M: currentProfile.costLabel,
-    // Current model info
     currentModel: currentProfile,
-    // Task
     taskType,
     isCodingTask: taskType === "coding",
-    // Suggestions (null if none better)
+    bestModel: bestOverall ? {
+      id: selectionId(bestOverall.model),
+      name: shortName(bestOverall.model.id),
+      provider: providerLabel(bestOverall.profile.provider),
+      score: bestOverall.profile.finalScore,
+    } : null,
     cheaperAlternative,
     betterModel,
     cheapestPaid,
     bestFree,
     bestPaid,
+    bestValueModel: bestValueRanked ? {
+      id: selectionId(bestValueRanked.model),
+      name: shortName(bestValueRanked.model.id),
+      provider: providerLabel(bestValueRanked.profile.provider),
+      isFree: bestValueRanked.profile.isFree,
+      costLabel: formatPricePer1M(bestValueRanked.model),
+      score: bestValueRanked.profile.finalScore,
+    } : null,
     codingSuggestion,
-    // Budget
+    rankingSources: {
+      huggingFace: Object.keys(rankingSignals || {}).length > 0,
+      openRouter: models.some((m) => m._provider === "openrouter"),
+    },
+    providerPicks,
     budgetPick,
     monthlyBudget: monthlyBudget > 0 ? monthlyBudget : null,
     budgetEstMonthly,
-    // Preference applied
+    estMonthlyCost,
     preference,
   };
 }

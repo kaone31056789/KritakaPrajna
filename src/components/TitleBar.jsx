@@ -1,7 +1,7 @@
 import React from "react";
 import KPLogo from "./KPLogo";
 
-export default function TitleBar({ sidebarOpen, onToggleSidebar }) {
+export default function TitleBar({ sidebarOpen, onToggleSidebar, toggleShortcut = "Ctrl+B" }) {
   const minimize = () => window.electronAPI?.windowMinimize();
   const maximize = () => window.electronAPI?.windowMaximize();
   const close = () => window.electronAPI?.windowClose();
@@ -15,6 +15,7 @@ export default function TitleBar({ sidebarOpen, onToggleSidebar }) {
       <div className="flex items-center gap-1 pl-2" style={{ WebkitAppRegion: "no-drag" }}>
         <button
           onClick={onToggleSidebar}
+          title={`Toggle sidebar (${toggleShortcut})`}
           className="w-7 h-7 flex items-center justify-center rounded-md text-dark-400 hover:text-dark-200 hover:bg-white/[0.06] transition-colors cursor-pointer"
           aria-label="Toggle sidebar"
         >

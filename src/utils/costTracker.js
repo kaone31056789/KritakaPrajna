@@ -18,6 +18,41 @@ export function calculateCost(usage, modelPricing) {
   return (promptTokens * promptPrice) + (completionTokens * completionPrice);
 }
 
+function estimateTextTokens(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) return 0;
+  return Math.max(1, Math.ceil(normalized.length / 4));
+}
+
+function contentToText(content) {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (part?.type === "text") return part.text || "";
+        return "";
+      })
+      .join("\n");
+  }
+  return "";
+}
+
+export function estimateUsageFromMessages(messages = [], outputText = "") {
+  const promptTokens = messages.reduce((sum, message) => {
+    return sum + estimateTextTokens(contentToText(message?.content));
+  }, 0);
+
+  const completionTokens = estimateTextTokens(outputText);
+
+  return {
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    estimated: true,
+    cost: null,
+  };
+}
+
 /**
  * Check if a model is free (both prompt and completion pricing are 0).
  */

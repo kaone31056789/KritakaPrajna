@@ -1,3 +1,4 @@
+import { mapReasoningEffort, supportsReasoningModel } from "../utils/reasoningControls";
 const API_BASE = "https://openrouter.ai/api/v1";
 
 export async function fetchModels(apiKey) {
@@ -33,10 +34,15 @@ export async function fetchCredits(apiKey) {
  * Returns { text, usage } where usage is { prompt_tokens, completion_tokens } or null.
  * Pass an AbortController signal to allow cancellation.
  */
-export async function streamMessage(apiKey, model, messages, { onChunk, signal } = {}) {
+export async function streamMessage(apiKey, model, messages, { onChunk, signal, reasoningDepth } = {}) {
   const maxRetries = 3;
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const body = { model, messages, stream: true };
+    if (supportsReasoningModel({ id: model, _provider: "openrouter" })) {
+      body.reasoning = { effort: mapReasoningEffort(reasoningDepth || "balanced") };
+    }
+
     const res = await fetch(`${API_BASE}/chat/completions`, {
       method: "POST",
       headers: {
@@ -45,7 +51,7 @@ export async function streamMessage(apiKey, model, messages, { onChunk, signal }
         "HTTP-Referer": "https://kritakaprajna.app",
         "X-Title": "KritakaPrajna",
       },
-      body: JSON.stringify({ model, messages, stream: true }),
+      body: JSON.stringify(body),
       signal,
     });
 

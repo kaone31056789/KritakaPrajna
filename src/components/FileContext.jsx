@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from "framer-motion";
 const ease = [0.4, 0, 0.2, 1];
 const api = window.electronAPI;
 
+const BINARY_EXTS = new Set(["png","jpg","jpeg","gif","webp","ico","bmp","tiff","woff","woff2","ttf","eot","mp3","mp4","wav","zip","tar","gz","exe","dll","bin","so","dylib"]);
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function fileExt(name) {
@@ -208,27 +210,36 @@ export default function FileContext({ onAttach }) {
 
   const handleFileClick = useCallback(async (entry) => {
     if (!api) return;
-    setLoadingFile(true);
-    const result = await api.readFile(entry.path);
-    setPreview({
-      name: entry.name,
-      path: entry.path,
-      content: result.content,
-      size: result.size,
-      error: result.error,
-    });
-    setLoadingFile(false);
-  }, []);
+    const ext = fileExt(entry.name);
 
-  const handleAttach = useCallback(() => {
-    if (!preview?.content || !onAttach) return;
-    onAttach({
-      name: preview.name,
-      path: preview.path,
-      content: preview.content,
-    });
-    setPreview(null);
-  }, [preview, onAttach]);
+    if (BINARY_EXTS.has(ext)) {
+      setPreview({ name: entry.name, path: entry.path, content: null, size: 0, error: "Binary file — cannot attach as text" });
+      return;
+    }
+
+    setLoadingFile(true);
+    let content = null, size = 0, error = null, extra = "";
+
+    if (ext === "pdf") {
+      const result = await api.extractPdfText(entry.path);
+      error = result.error;
+      content = result.text || null;
+      size = content?.length || 0;
+      if (!error && result.pages) extra = ` (${result.pages} page${result.pages !== 1 ? "s" : ""})`;
+    } else {
+      const result = await api.readFile(entry.path);
+      error = result.error;
+      content = result.content || null;
+      size = result.size || 0;
+    }
+
+    setPreview({ name: entry.name, path: entry.path, content, size, error, extra });
+
+    if (content && !error && onAttach) {
+      onAttach({ name: entry.name, path: entry.path, content });
+    }
+    setLoadingFile(false);
+  }, [onAttach]);
 
   // Not in Electron
   if (!api) {
@@ -358,21 +369,15 @@ export default function FileContext({ onAttach }) {
                     <span className={`text-[9px] font-semibold rounded px-1.5 py-0.5 ${extColor(preview.name)} bg-dark-700/50`}>
                       {extLabel(preview.name) || "FILE"}
                     </span>
-                    <span className="text-[10px] text-dark-500">{formatSize(preview.size)}</span>
+                    <span className="text-[10px] text-dark-500">{formatSize(preview.size)}{preview.extra || ""}</span>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
-                    <motion.button
-                      type="button"
-                      onClick={handleAttach}
-                      whileHover={{ scale: 1.03 }}
-                      whileTap={{ scale: 0.97 }}
-                      className="flex items-center gap-1 text-[10px] font-semibold text-dark-950 bg-gradient-to-r from-saffron-500 to-saffron-400 hover:from-saffron-400 hover:to-saffron-300 rounded-lg px-2.5 py-1.5 cursor-pointer transition-all shadow-sm shadow-saffron-500/20"
-                    >
+                    <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 rounded-lg px-2.5 py-1.5 border border-emerald-500/20">
                       <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                       </svg>
-                      Attach
-                    </motion.button>
+                      Attached
+                    </span>
                     <button
                       type="button"
                       onClick={() => setPreview(null)}

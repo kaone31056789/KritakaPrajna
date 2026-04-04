@@ -2,7 +2,9 @@ const { app, BrowserWindow, ipcMain, dialog, Menu, safeStorage, session } = requ
 const path = require("path");
 const fs = require("fs");
 const Store = require("electron-store");
-const { autoUpdater } = require("electron-updater");
+// electron-updater is lazy-required inside setupAutoUpdater so it initializes
+// after app.whenReady() — importing at top level causes a crash in dev mode.
+let autoUpdater;
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 
@@ -10,7 +12,20 @@ const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 const store = new Store({
   name: "config-v2",
   schema: {
-    apiKeyEncrypted: { type: "string", default: "" },
+    apiKeyEncrypted:         { type: "string", default: "" }, // OpenRouter (legacy)
+    openaiKeyEncrypted:      { type: "string", default: "" },
+    anthropicKeyEncrypted:   { type: "string", default: "" },
+    huggingfaceKeyEncrypted: { type: "string", default: "" },
+    keyboardShortcuts:       { type: "object", default: {} },
+    userMemory:              {
+      type: "object",
+      default: {
+        preferences: [],
+        coding: [],
+        context: [],
+        autoMode: true,
+      },
+    },
   },
 });
 
@@ -27,8 +42,7 @@ function getApiKey() {
 
 function setApiKey(key) {
   if (!safeStorage.isEncryptionAvailable()) {
-    store.set("apiKeyEncrypted", key);
-    return;
+    throw new Error("Secure storage is not available on this system. API keys cannot be saved.");
   }
   store.set("apiKeyEncrypted", safeStorage.encryptString(key).toString("base64"));
 }
@@ -37,19 +51,85 @@ function removeApiKey() {
   store.delete("apiKeyEncrypted");
 }
 
-// One-time migration: read old AES-encrypted store and carry the key over to safeStorage.
-// Must be called after app.whenReady() so safeStorage is available.
-function migrateOldStore() {
-  if (store.get("apiKeyEncrypted")) return; // already migrated
+// ── Multi-provider key helpers ───────────────────────────────────────────────
+const PROVIDER_KEY_MAP = {
+  openrouter:   "apiKeyEncrypted",
+  openai:       "openaiKeyEncrypted",
+  anthropic:    "anthropicKeyEncrypted",
+  huggingface:  "huggingfaceKeyEncrypted",
+};
+
+function getProviderKey(provider) {
+  const field = PROVIDER_KEY_MAP[provider];
+  if (!field) return null;
+  const encrypted = store.get(field);
+  if (!encrypted) return null;
+  if (!safeStorage.isEncryptionAvailable()) return encrypted;
   try {
-    const oldStore = new Store({ name: "config", encryptionKey: "kritakaprajna-v1" });
-    const oldKey = oldStore.get("apiKey");
-    if (oldKey) setApiKey(oldKey);
-    oldStore.clear();
+    return safeStorage.decryptString(Buffer.from(encrypted, "base64"));
   } catch {
-    // old store missing or unreadable — nothing to migrate
+    return null;
   }
 }
+
+function setProviderKey(provider, key) {
+  const field = PROVIDER_KEY_MAP[provider];
+  if (!field) return;
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error("Secure storage is not available on this system. API keys cannot be saved.");
+  }
+  store.set(field, safeStorage.encryptString(key).toString("base64"));
+}
+
+function removeProviderKey(provider) {
+  const field = PROVIDER_KEY_MAP[provider];
+  if (field) store.delete(field);
+}
+
+function getAllProviderKeys() {
+  return {
+    openrouter:  getProviderKey("openrouter"),
+    openai:      getProviderKey("openai"),
+    anthropic:   getProviderKey("anthropic"),
+    huggingface: getProviderKey("huggingface"),
+  };
+}
+
+function getKeyboardShortcuts() {
+  return store.get("keyboardShortcuts") || {};
+}
+
+function setKeyboardShortcuts(shortcuts) {
+  store.set("keyboardShortcuts", shortcuts || {});
+}
+
+function resetKeyboardShortcuts() {
+  store.delete("keyboardShortcuts");
+}
+
+function getUserMemory() {
+  const memory = store.get("userMemory");
+  return {
+    preferences: Array.isArray(memory?.preferences) ? memory.preferences : [],
+    coding: Array.isArray(memory?.coding) ? memory.coding : [],
+    context: Array.isArray(memory?.context) ? memory.context : [],
+    autoMode: memory?.autoMode !== false,
+  };
+}
+
+function setUserMemory(memory) {
+  store.set("userMemory", {
+    preferences: Array.isArray(memory?.preferences) ? memory.preferences : [],
+    coding: Array.isArray(memory?.coding) ? memory.coding : [],
+    context: Array.isArray(memory?.context) ? memory.context : [],
+    autoMode: memory?.autoMode !== false,
+  });
+}
+
+function resetUserMemory() {
+  store.delete("userMemory");
+}
+
 
 // Tracks the folder the user explicitly opened — used to scope file write access
 let allowedBasePath = null;
@@ -70,7 +150,7 @@ function createWindow() {
             "script-src 'self'; " +
             "style-src 'self' 'unsafe-inline'; " +
             "img-src 'self' data: blob:; " +
-            "connect-src https://openrouter.ai; " +
+            "connect-src https://openrouter.ai https://api.openai.com https://api.anthropic.com https://api-inference.huggingface.co https://router.huggingface.co https://huggingface.co; " +
             "font-src 'self' data:;",
           ],
         },
@@ -101,6 +181,9 @@ function createWindow() {
   }
 }
 
+// ── IPC handlers — registered inside app.whenReady() to guarantee ipcMain is live
+function registerIpcHandlers() {
+
 // ── IPC: pick a folder ──────────────────────────────────────────────────────
 ipcMain.handle("select-folder", async () => {
   const result = await dialog.showOpenDialog({
@@ -111,8 +194,17 @@ ipcMain.handle("select-folder", async () => {
   return allowedBasePath;
 });
 
+// ── Path validation helper ───────────────────────────────────────────────────
+function isPathAllowed(targetPath) {
+  if (!allowedBasePath) return false;
+  const resolved = path.resolve(targetPath);
+  const base = path.resolve(allowedBasePath);
+  return resolved === base || resolved.startsWith(base + path.sep);
+}
+
 // ── IPC: read directory tree (1 level deep for lazy loading) ────────────────
 ipcMain.handle("read-dir", async (_event, dirPath) => {
+  if (!isPathAllowed(dirPath)) return [];
   try {
     const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
     return entries
@@ -134,6 +226,7 @@ ipcMain.handle("read-dir", async (_event, dirPath) => {
 
 // ── IPC: read a file (with size limit) ──────────────────────────────────────
 ipcMain.handle("read-file", async (_event, filePath) => {
+  if (!isPathAllowed(filePath)) return { error: "Access denied: file is outside the opened folder", content: null, size: 0 };
   try {
     const stat = await fs.promises.stat(filePath);
     if (stat.size > MAX_FILE_SIZE) {
@@ -148,14 +241,49 @@ ipcMain.handle("read-file", async (_event, filePath) => {
 
 // ── IPC: extract text from PDF ──────────────────────────────────────────────
 ipcMain.handle("extract-pdf-text", async (_event, filePath) => {
+  if (!isPathAllowed(filePath)) return { error: "Access denied: file is outside the opened folder", text: null };
   try {
     const stat = await fs.promises.stat(filePath);
     if (stat.size > MAX_FILE_SIZE) {
       return { error: "PDF too large (max 5 MB)", text: null };
     }
-    const pdfParse = require("pdf-parse");
+    // pdf-parse uses PDF.js which needs DOMMatrix — polyfill it for Node/Electron main process
+    if (typeof globalThis.DOMMatrix === "undefined") {
+      globalThis.DOMMatrix = class DOMMatrix {
+        constructor(init) {
+          this.a=1;this.b=0;this.c=0;this.d=1;this.e=0;this.f=0;
+          this.m11=1;this.m12=0;this.m13=0;this.m14=0;
+          this.m21=0;this.m22=1;this.m23=0;this.m24=0;
+          this.m31=0;this.m32=0;this.m33=1;this.m34=0;
+          this.m41=0;this.m42=0;this.m43=0;this.m44=1;
+          if (Array.isArray(init) && init.length === 6) {
+            [this.a,this.b,this.c,this.d,this.e,this.f]=init;
+          }
+        }
+        multiply() { return new globalThis.DOMMatrix(); }
+        translate(x=0,y=0) { return new globalThis.DOMMatrix([this.a,this.b,this.c,this.d,this.e+x,this.f+y]); }
+        scale(sx=1,sy=1) { return new globalThis.DOMMatrix([this.a*sx,this.b,this.c,this.d*sy,this.e,this.f]); }
+        rotate() { return new globalThis.DOMMatrix(); }
+        transformPoint(p={}) { return { x: (p.x||0)*this.a+this.e, y: (p.y||0)*this.d+this.f, w: p.w||1 }; }
+        static fromMatrix(m) { return new globalThis.DOMMatrix(); }
+        static fromFloat32Array(a) { return new globalThis.DOMMatrix(Array.from(a)); }
+        static fromFloat64Array(a) { return new globalThis.DOMMatrix(Array.from(a)); }
+      };
+    }
+    const _pdfMod = require("pdf-parse");
+    const pdfParse = typeof _pdfMod === "function" ? _pdfMod : (_pdfMod.default || _pdfMod);
     const buffer = await fs.promises.readFile(filePath);
-    const data = await pdfParse(buffer);
+    const pagerender = (pageData) =>
+      pageData.getTextContent().then((tc) => {
+        let lastY = null, text = "";
+        for (const item of tc.items) {
+          if (lastY !== null && item.transform[5] !== lastY) text += "\n";
+          text += item.str;
+          lastY = item.transform[5];
+        }
+        return text;
+      });
+    const data = await pdfParse(buffer, { pagerender });
     return { error: null, text: data.text, pages: data.numpages };
   } catch (err) {
     return { error: err.message, text: null };
@@ -186,6 +314,18 @@ ipcMain.handle("store-get-key", () => getApiKey());
 ipcMain.handle("store-set-key", (_event, key) => { setApiKey(key); });
 ipcMain.handle("store-remove-key", () => { removeApiKey(); });
 
+// ── IPC: multi-provider key management ──────────────────────────────────────
+ipcMain.handle("provider-get-key", (_event, provider) => getProviderKey(provider));
+ipcMain.handle("provider-set-key", (_event, provider, key) => { setProviderKey(provider, key); });
+ipcMain.handle("provider-remove-key", (_event, provider) => { removeProviderKey(provider); });
+ipcMain.handle("providers-get-all", () => getAllProviderKeys());
+ipcMain.handle("shortcuts-get-all", () => getKeyboardShortcuts());
+ipcMain.handle("shortcuts-set-all", (_event, shortcuts) => { setKeyboardShortcuts(shortcuts); });
+ipcMain.handle("shortcuts-reset-all", () => { resetKeyboardShortcuts(); });
+ipcMain.handle("memory-get", () => getUserMemory());
+ipcMain.handle("memory-set", (_event, memory) => { setUserMemory(memory); });
+ipcMain.handle("memory-reset", () => { resetUserMemory(); });
+
 // ── IPC: window controls ────────────────────────────────────────────────────
 ipcMain.handle("window-minimize", () => { if (mainWindow) mainWindow.minimize(); });
 ipcMain.handle("window-maximize", () => {
@@ -194,8 +334,18 @@ ipcMain.handle("window-maximize", () => {
 });
 ipcMain.handle("window-close", () => { if (mainWindow) mainWindow.close(); });
 
+// ── IPC: manual update check ────────────────────────────────────────────────
+ipcMain.handle("check-for-updates", () => {
+  autoUpdater?.checkForUpdates().catch(() => {});
+});
+
+ipcMain.handle("get-app-version", () => app.getVersion());
+
+} // end registerIpcHandlers
+
 // ── Auto-updater setup ──────────────────────────────────────────────────────
 function setupAutoUpdater() {
+  autoUpdater = require("electron-updater").autoUpdater;
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
 
@@ -261,17 +411,15 @@ function sendUpdateStatus(status, data) {
   }
 }
 
-// ── IPC: manual update check ────────────────────────────────────────────────
-ipcMain.handle("check-for-updates", () => {
-  autoUpdater.checkForUpdates().catch(() => {});
-});
-
-ipcMain.handle("get-app-version", () => app.getVersion());
+// Store installs (WindowsApps path) are updated by the Microsoft Store — skip electron-updater
+function isStoreBuild() {
+  return app.getPath("exe").includes("WindowsApps");
+}
 
 app.whenReady().then(() => {
-  migrateOldStore();
+  registerIpcHandlers();
   createWindow();
-  if (app.isPackaged) {
+  if (app.isPackaged && !isStoreBuild()) {
     setupAutoUpdater();
   }
 });

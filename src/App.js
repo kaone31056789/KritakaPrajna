@@ -12,62 +12,110 @@ const pageTransition = {
   transition: { duration: 0.25, ease: [0.4, 0, 0.2, 1] },
 };
 
+const EMPTY_PROVIDERS = { openrouter: null, openai: null, anthropic: null, huggingface: null };
+
+async function loadAllProviderKeys() {
+  if (window.electronAPI?.getAllProviderKeys) {
+    return await window.electronAPI.getAllProviderKeys();
+  }
+  // Browser dev fallback — migrate from localStorage single key
+  return {
+    openrouter:  localStorage.getItem("openrouter_key")       || null,
+    openai:      localStorage.getItem("openai_key")           || null,
+    anthropic:   localStorage.getItem("anthropic_key")        || null,
+    huggingface: localStorage.getItem("huggingface_key")      || null,
+  };
+}
+
+async function saveAllProviderKeys(providers) {
+  for (const [provider, key] of Object.entries(providers)) {
+    if (key) {
+      if (window.electronAPI?.setProviderKey) {
+        await window.electronAPI.setProviderKey(provider, key);
+      } else {
+        localStorage.setItem(`${provider}_key`, key);
+      }
+    }
+  }
+}
+
+async function removeProviderKey(provider) {
+  if (window.electronAPI?.removeProviderKey) {
+    await window.electronAPI.removeProviderKey(provider);
+  } else {
+    localStorage.removeItem(`${provider}_key`);
+  }
+}
+
+function hasAnyKey(providers) {
+  return Object.values(providers).some((k) => !!k);
+}
+
 export default function App() {
-  const [apiKey, setApiKey] = useState(null);
-  const [keyLoaded, setKeyLoaded] = useState(false);
+  const [providers, setProviders] = useState(EMPTY_PROVIDERS);
+  const [keysLoaded, setKeysLoaded] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
 
-  // Load API key from secure store on mount
+  // Load all provider keys on mount
   useEffect(() => {
-    const load = async () => {
-      if (window.electronAPI?.getApiKey) {
-        const key = await window.electronAPI.getApiKey();
-        if (key) setApiKey(key);
-      } else {
-        // Fallback for browser dev (migrate from localStorage)
-        const key = localStorage.getItem("openrouter_key");
-        if (key) setApiKey(key);
-      }
-      setKeyLoaded(true);
-    };
-    load();
+    loadAllProviderKeys().then((keys) => {
+      setProviders({ ...EMPTY_PROVIDERS, ...keys });
+      setKeysLoaded(true);
+    });
   }, []);
 
-  const handleSaveKey = async (key) => {
-    if (window.electronAPI?.setApiKey) {
-      await window.electronAPI.setApiKey(key);
-    } else {
-      localStorage.setItem("openrouter_key", key);
-    }
-    setApiKey(key);
-  };
+  const handleSaveProviders = useCallback(async (newKeys) => {
+    await saveAllProviderKeys(newKeys);
+    // Re-load to get the fully merged state (existing + new)
+    const merged = await loadAllProviderKeys();
+    setProviders({ ...EMPTY_PROVIDERS, ...merged });
+  }, []);
 
-  const handleResetKey = async () => {
-    if (window.electronAPI?.removeApiKey) {
-      await window.electronAPI.removeApiKey();
+  const handleSaveProviderKey = useCallback(async (provider, key) => {
+    if (window.electronAPI?.setProviderKey) {
+      await window.electronAPI.setProviderKey(provider, key);
     } else {
-      localStorage.removeItem("openrouter_key");
+      localStorage.setItem(`${provider}_key`, key);
     }
-    setApiKey(null);
-  };
+    setProviders((prev) => ({ ...prev, [provider]: key }));
+  }, []);
+
+  const handleRemoveProviderKey = useCallback(async (provider) => {
+    await removeProviderKey(provider);
+    setProviders((prev) => ({ ...prev, [provider]: null }));
+  }, []);
+
+  const handleResetAll = useCallback(async () => {
+    for (const p of Object.keys(EMPTY_PROVIDERS)) {
+      await removeProviderKey(p);
+    }
+    setProviders(EMPTY_PROVIDERS);
+  }, []);
 
   const handleSplashDone = useCallback(() => setShowSplash(false), []);
 
+  const ready = keysLoaded && !showSplash;
+
   return (
     <AnimatePresence mode="wait">
-      {showSplash || !keyLoaded ? (
+      {!ready ? (
         <motion.div key="splash" {...pageTransition}>
           <SplashScreen onDone={handleSplashDone} />
         </motion.div>
-      ) : !apiKey ? (
+      ) : !hasAnyKey(providers) ? (
         <motion.div key="apikey" {...pageTransition}>
-          <ApiKeyScreen onSave={handleSaveKey} />
+          <ApiKeyScreen onSave={handleSaveProviders} initialProviders={providers} />
         </motion.div>
       ) : (
         <motion.div key="chat" {...pageTransition} className="h-screen flex flex-col">
           <UpdateBanner />
           <div className="flex-1 min-h-0">
-            <ChatApp apiKey={apiKey} onSaveKey={handleSaveKey} onResetKey={handleResetKey} />
+            <ChatApp
+              providers={providers}
+              onSaveProviderKey={handleSaveProviderKey}
+              onRemoveProviderKey={handleRemoveProviderKey}
+              onResetAll={handleResetAll}
+            />
           </div>
         </motion.div>
       )}

@@ -11,6 +11,12 @@ const COOLDOWN_MS = 2 * 60 * 1000; // 2 min cooldown after marking unavailable
 /** In-memory store for model health */
 const modelHealth = new Map();
 
+function modelKey(modelOrId) {
+  if (!modelOrId) return "";
+  if (typeof modelOrId === "string") return modelOrId;
+  return modelOrId._selectionId || modelOrId.id;
+}
+
 function getHealth(modelId) {
   if (!modelHealth.has(modelId)) {
     modelHealth.set(modelId, {
@@ -139,16 +145,16 @@ export function getModelHealth(modelId) {
  * @returns {object|null} Best available model or null
  */
 export function findFallbackModel(models, currentModelId, taskType, qualityScorer) {
-  const currentModel = models.find((m) => m.id === currentModelId);
+  const currentModel = models.find((m) => modelKey(m) === currentModelId || m.id === currentModelId);
   const currentIsFree =
     currentModel &&
     Number(currentModel.pricing?.prompt) === 0 &&
     Number(currentModel.pricing?.completion) === 0;
 
   const available = models.filter((m) => {
-    if (m.id === currentModelId) return false;
+    if (modelKey(m) === currentModelId || m.id === currentModelId) return false;
     if (m.id.startsWith("openrouter/")) return false;
-    if (isModelUnavailable(m.id)) return false;
+    if (isModelUnavailable(modelKey(m))) return false;
     // Stay in the same pricing tier: free → free, paid → paid
     const mIsFree = Number(m.pricing?.prompt) === 0 && Number(m.pricing?.completion) === 0;
     if (currentIsFree && !mIsFree) return false;
@@ -177,7 +183,7 @@ export function findCheapestModel(models, taskType, capabilityFilter) {
 
   // Filter out unavailable and OpenRouter auto/meta models
   capable = capable.filter((m) =>
-    !isModelUnavailable(m.id) && !m.id.startsWith("openrouter/")
+    !isModelUnavailable(modelKey(m)) && !m.id.startsWith("openrouter/")
   );
   if (capable.length === 0) return null;
 

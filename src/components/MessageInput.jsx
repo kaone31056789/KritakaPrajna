@@ -1,11 +1,24 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { eventToShortcut, normalizeShortcutString } from "../utils/keyboardShortcuts";
 
 const ease = [0.4, 0, 0.2, 1];
 
 const ACCEPTED_TYPES = ".png,.jpg,.jpeg,.gif,.webp,.txt,.js,.jsx,.ts,.tsx,.py,.json,.md,.css,.html,.xml,.yaml,.yml,.csv,.pdf";
 
-export default function MessageInput({ onSend, onStop, onUpload, loading, disabled, commandHints: externalHints, onTextChange }) {
+export default function MessageInput({
+  onSend,
+  onStop,
+  onUpload,
+  loading,
+  disabled,
+  commandHints: externalHints,
+  onTextChange,
+  showReasoningControl = false,
+  reasoningDepth = "balanced",
+  onReasoningDepthChange,
+  sendShortcut = "Ctrl+Enter",
+}) {
   const SLASH_COMMANDS = externalHints || [
     { cmd: "/explain", desc: "Explain a file", arg: "<file>" },
     { cmd: "/fix", desc: "Find & fix bugs", arg: "<file>" },
@@ -32,7 +45,13 @@ export default function MessageInput({ onSend, onStop, onUpload, loading, disabl
   };
 
   const handleKeyDown = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    const shortcut = eventToShortcut(e);
+    if (shortcut && shortcut === normalizeShortcutString(sendShortcut)) {
+      e.preventDefault();
+      handleSubmit(e);
+      return;
+    }
+    if (e.key === "Enter" && !e.shiftKey && normalizeShortcutString(sendShortcut) === "Ctrl+Enter" && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
       handleSubmit(e);
     }
@@ -65,6 +84,43 @@ export default function MessageInput({ onSend, onStop, onUpload, loading, disabl
   return (
     <div className="shrink-0 pb-5 pt-2 px-4">
       <div className="max-w-3xl mx-auto relative">
+        {showReasoningControl && (
+          <div className="mb-2 px-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className="text-[11px] text-dark-400"
+                title="Controls how deeply the AI thinks before answering"
+              >
+                Reasoning:
+              </span>
+              {[
+                { id: "fast", label: "Fast" },
+                { id: "balanced", label: "Balanced" },
+                { id: "deep", label: "Deep" },
+              ].map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  title="Controls how deeply the AI thinks before answering"
+                  onClick={() => onReasoningDepthChange?.(option.id)}
+                  className={`px-3 py-1.5 rounded-full text-[11px] font-medium border transition-all cursor-pointer ${
+                    reasoningDepth === option.id
+                      ? "text-saffron-200 border-saffron-400/35 bg-saffron-500/14 shadow-[0_0_18px_rgba(245,158,11,0.12)]"
+                      : "text-dark-400 border-white/[0.08] bg-white/[0.02] hover:text-dark-200 hover:bg-white/[0.04]"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            {reasoningDepth === "deep" && (
+              <p className="mt-1.5 text-[10px] text-saffron-300/80">
+                Deep reasoning may increase cost and response time.
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Command hints popover */}
         <AnimatePresence>
           {commandHints.length > 0 && (
@@ -164,6 +220,7 @@ export default function MessageInput({ onSend, onStop, onUpload, loading, disabl
               transition={{ duration: 0.15, ease }}
               className="w-10 h-10 flex items-center justify-center bg-saffron-500 disabled:opacity-25 disabled:hover:bg-saffron-500 text-dark-950 rounded-full cursor-pointer shrink-0"
               aria-label="Send message"
+              title={`Send (${sendShortcut})`}
             >
               <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 10.5L12 3m0 0l7.5 7.5M12 3v18" />
