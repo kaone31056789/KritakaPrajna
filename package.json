@@ -63,8 +63,9 @@
       "target": "nsis",
       "icon": "assets/logo.ico",
       "artifactName": "${productName}-Setup-${version}.${ext}",
-      "signingHashAlgorithms": ["sha256"],
-      "signDlls": false
+      "signtoolOptions": {
+        "signingHashAlgorithms": ["sha256"]
+      }
     },
     "nsis": {
       "oneClick": false,
