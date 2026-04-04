@@ -227,6 +227,51 @@ export async function fetchModels(apiKey) {
   }
 }
 
+/** Image generation models available on Hugging Face */
+export const IMAGE_GEN_MODELS = [
+  { id: "black-forest-labs/FLUX.1-schnell", name: "FLUX.1 Schnell (Free)", _provider: "huggingface", _isImageGen: true, pricing: { prompt: "0", completion: "0" }, context_length: 0 },
+  { id: "black-forest-labs/FLUX.1-dev",     name: "FLUX.1 Dev",            _provider: "huggingface", _isImageGen: true, pricing: { prompt: "0", completion: "0" }, context_length: 0 },
+  { id: "stabilityai/stable-diffusion-xl-base-1.0", name: "SDXL Base",    _provider: "huggingface", _isImageGen: true, pricing: { prompt: "0", completion: "0" }, context_length: 0 },
+];
+
+
+/**
+ * Shared helper: call HF hf-inference router with binary response.
+ * Uses router.huggingface.co (same domain as chat — no CORS/CSP issues).
+ */
+async function hfInferenceBinary(apiKey, modelId, prompt) {
+  const res = await fetch(`https://router.huggingface.co/hf-inference/models/${modelId}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "x-wait-for-model": "true",
+    },
+    body: JSON.stringify({ inputs: prompt }),
+  });
+
+  if (!res.ok) {
+    const txt = await res.text();
+    let msg = txt;
+    try { msg = JSON.parse(txt).error || txt; } catch {}
+    throw new Error(msg);
+  }
+
+  const contentType = res.headers.get("content-type") || "application/octet-stream";
+  const buffer = await res.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+  return { dataUrl: `data:${contentType};base64,${btoa(binary)}`, contentType };
+}
+
+/** Generate an image via HuggingFace hf-inference router */
+export async function generateImage(apiKey, modelId, prompt) {
+  const { dataUrl } = await hfInferenceBinary(apiKey, modelId, prompt);
+  return { imageUrl: dataUrl };
+}
+
+
 /**
  * Stream a chat completion via HuggingFace Inference API (OpenAI-compatible).
  * Returns { text, usage } to match the other providers.

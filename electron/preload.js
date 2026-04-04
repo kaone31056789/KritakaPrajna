@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   readDir: (dirPath) => ipcRenderer.invoke("read-dir", dirPath),
   readFile: (filePath) => ipcRenderer.invoke("read-file", filePath),
   extractPdfText: (filePath) => ipcRenderer.invoke("extract-pdf-text", filePath),
+  extractPdfTextFromBuffer: (arrayBuffer) => ipcRenderer.invoke("extract-pdf-text-buffer", arrayBuffer),
   writeFile: (filePath, content) => ipcRenderer.invoke("write-file", filePath, content),
   // Window controls
   windowMinimize: () => ipcRenderer.invoke("window-minimize"),

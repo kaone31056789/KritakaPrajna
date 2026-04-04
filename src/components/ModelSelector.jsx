@@ -375,7 +375,6 @@ export default function ModelSelector({ models, selected, onSelect, selectedMode
     { id: "image-to-text", label: "Image to Text" },
     { id: "any-to-any", label: "Any to Any" },
     { id: "image-to-image", label: "Image to Image" },
-    { id: "text-to-video", label: "Text to Video" },
     { id: "text-to-speech", label: "Text to Speech" },
     { id: "more", label: "More" },
   ];

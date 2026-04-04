@@ -25,58 +25,103 @@ export const MEMORY_CATEGORY_DEFS = [
   },
 ];
 
+// Detect language from code fences (```python, ```js, etc.) or natural mentions
 const LANGUAGE_PATTERNS = [
-  { pattern: /\bpython\b/i, memory: "User prefers Python" },
-  { pattern: /\btypescript\b|\btype script\b/i, memory: "User prefers TypeScript" },
-  { pattern: /\bjavascript\b|\bjava script\b/i, memory: "User prefers JavaScript" },
-  { pattern: /\bc\+\+\b|\bcpp\b/i, memory: "User prefers C++" },
-  { pattern: /\bc#\b|\bc sharp\b/i, memory: "User prefers C#" },
-  { pattern: /\bjava\b/i, memory: "User prefers Java" },
-  { pattern: /\brust\b/i, memory: "User prefers Rust" },
-  { pattern: /\bgo\b|\bgolang\b/i, memory: "User prefers Go" },
+  { pattern: /```python|in python|using python|write.*python|python code|python script|\.py\b/i, memory: "User prefers Python" },
+  { pattern: /```typescript|in typescript|using typescript|\.tsx?\b|tsconfig/i, memory: "User prefers TypeScript" },
+  { pattern: /```javascript|in javascript|using javascript|\.jsx?\b|node\.?js|npm |yarn /i, memory: "User prefers JavaScript" },
+  { pattern: /```cpp|```c\+\+|\bc\+\+\b|\bcpp\b/i, memory: "User prefers C++" },
+  { pattern: /```csharp|```c#|\bc#\b|\.net\b|asp\.net/i, memory: "User prefers C#" },
+  { pattern: /```java\b|in java\b|using java\b|spring boot|\.java\b/i, memory: "User prefers Java" },
+  { pattern: /```rust|in rust|using rust|\.rs\b|cargo\.toml/i, memory: "User prefers Rust" },
+  { pattern: /```go\b|in golang|using go\b|\.go\b|go mod/i, memory: "User prefers Go" },
+  { pattern: /```php|in php|using php|laravel|symfony|\.php\b/i, memory: "User prefers PHP" },
+  { pattern: /```ruby|in ruby|using ruby|rails|\.rb\b/i, memory: "User prefers Ruby" },
+  { pattern: /```swift|in swift|using swift|swiftui|xcode/i, memory: "User prefers Swift" },
+  { pattern: /```kotlin|in kotlin|using kotlin|android studio/i, memory: "User prefers Kotlin" },
+  { pattern: /```sql|in sql|using sql|postgresql|mysql|sqlite/i, memory: "User prefers SQL" },
+];
+
+// Detect framework/stack from natural usage
+const FRAMEWORK_PATTERNS = [
+  { pattern: /\breact\b.*\b(component|hook|jsx|useState|useEffect)\b|\b(component|hook|jsx|useState|useEffect)\b.*\breact\b/i, memory: "User works with React" },
+  { pattern: /\bnext\.?js\b|nextjs|app router|server component/i, memory: "User works with Next.js" },
+  { pattern: /\bvue\b.*\b(component|composable|v-model)\b|\bvuejs\b/i, memory: "User works with Vue" },
+  { pattern: /\bangular\b.*\b(component|service|module|directive)\b/i, memory: "User works with Angular" },
+  { pattern: /\bdjango\b|\bflask\b|\bfastapi\b/i, memory: "User works with Python web frameworks" },
+  { pattern: /\belectron\b.*\b(ipc|renderer|main process)\b/i, memory: "User is building an Electron app" },
+  { pattern: /\bdocker\b|\bkubernetes\b|\bk8s\b/i, memory: "User works with containers/DevOps" },
 ];
 
 const AUTO_MEMORY_RULES = {
   preferences: [
     {
-      pattern: /\b(keep it short|short answers?|brief answers?|be concise|concise reply|keep answers concise)\b/i,
+      pattern: /\b(keep it short|short answers?|brief|be concise|concise|tldr|don'?t explain|no explanation)\b/i,
       memory: "User prefers short answers",
     },
     {
-      pattern: /\b(step[- ]by[- ]step|walk me through|explain step by step)\b/i,
+      pattern: /\b(step[- ]by[- ]step|walk me through|explain.*step|one step at a time|break it down)\b/i,
       memory: "User prefers step-by-step explanations",
     },
     {
-      pattern: /\b(detailed answers?|in[- ]depth explanation|explain in detail|go deeper)\b/i,
+      pattern: /\b(detailed|in[- ]depth|go deeper|explain more|elaborate|thorough)\b/i,
       memory: "User prefers detailed explanations",
     },
     {
-      pattern: /\b(just the code|code only|only code|skip the explanation)\b/i,
+      pattern: /\b(just the code|code only|only.*code|skip.*explanation|no explanation|show.*code)\b/i,
       memory: "User prefers code-first answers",
+    },
+    {
+      pattern: /\b(in (hindi|spanish|french|german|arabic|portuguese|japanese|chinese|korean))\b/i,
+      memory: (m) => `User prefers responses in ${m[2].charAt(0).toUpperCase() + m[2].slice(1)}`,
     },
   ],
   coding: [
     {
-      pattern: /\b(with comments|add comments|include comments|comment the code)\b/i,
+      pattern: /\b(with comments|add comments|include comments|comment the code|commented)\b/i,
       memory: "User likes code with comments",
     },
     {
-      pattern: /\b(clean code|readable code|best practices|well-structured code)\b/i,
+      pattern: /\b(clean code|readable|best practices|well[- ]structured|maintainable)\b/i,
       memory: "User prefers clean, readable code",
+    },
+    {
+      pattern: /\b(functional|arrow functions?|no class|avoid class)\b/i,
+      memory: "User prefers functional programming style",
+    },
+    {
+      pattern: /\b(async\/await|promises?|async functions?)\b/i,
+      memory: "User prefers async/await patterns",
     },
   ],
   context: [
     {
-      pattern: /\b(dsa|data structures and algorithms|leetcode)\b/i,
-      memory: "User is preparing for DSA",
+      pattern: /\b(dsa|data structures?|algorithms?|leetcode|hackerrank|competitive programming)\b/i,
+      memory: "User is practicing DSA / competitive programming",
     },
     {
-      pattern: /\b(building an ai app|building an ai chatbot|multi ai chatbot|ai assistant app)\b/i,
-      memory: "User is building an AI app",
+      pattern: /\b(ai app|ai chatbot|ai assistant|llm app|openrouter|openai api|anthropic api|gemini api)\b/i,
+      memory: "User is building an AI application",
     },
     {
-      pattern: /\b(interview prep|coding interview|job interview)\b/i,
+      pattern: /\b(interview|interview prep|coding interview|job interview|hiring)\b/i,
       memory: "User is preparing for coding interviews",
+    },
+    {
+      pattern: /\b(machine learning|ml model|deep learning|neural network|training|pytorch|tensorflow)\b/i,
+      memory: "User works in machine learning / AI",
+    },
+    {
+      pattern: /\b(startup|side project|freelance|client project|production app)\b/i,
+      memory: "User is working on a professional/production project",
+    },
+    {
+      pattern: /\b(beginner|just started|learning to code|new to programming|student)\b/i,
+      memory: "User is learning to code",
+    },
+    {
+      pattern: /\b(senior|experienced|years of experience|professional developer|software engineer)\b/i,
+      memory: "User is an experienced developer",
     },
   ],
 };
@@ -211,7 +256,10 @@ export function detectMemoryFromMessage(text) {
   const detected = normalizeUserMemory(DEFAULT_USER_MEMORY);
 
   for (const rule of AUTO_MEMORY_RULES.preferences) {
-    if (rule.pattern.test(value)) detected.preferences.push(rule.memory);
+    const m = value.match(rule.pattern);
+    if (m) {
+      detected.preferences.push(typeof rule.memory === "function" ? rule.memory(m) : rule.memory);
+    }
   }
 
   for (const rule of AUTO_MEMORY_RULES.coding) {
@@ -222,14 +270,33 @@ export function detectMemoryFromMessage(text) {
     if (rule.pattern.test(value)) detected.context.push(rule.memory);
   }
 
-  for (const language of LANGUAGE_PATTERNS) {
-    if (language.pattern.test(value)) {
-      detected.coding.push(language.memory);
+  // Detect language — stop at first match to avoid duplicates
+  for (const lang of LANGUAGE_PATTERNS) {
+    if (lang.pattern.test(value)) {
+      detected.coding.push(lang.memory);
       break;
     }
   }
 
+  // Detect framework/stack (can match multiple)
+  for (const fw of FRAMEWORK_PATTERNS) {
+    if (fw.pattern.test(value)) detected.context.push(fw.memory);
+  }
+
   return normalizeUserMemory(detected);
+}
+
+/**
+ * Scan both user message AND AI response to pick up patterns.
+ * Call this after a successful AI reply.
+ */
+export function detectMemoryFromExchange(userText, aiText) {
+  const fromUser = detectMemoryFromMessage(userText || "");
+  // Scan AI response for language/framework clues (the AI often mentions what lang to use)
+  const fromAI = detectMemoryFromMessage(aiText || "");
+  // Only carry over coding/context from AI response, not preferences
+  fromAI.preferences = [];
+  return mergeUserMemory(fromUser, fromAI);
 }
 
 function extractTextChunks(value, chunks = []) {

@@ -139,24 +139,30 @@ let mainWindow = null;
 function createWindow() {
   Menu.setApplicationMenu(null);
 
-  // ── CSP: restrict what the renderer can load/connect to (production only) ──
-  if (app.isPackaged) {
-    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-      callback({
-        responseHeaders: {
-          ...details.responseHeaders,
-          "Content-Security-Policy": [
-            "default-src 'self'; " +
-            "script-src 'self'; " +
-            "style-src 'self' 'unsafe-inline'; " +
-            "img-src 'self' data: blob:; " +
-            "connect-src https://openrouter.ai https://api.openai.com https://api.anthropic.com https://api-inference.huggingface.co https://router.huggingface.co https://huggingface.co; " +
-            "font-src 'self' data:;",
-          ],
-        },
-      });
+  // ── CSP: restrict what the renderer can load/connect to ────────────────────
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        "Content-Security-Policy": [
+          "default-src 'self'; " +
+          "script-src 'self'; " +
+          "style-src 'self' 'unsafe-inline'; " +
+          "img-src 'self' data: blob: https:; " +
+          "connect-src https://openrouter.ai https://api.openai.com https://api.anthropic.com https://router.huggingface.co https://huggingface.co; " +
+          "font-src 'self' data:; " +
+          "media-src blob:; " +
+          "object-src 'none'; " +
+          "base-uri 'none';",
+        ],
+      },
     });
-  }
+  });
+
+  // ── Block all permission requests (camera, mic, geolocation, etc.) ──────────
+  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
+    callback(false);
+  });
 
   const win = new BrowserWindow({
     title: "KritakaPrajna",
@@ -168,11 +174,23 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      sandbox: true,
       preload: path.join(__dirname, "preload.js"),
     },
   });
 
   mainWindow = win;
+
+  // ── Block renderer from navigating away from the app ────────────────────────
+  win.webContents.on("will-navigate", (event, url) => {
+    const appUrl = app.isPackaged ? "file://" : "http://localhost:3000";
+    if (!url.startsWith(appUrl)) {
+      event.preventDefault();
+    }
+  });
+
+  // ── Block new windows / popups ───────────────────────────────────────────────
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 
   if (app.isPackaged) {
     win.loadFile(path.join(__dirname, "../build/index.html"));
@@ -239,9 +257,57 @@ ipcMain.handle("read-file", async (_event, filePath) => {
   }
 });
 
+// ── IPC: extract text from PDF (buffer — works for any user-selected file) ───
+ipcMain.handle("extract-pdf-text-buffer", async (_event, arrayBuffer) => {
+  try {
+    const buffer = Buffer.from(arrayBuffer);
+    if (buffer.length > MAX_FILE_SIZE) {
+      return { error: "PDF too large (max 5 MB)", text: null };
+    }
+    if (typeof globalThis.DOMMatrix === "undefined") {
+      globalThis.DOMMatrix = class DOMMatrix {
+        constructor(init) {
+          this.a=1;this.b=0;this.c=0;this.d=1;this.e=0;this.f=0;
+          this.m11=1;this.m12=0;this.m13=0;this.m14=0;
+          this.m21=0;this.m22=1;this.m23=0;this.m24=0;
+          this.m31=0;this.m32=0;this.m33=1;this.m34=0;
+          this.m41=0;this.m42=0;this.m43=0;this.m44=1;
+          if (Array.isArray(init) && init.length === 6) {
+            [this.a,this.b,this.c,this.d,this.e,this.f]=init;
+          }
+        }
+        multiply() { return new globalThis.DOMMatrix(); }
+        translate(x=0,y=0) { return new globalThis.DOMMatrix([this.a,this.b,this.c,this.d,this.e+x,this.f+y]); }
+        scale(sx=1,sy=1) { return new globalThis.DOMMatrix([this.a*sx,this.b,this.c,this.d*sy,this.e,this.f]); }
+        rotate() { return new globalThis.DOMMatrix(); }
+        transformPoint(p={}) { return { x: (p.x||0)*this.a+this.e, y: (p.y||0)*this.d+this.f, w: p.w||1 }; }
+        static fromMatrix(m) { return new globalThis.DOMMatrix(); }
+        static fromFloat32Array(a) { return new globalThis.DOMMatrix(Array.from(a)); }
+        static fromFloat64Array(a) { return new globalThis.DOMMatrix(Array.from(a)); }
+      };
+    }
+    const _pdfMod = require("pdf-parse");
+    const pdfParse = typeof _pdfMod === "function" ? _pdfMod : (_pdfMod.default || _pdfMod);
+    const pagerender = (pageData) =>
+      pageData.getTextContent().then((tc) => {
+        let lastY = null, text = "";
+        for (const item of tc.items) {
+          if (lastY !== null && item.transform[5] !== lastY) text += "\n";
+          text += item.str;
+          lastY = item.transform[5];
+        }
+        return text;
+      });
+    const data = await pdfParse(buffer, { pagerender });
+    return { error: null, text: data.text, pages: data.numpages };
+  } catch (err) {
+    return { error: err.message, text: null };
+  }
+});
+
 // ── IPC: extract text from PDF ──────────────────────────────────────────────
 ipcMain.handle("extract-pdf-text", async (_event, filePath) => {
-  if (!isPathAllowed(filePath)) return { error: "Access denied: file is outside the opened folder", text: null };
+  // PDF extraction is read-only on a user-selected file — no folder-scope restriction needed.
   try {
     const stat = await fs.promises.stat(filePath);
     if (stat.size > MAX_FILE_SIZE) {
@@ -315,9 +381,20 @@ ipcMain.handle("store-set-key", (_event, key) => { setApiKey(key); });
 ipcMain.handle("store-remove-key", () => { removeApiKey(); });
 
 // ── IPC: multi-provider key management ──────────────────────────────────────
-ipcMain.handle("provider-get-key", (_event, provider) => getProviderKey(provider));
-ipcMain.handle("provider-set-key", (_event, provider, key) => { setProviderKey(provider, key); });
-ipcMain.handle("provider-remove-key", (_event, provider) => { removeProviderKey(provider); });
+const VALID_PROVIDERS = new Set(["openrouter", "openai", "anthropic", "huggingface"]);
+ipcMain.handle("provider-get-key", (_event, provider) => {
+  if (!VALID_PROVIDERS.has(provider)) return null;
+  return getProviderKey(provider);
+});
+ipcMain.handle("provider-set-key", (_event, provider, key) => {
+  if (!VALID_PROVIDERS.has(provider)) return;
+  if (typeof key !== "string" || key.length > 256) return;
+  setProviderKey(provider, key);
+});
+ipcMain.handle("provider-remove-key", (_event, provider) => {
+  if (!VALID_PROVIDERS.has(provider)) return;
+  removeProviderKey(provider);
+});
 ipcMain.handle("providers-get-all", () => getAllProviderKeys());
 ipcMain.handle("shortcuts-get-all", () => getKeyboardShortcuts());
 ipcMain.handle("shortcuts-set-all", (_event, shortcuts) => { setKeyboardShortcuts(shortcuts); });

@@ -11,6 +11,83 @@ const msgVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.25, ease } },
 };
 
+/** Split <think>…</think> from the rest of the message */
+function parseThinking(content) {
+  if (typeof content !== "string") return { thinking: null, isThinking: false, rest: content };
+  const openIdx = content.indexOf("<think>");
+  if (openIdx === -1) return { thinking: null, isThinking: false, rest: content };
+  const closeIdx = content.indexOf("</think>", openIdx);
+  if (closeIdx === -1) {
+    // Still streaming the thinking block
+    return { thinking: content.slice(openIdx + 7), isThinking: true, rest: content.slice(0, openIdx) };
+  }
+  return {
+    thinking: content.slice(openIdx + 7, closeIdx),
+    isThinking: false,
+    rest: (content.slice(0, openIdx) + content.slice(closeIdx + 8)).trimStart(),
+  };
+}
+
+function ThinkingBlock({ content, isThinking }) {
+  const [expanded, setExpanded] = useState(isThinking);
+
+  // Auto-collapse when thinking finishes
+  useEffect(() => {
+    if (!isThinking) setExpanded(false);
+  }, [isThinking]);
+
+  return (
+    <div className="mb-3 rounded-xl border border-white/[0.06] bg-white/[0.02] overflow-hidden">
+      {/* Header */}
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/[0.03] transition-colors"
+      >
+        {isThinking ? (
+          <span className="inline-flex gap-0.5 text-saffron-400/70">
+            <motion.span animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1, repeat: Infinity, ease, delay: 0 }}>●</motion.span>
+            <motion.span animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1, repeat: Infinity, ease, delay: 0.2 }}>●</motion.span>
+            <motion.span animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1, repeat: Infinity, ease, delay: 0.4 }}>●</motion.span>
+          </span>
+        ) : (
+          <svg className="w-3.5 h-3.5 text-dark-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+          </svg>
+        )}
+        <span className="text-[11px] text-dark-400 font-medium">
+          {isThinking ? "Thinking…" : "Thought"}
+        </span>
+        {!isThinking && (
+          <svg
+            className={`w-3 h-3 text-dark-500 ml-auto transition-transform ${expanded ? "rotate-180" : ""}`}
+            fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        )}
+      </button>
+
+      {/* Body */}
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.div
+            key="thinking-body"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.2, ease }}
+            className="overflow-hidden"
+          >
+            <div className="px-3 pb-3 text-[12px] text-dark-400 leading-relaxed border-t border-white/[0.04] pt-2 italic">
+              <MarkdownRenderer content={content} />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 function MandalaLogo() {
   return (
     <svg className="w-16 h-16 text-saffron-500" viewBox="0 0 100 100" fill="none">
@@ -39,15 +116,30 @@ function AiIcon() {
 /** Render message content — handles both plain strings and multimodal arrays */
 function MessageContent({ content, isAssistant = false }) {
   if (typeof content === "string") {
-    // Use markdown renderer for assistant messages
-    if (isAssistant) return <MarkdownRenderer content={content} />;
+    if (isAssistant) {
+      const { thinking, isThinking, rest } = parseThinking(content);
+      return (
+        <>
+          {thinking != null && <ThinkingBlock content={thinking} isThinking={isThinking} />}
+          {rest && <MarkdownRenderer content={rest} />}
+        </>
+      );
+    }
     return content;
   }
   if (!Array.isArray(content)) return String(content || "");
 
   return content.map((part, idx) => {
     if (part.type === "text") {
-      if (isAssistant) return <MarkdownRenderer key={idx} content={part.text} />;
+      if (isAssistant) {
+        const { thinking, isThinking, rest } = parseThinking(part.text);
+        return (
+          <React.Fragment key={idx}>
+            {thinking != null && <ThinkingBlock content={thinking} isThinking={isThinking} />}
+            {rest && <MarkdownRenderer content={rest} />}
+          </React.Fragment>
+        );
+      }
       return <span key={idx}>{part.text}</span>;
     }
     if (part.type === "image_url" && part.image_url?.url) {
@@ -154,10 +246,39 @@ export default function MessageList({ messages, loading, onRefine, onRetry, onRe
               className={`flex ${isUser ? "justify-end" : "justify-start"}`}
             >
               {isUser ? (
-                <div
-                  className="bg-saffron-600 text-white rounded-2xl rounded-br-sm px-4 py-2.5 max-w-[80%] min-w-[56px] text-sm leading-relaxed whitespace-pre-wrap break-words shadow-lg shadow-saffron-900/20"
-                >
-                  <MessageContent content={msg.content} />
+                <div className="flex flex-col items-end gap-1.5 max-w-[80%]">
+                  {/* Attachment chips */}
+                  {msg._attachments?.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 justify-end">
+                      {msg._attachments.map((a, idx) => (
+                        <span
+                          key={idx}
+                          className="inline-flex items-center gap-1 text-[11px] bg-saffron-700/60 text-saffron-100 rounded-lg px-2 py-1"
+                        >
+                          {a.type === "image" ? (
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                              <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path strokeLinecap="round" d="M21 15l-5-5L5 21" />
+                            </svg>
+                          ) : a.type === "pdf" ? (
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                              <path strokeLinecap="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                          ) : (
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                              <path strokeLinecap="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                            </svg>
+                          )}
+                          {a.name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {/* Message text */}
+                  {(msg._displayText || typeof msg.content === "string") && (
+                    <div className="bg-saffron-600 text-white rounded-2xl rounded-br-sm px-4 py-2.5 min-w-[56px] text-sm leading-relaxed whitespace-pre-wrap break-words shadow-lg shadow-saffron-900/20">
+                      <MessageContent content={msg._displayText ?? msg.content} />
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="flex flex-col items-start gap-1 max-w-[85%]">
@@ -166,7 +287,14 @@ export default function MessageList({ messages, loading, onRefine, onRetry, onRe
                     <div
                       className="bg-dark-800/70 text-dark-100 border border-dark-700/30 rounded-2xl rounded-tl-sm px-4 py-2.5 min-w-[56px] text-sm leading-relaxed break-words markdown-body"
                     >
-                      {(typeof msg.content === "string" ? msg.content : msg.content?.length) ? (
+                      {msg._imageUrl ? (
+                        <img
+                          src={msg._imageUrl}
+                          alt="Generated image"
+                          className="max-w-full rounded-xl object-contain"
+                          style={{ maxHeight: 480 }}
+                        />
+                      ) : (typeof msg.content === "string" ? msg.content : msg.content?.length) ? (
                         <MessageContent content={msg.content} isAssistant />
                       ) : (
                         <span className="inline-flex gap-1 text-saffron-400/60">

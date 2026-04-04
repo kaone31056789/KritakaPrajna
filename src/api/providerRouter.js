@@ -9,10 +9,10 @@
  * Each value is a string API key or null/undefined if not configured.
  */
 
-import { fetchModels as fetchOpenRouterModels, streamMessage as streamOpenRouter, fetchCredits } from "./openrouter";
+import { fetchModels as fetchOpenRouterModels, streamMessage as streamOpenRouter, fetchCredits, generateImage as generateImageOR, IMAGE_GEN_MODELS as OR_IMAGE_MODELS } from "./openrouter";
 import { fetchModels as fetchOpenAIModels, streamMessage as streamOpenAI } from "./openai";
 import { fetchModels as fetchAnthropicModels, streamMessage as streamAnthropic } from "./anthropic";
-import { fetchModels as fetchHFModels, streamMessage as streamHF } from "./huggingface";
+import { fetchModels as fetchHFModels, streamMessage as streamHF, generateImage as generateImageHF, IMAGE_GEN_MODELS as HF_IMAGE_MODELS } from "./huggingface";
 
 export { fetchCredits };
 
@@ -64,9 +64,34 @@ export async function fetchAllModels(providerKeys) {
     providerKeys?.huggingface ? fetchHFModels(providerKeys.huggingface)                                                                      : Promise.resolve([]),
   ]);
 
-  return results
+  const chatModels = results
     .flatMap((r) => (r.status === "fulfilled" ? r.value : []))
     .map(withSelectionMeta);
+
+  // Append image and video generation models for active providers
+  const imageModels = [
+    ...(providerKeys?.openrouter  ? OR_IMAGE_MODELS : []),
+    ...(providerKeys?.huggingface ? HF_IMAGE_MODELS : []),
+  ].map(withSelectionMeta);
+
+  return [...chatModels, ...imageModels];
+}
+
+/** Returns true if the model is an image generation model */
+export function isImageGenModel(model) {
+  return !!model?._isImageGen;
+}
+
+/** Generate an image — routes to the correct provider */
+export async function routeImageGen(providerKeys, model, prompt) {
+  const provider = model?._provider || "openrouter";
+  const key = providerKeys?.[provider];
+  if (!key) throw new Error(`No API key configured for ${providerLabel(provider)}.`);
+  switch (provider) {
+    case "openrouter":  return generateImageOR(key, model.id, prompt);
+    case "huggingface": return generateImageHF(key, model.id, prompt);
+    default: throw new Error(`Image generation not supported for ${provider}`);
+  }
 }
 
 // ── Stream routing ───────────────────────────────────────────────────────────

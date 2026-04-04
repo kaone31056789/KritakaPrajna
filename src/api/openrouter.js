@@ -123,3 +123,47 @@ export async function streamMessage(apiKey, model, messages, { onChunk, signal, 
     return { text: full || "(No response)", usage };
   }
 }
+
+/** Image generation models available on OpenRouter (confirmed catalog IDs) */
+export const IMAGE_GEN_MODELS = [
+  { id: "openai/dall-e-3",                    name: "DALL·E 3",          _provider: "openrouter", _isImageGen: true, pricing: { prompt: "0.00004", completion: "0" }, context_length: 0 },
+  { id: "black-forest-labs/flux-1.1-pro",     name: "FLUX 1.1 Pro",      _provider: "openrouter", _isImageGen: true, pricing: { prompt: "0.000004", completion: "0" }, context_length: 0 },
+  { id: "black-forest-labs/flux-pro",         name: "FLUX Pro",          _provider: "openrouter", _isImageGen: true, pricing: { prompt: "0.000055", completion: "0" }, context_length: 0 },
+  { id: "black-forest-labs/flux-schnell",     name: "FLUX Schnell",      _provider: "openrouter", _isImageGen: true, pricing: { prompt: "0.0000005", completion: "0" }, context_length: 0 },
+  { id: "stability-ai/stable-diffusion-xl",  name: "Stable Diffusion XL", _provider: "openrouter", _isImageGen: true, pricing: { prompt: "0.000008", completion: "0" }, context_length: 0 },
+];
+
+/**
+ * Generate an image via OpenRouter's images/generations endpoint.
+ * Returns { imageUrl } — a remote URL.
+ */
+export async function generateImage(apiKey, modelId, prompt) {
+  const res = await fetch(`${API_BASE}/images/generations`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://kritakaprajna.app",
+      "X-Title": "KritakaPrajna",
+    },
+    body: JSON.stringify({ model: modelId, prompt, n: 1 }),
+  });
+
+  const contentType = res.headers.get("content-type") || "";
+  if (!res.ok || contentType.includes("text/html")) {
+    // HTML response = endpoint doesn't exist or model not found
+    const txt = contentType.includes("text/html")
+      ? "Model not available for image generation on OpenRouter"
+      : await res.text();
+    let msg = txt;
+    try { if (!contentType.includes("text/html")) msg = JSON.parse(txt).error?.message || txt; } catch {}
+    throw new Error(msg);
+  }
+
+  const json = await res.json();
+  const url = json.data?.[0]?.url || json.data?.[0]?.b64_json;
+  if (!url) throw new Error("No image returned from OpenRouter");
+  if (url.startsWith("data:") || url.startsWith("http")) return { imageUrl: url };
+  return { imageUrl: `data:image/png;base64,${url}` };
+}
+

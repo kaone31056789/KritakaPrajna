@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { fetchAllModels, routeStream, fetchCredits, suggestFallbackAcrossProviders, findModelBySelection, toSelectionId } from "../api/providerRouter";
+import { fetchAllModels, routeStream, fetchCredits, suggestFallbackAcrossProviders, findModelBySelection, toSelectionId, isImageGenModel, routeImageGen } from "../api/providerRouter";
 import ModelSelector from "./ModelSelector";
 import MessageList from "./MessageList";
 import MessageInput from "./MessageInput";
@@ -28,6 +28,7 @@ import {
   buildSystemPromptWithMemory,
   hasUserMemory,
 } from "../utils/userMemory";
+import { extractMemoryWithAI } from "../utils/aiMemoryExtractor";
 
 const ease = [0.4, 0, 0.2, 1];
 const CHATS_KEY = "openrouter_chats";
@@ -91,6 +92,28 @@ function deriveTitle(messages) {
 const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp"];
 const MAX_UPLOAD_SIZE = 5 * 1024 * 1024; // 5 MB
 
+/** Extract text from a PDF file entirely in the renderer using pdfjs-dist */
+async function parsePdfFile(file) {
+  const pdfjsLib = await import("pdfjs-dist");
+  if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+      "pdfjs-dist/build/pdf.worker.mjs",
+      import.meta.url
+    ).href;
+  }
+  const arrayBuffer = await file.arrayBuffer();
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+  const pdf = await loadingTask.promise;
+  const pages = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const pageText = content.items.map((item) => item.str).join(" ").trim();
+    if (pageText) pages.push(pageText);
+  }
+  return pages.join("\n\n");
+}
+
 function fileExt(name) {
   const dot = name.lastIndexOf(".");
   return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
@@ -126,6 +149,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState([]);
   const [uploads, setUploads] = useState([]); // { id, name, type, dataUrl?, content?, size, ext }
   const [smartSuggestion, setSmartSuggestion] = useState(null);
@@ -347,16 +371,15 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
         });
         setUploads((prev) => [...prev, { ...base, type: "image", dataUrl }]);
       } else if (ext === "pdf") {
-        // Extract text via Electron IPC if available
-        if (electronApi?.extractPdfText && file.path) {
-          const result = await electronApi.extractPdfText(file.path);
-          if (result.text) {
-            setUploads((prev) => [...prev, { ...base, type: "pdf", content: result.text }]);
+        try {
+          const text = await parsePdfFile(file);
+          if (text) {
+            setUploads((prev) => [...prev, { ...base, type: "pdf", content: text }]);
           } else {
-            setUploads((prev) => [...prev, { ...base, type: "pdf", content: null, error: result.error }]);
+            setUploads((prev) => [...prev, { ...base, type: "pdf", content: null, error: "No text found — PDF may be image-based" }]);
           }
-        } else {
-          setUploads((prev) => [...prev, { ...base, type: "pdf", content: null, error: "PDF reading requires desktop app" }]);
+        } catch (err) {
+          setUploads((prev) => [...prev, { ...base, type: "pdf", content: null, error: err.message }]);
         }
       } else {
         // Read as text
@@ -543,7 +566,17 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
       setAttachedFiles([]);
       setUploads([]);
 
-      const userMsg = { role: "user", content };
+      // Build display-only metadata (what the user sees in the bubble)
+      const allAttachments = [
+        ...attachedFiles.map((f) => ({ name: f.name, type: "file" })),
+        ...uploads.map((u) => ({ name: u.name, type: u.type })),
+      ];
+      const userMsg = {
+        role: "user",
+        content,
+        _displayText: text.trim(),
+        _attachments: allAttachments.length > 0 ? allAttachments : undefined,
+      };
       const aiMsg = { role: "assistant", content: "" };
 
       // If a /fix command was used, attach original file data for diff viewer
@@ -592,6 +625,24 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
 
       try {
         const currentModelObj = findModelBySelection(models, selectedModel);
+
+        // ── Image generation ──────────────────────────────────────────────────
+        if (isImageGenModel(currentModelObj)) {
+          const { imageUrl } = await routeImageGen(providers, currentModelObj, textContent);
+          setChats((prev) =>
+            prev.map((c) => {
+              if (c.id !== chatId) return c;
+              const next = [...c.messages];
+              next[next.length - 1] = { ...next[next.length - 1], content: "", _imageUrl: imageUrl };
+              return { ...c, messages: next };
+            })
+          );
+          setLoading(false);
+          recordSuccess(selectedModel);
+          return;
+        }
+
+
         const result = await routeStream(
           providers,
           currentModelObj || { id: selectedModel.includes("::") ? selectedModel.split("::").slice(1).join("::") : selectedModel, _provider: "openrouter" },
@@ -660,6 +711,19 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
           })
         );
 
+        // Use a free HuggingFace model in the background to extract memory from this exchange
+        if (userMemory.autoMode) {
+          extractMemoryWithAI(providers, text.trim(), result.text || "").then((aiMemory) => {
+            if (aiMemory && hasUserMemory(aiMemory)) {
+              setUserMemory((prev) => {
+                const merged = mergeUserMemory(prev, aiMemory);
+                handleSaveMemory(merged).catch(() => {});
+                return merged;
+              });
+            }
+          }).catch(() => {});
+        }
+
         // Refresh OpenRouter credits if key is present
         if (providers?.openrouter) {
           fetchCredits(providers.openrouter).then((c) => { if (c) setLifetimeCost(c); });
@@ -726,52 +790,60 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
 
   /**
    * Retry or regenerate last request.
-   * @param {"same"|"better"} mode - "same" retries with same model, "better" picks a better one
+   * @param {"same"|"better"} mode
    */
   const handleRetryOrRegenerate = useCallback(
     (mode) => {
       const last = lastRequestRef.current;
       if (!last) return;
 
-      // Remove the last AI message (error or completed)
+      if (mode === "better") {
+        // Open model picker — user chooses the model, then we regenerate
+        setModelPickerOpen(true);
+        return;
+      }
+
+      // Remove last AI + user messages so handleSend re-adds them cleanly
       setChats((prev) =>
         prev.map((c) => {
           if (c.id !== activeChatId) return c;
           const msgs = [...c.messages];
-          // Remove last assistant message
-          if (msgs.length > 0 && msgs[msgs.length - 1].role === "assistant") {
-            msgs.pop();
-          }
+          if (msgs[msgs.length - 1]?.role === "assistant") msgs.pop();
+          if (msgs[msgs.length - 1]?.role === "user") msgs.pop();
           return { ...c, messages: msgs };
         })
       );
 
-      // If "better", try to pick a better model
-      if (mode === "better") {
-        const retryTask = detectUiTask(last.text, last.uploads, last.attachedFiles);
-        const taskType = uiTaskToAdvisorTask(retryTask, last.text, last.uploads, last.attachedFiles);
-        const suggestion = selectSmartModel(models, taskType, selectedModel, modelPref);
-        if (suggestion.recommended && toSelectionId(suggestion.recommended) !== selectedModel) {
-          setSelectedModel(toSelectionId(suggestion.recommended));
-        } else {
-          // Fallback: find any available model that's not the current one
-          const fallback = findFallbackModel(models.filter((m) => supportsTask(m, retryTask)), selectedModel, taskType, qualityScore);
-          if (fallback) {
-            setSelectedModel(toSelectionId(fallback));
-          }
-        }
-      }
+      setError("");
+      setLastError(null);
+      setTimeout(() => handleSend(last.text), 50);
+    },
+    [activeChatId, handleSend]
+  );
+
+  /** Called when user picks a model from the picker and wants to retry */
+  const handleRetryWithModel = useCallback(
+    (modelSelId) => {
+      const last = lastRequestRef.current;
+      if (!last) return;
+      setModelPickerOpen(false);
+      setSelectedModel(modelSelId);
+
+      setChats((prev) =>
+        prev.map((c) => {
+          if (c.id !== activeChatId) return c;
+          const msgs = [...c.messages];
+          if (msgs[msgs.length - 1]?.role === "assistant") msgs.pop();
+          if (msgs[msgs.length - 1]?.role === "user") msgs.pop();
+          return { ...c, messages: msgs };
+        })
+      );
 
       setError("");
       setLastError(null);
-
-      // Re-send the original text (handleSend will rebuild everything)
-      // Use a small timeout to let state settle after model change
-      setTimeout(() => {
-        handleSend(last.text);
-      }, 50);
+      setTimeout(() => handleSend(last.text), 80);
     },
-    [activeChatId, models, selectedModel, modelPref, handleSend]
+    [activeChatId, handleSend]
   );
 
   /** Called from MessageList retry buttons (on error messages) */
@@ -1428,6 +1500,62 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
         </>
       )}
       </div>
+
+      {/* Model picker modal for "Retry Better Model" */}
+      <AnimatePresence>
+        {modelPickerOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+            onClick={() => setModelPickerOpen(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ duration: 0.18 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-dark-900 border border-white/[0.08] rounded-2xl shadow-2xl w-[420px] max-h-[70vh] flex flex-col overflow-hidden"
+            >
+              <div className="px-5 py-4 border-b border-white/[0.06] flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-white">Choose a model to retry with</p>
+                  <p className="text-xs text-dark-400 mt-0.5">Pick any available model</p>
+                </div>
+                <button onClick={() => setModelPickerOpen(false)} className="text-dark-500 hover:text-dark-200 p-1 rounded-lg hover:bg-white/[0.05] cursor-pointer transition-colors">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </div>
+              <div className="overflow-y-auto flex-1 p-2">
+                {models.map((m) => {
+                  const sid = toSelectionId(m);
+                  const isCurrent = sid === selectedModel;
+                  return (
+                    <button
+                      key={sid}
+                      onClick={() => handleRetryWithModel(sid)}
+                      disabled={isCurrent}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors cursor-pointer mb-0.5 ${
+                        isCurrent
+                          ? "opacity-40 cursor-not-allowed bg-white/[0.02]"
+                          : "hover:bg-white/[0.05]"
+                      }`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-white truncate">{m.name || m.id}</p>
+                        <p className="text-[10px] text-dark-500 truncate">{providerLabel(m._provider)} · {m.id}</p>
+                      </div>
+                      {isCurrent && <span className="text-[10px] text-dark-500 shrink-0">current</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

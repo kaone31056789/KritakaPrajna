@@ -2,21 +2,21 @@ import React, { useState, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 
-/** Custom dark theme overrides matching the app's dark palette */
+/** VSCode Dark+ theme with app background */
 const codeTheme = {
-  ...oneDark,
+  ...vscDarkPlus,
   'pre[class*="language-"]': {
-    ...oneDark['pre[class*="language-"]'],
-    background: "#0d1117",
+    ...vscDarkPlus['pre[class*="language-"]'],
+    background: "#1e1e1e",
     margin: 0,
     padding: "1rem",
     fontSize: "13px",
     lineHeight: "1.6",
   },
   'code[class*="language-"]': {
-    ...oneDark['code[class*="language-"]'],
+    ...vscDarkPlus['code[class*="language-"]'],
     background: "none",
     fontSize: "13px",
     lineHeight: "1.6",
@@ -65,9 +65,9 @@ function CodeBlock({ language, children }) {
   const displayLang = lang.charAt(0).toUpperCase() + lang.slice(1);
 
   return (
-    <div className="my-3 rounded-xl overflow-hidden border border-white/[0.06] bg-[#0d1117]">
+    <div className="my-3 rounded-xl overflow-hidden border border-white/[0.06] bg-[#1e1e1e]">
       {/* Header bar */}
-      <div className="flex items-center justify-between px-4 py-2 bg-white/[0.03] border-b border-white/[0.06]">
+      <div className="flex items-center justify-between px-4 py-2 bg-[#252526] border-b border-white/[0.06]">
         <span className="text-[11px] text-dark-400 font-mono font-medium tracking-wide">
           {displayLang}
         </span>
@@ -79,7 +79,7 @@ function CodeBlock({ language, children }) {
         language={lang}
         PreTag="div"
         showLineNumbers={code.split("\n").length > 3}
-        lineNumberStyle={{ color: "#374151", fontSize: "11px", paddingRight: "1em" }}
+        lineNumberStyle={{ color: "#858585", fontSize: "11px", paddingRight: "1em", userSelect: "none" }}
         wrapLines
         wrapLongLines
       >
@@ -87,6 +87,21 @@ function CodeBlock({ language, children }) {
       </SyntaxHighlighter>
     </div>
   );
+}
+
+/** Replace common LaTeX math symbols with readable equivalents */
+function preprocessLatex(text) {
+  return text
+    .replace(/\$\\rightarrow\$/g, "→")
+    .replace(/\$\\leftarrow\$/g, "←")
+    .replace(/\$\\Rightarrow\$/g, "⇒")
+    .replace(/\$\\Leftarrow\$/g, "⇐")
+    .replace(/\$\\leftrightarrow\$/g, "↔")
+    .replace(/\$\\Leftrightarrow\$/g, "⟺")
+    .replace(/\$\\uparrow\$/g, "↑")
+    .replace(/\$\\downarrow\$/g, "↓")
+    .replace(/\$\\to\$/g, "→")
+    .replace(/\$\\gets\$/g, "←");
 }
 
 /**
@@ -167,7 +182,7 @@ export default function MarkdownRenderer({ content }) {
         em: ({ children }) => <em className="text-dark-200">{children}</em>,
       }}
     >
-      {content}
+      {preprocessLatex(content)}
     </ReactMarkdown>
   );
 }

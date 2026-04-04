@@ -31,7 +31,8 @@ export const TASK_OPTIONS = [
 const TEXT_TO_IMAGE_PATTERNS = [
   "flux", "stable-diffusion", "sdxl", "ideogram", "imagen", "dall-e", "dalle", "recraft", "kandinsky",
 ];
-const TEXT_TO_VIDEO_PATTERNS = ["video", "veo", "sora", "hunyuanvideo", "wan-", "kling"];
+// Strict patterns — only model IDs that are video *generators*, not VL/multimodal models that accept video input
+const TEXT_TO_VIDEO_PATTERNS = ["veo-", "sora", "hunyuanvideo", "wan-ai/wan", "kling", "seedance", "seed-1.", "seed-2.", "haiper", "pika", "luma"];
 const AUDIO_PATTERNS = ["tts", "text-to-speech", "speech", "voice", "audio", "bark", "kokoro"];
 const IMAGE_EDIT_PATTERNS = ["image-to-image", "img2img", "inpaint", "controlnet", "edit"];
 const MULTIMODAL_PATTERNS = ["omni", "multimodal", "any-to-any", "gpt-4o", "gemini", "qwen-vl", "glm-4.5v", "claude"];
@@ -109,13 +110,18 @@ export function supportsVision(model) {
 
 /** All text models support text — this is a convenience check for non-image tasks */
 export function supportsText(model) {
-  return true; // All chat models support text
+  // Exclude dedicated image/video gen models — they cannot do chat
+  if (model?._isImageGen || model?._isVideoGen) return false;
+  return true;
 }
 
 export function supportsImageGeneration(model) {
+  // Explicit flag set by our provider router (HF / OR image gen models)
+  if (model?._isImageGen) return true;
   const id = model.id.toLowerCase();
   const modality = model.architecture?.modality || "";
-  if (modality.includes("text->image")) return true;
+  // Only models that OUTPUT images, not VL models that accept image input
+  if (modality.includes("->image") || modality.includes("text->image")) return true;
   return TEXT_TO_IMAGE_PATTERNS.some((p) => id.includes(p));
 }
 
@@ -127,9 +133,12 @@ export function supportsImageEditing(model) {
 }
 
 export function supportsVideo(model) {
+  // Explicit flag set by our provider router (HF video gen models)
+  if (model?._isVideoGen) return true;
   const id = model.id.toLowerCase();
   const modality = model.architecture?.modality || "";
-  if (modality.includes("video")) return true;
+  // Only models that OUTPUT video — "text+video->text" VL models must NOT match
+  if (modality.includes("->video")) return true;
   return TEXT_TO_VIDEO_PATTERNS.some((p) => id.includes(p));
 }
 
