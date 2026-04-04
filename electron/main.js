@@ -6,8 +6,9 @@ const { autoUpdater } = require("electron-updater");
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 
-// Store without hardcoded key — API key is encrypted via OS credential store (safeStorage)
+// New store file (config-v2) avoids reading the old AES-encrypted config.json
 const store = new Store({
+  name: "config-v2",
   schema: {
     apiKeyEncrypted: { type: "string", default: "" },
   },
@@ -34,6 +35,20 @@ function setApiKey(key) {
 
 function removeApiKey() {
   store.delete("apiKeyEncrypted");
+}
+
+// One-time migration: read old AES-encrypted store and carry the key over to safeStorage.
+// Must be called after app.whenReady() so safeStorage is available.
+function migrateOldStore() {
+  if (store.get("apiKeyEncrypted")) return; // already migrated
+  try {
+    const oldStore = new Store({ name: "config", encryptionKey: "kritakaprajna-v1" });
+    const oldKey = oldStore.get("apiKey");
+    if (oldKey) setApiKey(oldKey);
+    oldStore.clear();
+  } catch {
+    // old store missing or unreadable — nothing to migrate
+  }
 }
 
 // Tracks the folder the user explicitly opened — used to scope file write access
@@ -254,6 +269,7 @@ ipcMain.handle("check-for-updates", () => {
 ipcMain.handle("get-app-version", () => app.getVersion());
 
 app.whenReady().then(() => {
+  migrateOldStore();
   createWindow();
   if (app.isPackaged) {
     setupAutoUpdater();
