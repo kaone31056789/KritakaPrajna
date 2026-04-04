@@ -1,6 +1,6 @@
 {
   "name": "kritakaprajna",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "AI coding assistant powered by OpenRouter",
   "author": "Parikshit",
   "private": true,
@@ -62,7 +62,9 @@
     "win": {
       "target": "nsis",
       "icon": "assets/logo.ico",
-      "artifactName": "${productName}-Setup-${version}.${ext}"
+      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "signingHashAlgorithms": ["sha256"],
+      "signDlls": false
     },
     "nsis": {
       "oneClick": false,

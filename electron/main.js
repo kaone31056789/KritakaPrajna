@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Menu, safeStorage, session } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const Store = require("electron-store");
@@ -6,17 +6,62 @@ const { autoUpdater } = require("electron-updater");
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 
+// Store without hardcoded key — API key is encrypted via OS credential store (safeStorage)
 const store = new Store({
-  encryptionKey: "kritakaprajna-v1",
   schema: {
-    apiKey: { type: "string", default: "" },
+    apiKeyEncrypted: { type: "string", default: "" },
   },
 });
+
+function getApiKey() {
+  const encrypted = store.get("apiKeyEncrypted");
+  if (!encrypted) return null;
+  if (!safeStorage.isEncryptionAvailable()) return encrypted; // fallback: plaintext
+  try {
+    return safeStorage.decryptString(Buffer.from(encrypted, "base64"));
+  } catch {
+    return null;
+  }
+}
+
+function setApiKey(key) {
+  if (!safeStorage.isEncryptionAvailable()) {
+    store.set("apiKeyEncrypted", key);
+    return;
+  }
+  store.set("apiKeyEncrypted", safeStorage.encryptString(key).toString("base64"));
+}
+
+function removeApiKey() {
+  store.delete("apiKeyEncrypted");
+}
+
+// Tracks the folder the user explicitly opened — used to scope file write access
+let allowedBasePath = null;
 
 let mainWindow = null;
 
 function createWindow() {
   Menu.setApplicationMenu(null);
+
+  // ── CSP: restrict what the renderer can load/connect to (production only) ──
+  if (app.isPackaged) {
+    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          "Content-Security-Policy": [
+            "default-src 'self'; " +
+            "script-src 'self'; " +
+            "style-src 'self' 'unsafe-inline'; " +
+            "img-src 'self' data: blob:; " +
+            "connect-src https://openrouter.ai; " +
+            "font-src 'self' data:;",
+          ],
+        },
+      });
+    });
+  }
 
   const win = new BrowserWindow({
     title: "KritakaPrajna",
@@ -47,7 +92,8 @@ ipcMain.handle("select-folder", async () => {
     properties: ["openDirectory"],
   });
   if (result.canceled || !result.filePaths.length) return null;
-  return result.filePaths[0];
+  allowedBasePath = result.filePaths[0]; // update write-access scope
+  return allowedBasePath;
 });
 
 // ── IPC: read directory tree (1 level deep for lazy loading) ────────────────
@@ -105,6 +151,14 @@ ipcMain.handle("extract-pdf-text", async (_event, filePath) => {
 ipcMain.handle("write-file", async (_event, filePath, content) => {
   try {
     const resolved = path.resolve(filePath);
+    // Only allow writes inside the folder the user explicitly opened
+    if (!allowedBasePath) {
+      return { success: false, error: "No folder open — open a project folder before accepting diffs." };
+    }
+    const base = path.resolve(allowedBasePath);
+    if (!resolved.startsWith(base + path.sep) && resolved !== base) {
+      return { success: false, error: "Write denied: path is outside your opened folder." };
+    }
     await fs.promises.writeFile(resolved, content, "utf-8");
     return { success: true };
   } catch (err) {
@@ -112,10 +166,10 @@ ipcMain.handle("write-file", async (_event, filePath, content) => {
   }
 });
 
-// ── IPC: secure API key store ───────────────────────────────────────────────
-ipcMain.handle("store-get-key", () => store.get("apiKey") || null);
-ipcMain.handle("store-set-key", (_event, key) => { store.set("apiKey", key); });
-ipcMain.handle("store-remove-key", () => { store.delete("apiKey"); });
+// ── IPC: secure API key store (OS credential store via safeStorage) ─────────
+ipcMain.handle("store-get-key", () => getApiKey());
+ipcMain.handle("store-set-key", (_event, key) => { setApiKey(key); });
+ipcMain.handle("store-remove-key", () => { removeApiKey(); });
 
 // ── IPC: window controls ────────────────────────────────────────────────────
 ipcMain.handle("window-minimize", () => { if (mainWindow) mainWindow.minimize(); });
