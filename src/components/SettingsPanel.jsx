@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { DEFAULT_SHORTCUTS, SHORTCUT_ACTIONS, eventToShortcut, findShortcutConflict, getShortcutLabel, isValidShortcut, mergeShortcuts, normalizeShortcutString } from "../utils/keyboardShortcuts";
 import {
@@ -154,9 +154,27 @@ function ProviderRow({ def, currentKey, onSave, onRemove }) {
 }
 
 function ShortcutEditor({ shortcuts, onSaveShortcuts, onResetShortcuts }) {
-  const merged = mergeShortcuts(shortcuts);
+  const [merged, setMerged] = useState(() => mergeShortcuts(shortcuts));
   const [search, setSearch] = useState("");
   const [recording, setRecording] = useState(null);
+  const [shortcutError, setShortcutError] = useState("");
+  const recordButtonRefs = useRef({});
+
+  useEffect(() => {
+    setMerged(mergeShortcuts(shortcuts));
+  }, [shortcuts]);
+
+  useEffect(() => {
+    if (!recording) return;
+    const button = recordButtonRefs.current[recording];
+    button?.focus();
+  }, [recording]);
+
+  const persistShortcuts = async (nextShortcuts) => {
+    const normalized = mergeShortcuts(nextShortcuts);
+    setMerged(normalized);
+    await onSaveShortcuts?.(normalized);
+  };
 
   const visibleActions = SHORTCUT_ACTIONS.filter((action) =>
     action.label.toLowerCase().includes(search.toLowerCase())
@@ -164,13 +182,16 @@ function ShortcutEditor({ shortcuts, onSaveShortcuts, onResetShortcuts }) {
 
   const handleRecord = async (actionId, event) => {
     event.preventDefault();
+    event.stopPropagation();
     const shortcut = eventToShortcut(event);
     if (!shortcut) return;
     if (!isValidShortcut(shortcut)) {
+      setShortcutError("Use Ctrl/Shift/Alt + a valid key (A-Z, 0-9, Enter, comma, or F1-F12).");
       setRecording(null);
       return;
     }
 
+    setShortcutError("");
     const conflict = findShortcutConflict(merged, actionId, shortcut);
     let next = { ...merged };
 
@@ -186,8 +207,20 @@ function ShortcutEditor({ shortcuts, onSaveShortcuts, onResetShortcuts }) {
     }
 
     next[actionId] = normalizeShortcutString(shortcut);
-    await onSaveShortcuts?.(next);
+    await persistShortcuts(next);
     setRecording(null);
+  };
+
+  const handleResetAction = async (actionId) => {
+    setShortcutError("");
+    await persistShortcuts({ ...merged, [actionId]: DEFAULT_SHORTCUTS[actionId] });
+  };
+
+  const handleResetAll = async () => {
+    setShortcutError("");
+    setRecording(null);
+    await onResetShortcuts?.();
+    setMerged(mergeShortcuts(DEFAULT_SHORTCUTS));
   };
 
   return (
@@ -205,12 +238,16 @@ function ShortcutEditor({ shortcuts, onSaveShortcuts, onResetShortcuts }) {
           type="button"
           whileTap={{ scale: 0.97 }}
           transition={{ duration: 0.12, ease }}
-          onClick={onResetShortcuts}
+          onClick={handleResetAll}
           className="text-[11px] text-red-400 hover:text-red-300 border border-red-500/20 hover:border-red-500/30 rounded-lg px-3 py-2 cursor-pointer"
         >
           Reset All
         </motion.button>
       </div>
+
+      {shortcutError && (
+        <p className="text-xs text-red-400">{shortcutError}</p>
+      )}
 
       <input
         type="text"
@@ -240,6 +277,7 @@ function ShortcutEditor({ shortcuts, onSaveShortcuts, onResetShortcuts }) {
             <div className="flex items-center justify-between gap-2">
               <button
                 type="button"
+                ref={(node) => { recordButtonRefs.current[action.id] = node; }}
                 onClick={() => setRecording(action.id)}
                 onKeyDown={recording === action.id ? (e) => handleRecord(action.id, e) : undefined}
                 className={`flex-1 text-left rounded-lg border px-3 py-2 text-sm cursor-pointer transition-colors ${
@@ -252,7 +290,7 @@ function ShortcutEditor({ shortcuts, onSaveShortcuts, onResetShortcuts }) {
               </button>
               <button
                 type="button"
-                onClick={() => onSaveShortcuts?.({ ...merged, [action.id]: DEFAULT_SHORTCUTS[action.id] })}
+                onClick={() => handleResetAction(action.id)}
                 className="text-[11px] text-dark-400 hover:text-dark-200 cursor-pointer"
               >
                 Reset
@@ -384,11 +422,67 @@ function MemoryEditor({ memory, onSaveMemory, onResetMemory }) {
     });
   };
 
-  const handleCopyPrompt = () => {
-    navigator.clipboard.writeText(AI_IMPORT_PROMPT).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
+  const fallbackCopyWithExecCommand = (text) => {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    area.style.pointerEvents = "none";
+    document.body.appendChild(area);
+    area.focus();
+    area.select();
+    area.setSelectionRange(0, text.length);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(area);
+    return ok;
+  };
+
+  const handleCopyPrompt = async () => {
+    const text = AI_IMPORT_PROMPT;
+    setError("");
+
+    let copiedOk = false;
+
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        copiedOk = true;
+      } catch {}
+    }
+
+    if (!copiedOk && window.electronAPI?.writeClipboardText) {
+      try {
+        const result = await window.electronAPI.writeClipboardText(text);
+        copiedOk = !!result?.ok;
+      } catch {}
+    }
+
+    if (!copiedOk) {
+      try {
+        copiedOk = fallbackCopyWithExecCommand(text);
+      } catch {
+        copiedOk = false;
+      }
+    }
+
+    if (!copiedOk) {
+      setError("Clipboard permission denied. Copy the prompt manually from the box.");
+      return;
+    }
+
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const goToPasteChatExport = () => {
+    setImportState((current) => ({
+      ...current,
+      method: "paste",
+      aiStep: "response",
+      review: false,
+    }));
+    setError("");
   };
 
   const closeImportModal = () => {
@@ -763,14 +857,14 @@ function MemoryEditor({ memory, onSaveMemory, onResetMemory }) {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setImportState((s) => ({ ...s, aiStep: "response" }))}
+                        onClick={goToPasteChatExport}
                         className={`flex-1 rounded-lg px-3 py-2 text-xs font-medium cursor-pointer transition-colors ${
                           importState.aiStep === "response"
                             ? "bg-saffron-500/18 text-saffron-300"
                             : "text-dark-400 hover:text-dark-200 hover:bg-dark-800"
                         }`}
                       >
-                        2. Paste Response
+                        2. Paste Chat Export
                       </button>
                     </div>
 
@@ -798,10 +892,10 @@ function MemoryEditor({ memory, onSaveMemory, onResetMemory }) {
                             </button>
                             <button
                               type="button"
-                              onClick={() => setImportState((s) => ({ ...s, aiStep: "response" }))}
+                              onClick={goToPasteChatExport}
                               className="text-sm text-dark-200 bg-dark-800 hover:bg-dark-700 border border-dark-600/50 rounded-xl px-4 py-2 cursor-pointer"
                             >
-                              Next →
+                              Next → Paste Chat Export
                             </button>
                           </div>
                         </div>

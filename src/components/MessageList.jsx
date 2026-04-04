@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { formatCost } from "../utils/costTracker";
 import { extractAllCodeBlocks } from "../utils/diffEngine";
+import { safeCopyText } from "../utils/clipboard";
 import DiffViewer from "./DiffViewer";
 import MarkdownRenderer from "./MarkdownRenderer";
 
@@ -113,6 +114,22 @@ function AiIcon() {
   );
 }
 
+function usageTokenCount(usage) {
+  if (!usage) return 0;
+  const prompt = Number(usage.prompt_tokens) || 0;
+  const completion = Number(usage.completion_tokens) || 0;
+  const image = Number(usage.image_tokens) || Number(usage?.completion_tokens_details?.image_tokens) || 0;
+  if (completion === 0 && image > 0) return prompt + image;
+  return prompt + completion;
+}
+
+function costLabel(message) {
+  const cost = Number(message?.cost);
+  if (message?.isFree && (!Number.isFinite(cost) || cost === 0)) return "Free";
+  if (Number.isFinite(cost)) return `Cost: ${formatCost(cost)}`;
+  return "Cost: --";
+}
+
 /** Render message content — handles both plain strings and multimodal arrays */
 function MessageContent({ content, isAssistant = false }) {
   if (typeof content === "string") {
@@ -158,18 +175,20 @@ function MessageContent({ content, isAssistant = false }) {
 
 export default function MessageList({ messages, loading, onRefine, onRetry, onRegenerate, lastError }) {
   const bottomRef = useRef(null);
+  const copyResetTimerRef = useRef(null);
   const [dismissedDiffs, setDismissedDiffs] = useState(new Set());
   const [showDiff, setShowDiff] = useState(new Set());
+  const [copiedMsgIdx, setCopiedMsgIdx] = useState(null);
 
   const handleAcceptDiff = useCallback(async (code, filePath) => {
     if (filePath && window.electronAPI?.writeFile) {
       const result = await window.electronAPI.writeFile(filePath, code);
       if (!result.success) {
         // Fallback to clipboard
-        navigator.clipboard.writeText(code);
+        await safeCopyText(code);
       }
     } else {
-      navigator.clipboard.writeText(code);
+      await safeCopyText(code);
     }
   }, []);
 
@@ -189,6 +208,28 @@ export default function MessageList({ messages, loading, onRefine, onRetry, onRe
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  useEffect(() => {
+    return () => {
+      if (copyResetTimerRef.current) {
+        clearTimeout(copyResetTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleCopyMessage = useCallback(async (msgIdx, text) => {
+    const ok = await safeCopyText(text);
+    if (!ok) return;
+
+    setCopiedMsgIdx(msgIdx);
+    if (copyResetTimerRef.current) {
+      clearTimeout(copyResetTimerRef.current);
+    }
+    copyResetTimerRef.current = setTimeout(() => {
+      setCopiedMsgIdx(null);
+      copyResetTimerRef.current = null;
+    }, 1400);
+  }, []);
 
   /* ── Empty / Welcome State ── */
   if (messages.length === 0 && !loading) {
@@ -313,12 +354,12 @@ export default function MessageList({ messages, loading, onRefine, onRetry, onRe
                     </div>
                   </div>
                   {/* Per-message cost */}
-                  {!isStreaming && msg.content && (msg.cost > 0 || msg.isFree) && (
+                  {!isStreaming && (msg.content || msg._imageUrl) && (msg.cost > 0 || msg.isFree || msg.usage) && (
                     <span className="text-[11px] text-dark-400 select-none" style={{ marginLeft: '34px' }}>
-                      {msg.isFree && msg.cost === 0 ? "Free" : `Cost: ${formatCost(msg.cost)}`}
-                      {msg.usage && (
+                      {costLabel(msg)}
+                      {msg.usage && usageTokenCount(msg.usage) > 0 && (
                         <span className="ml-2 text-dark-400/70">
-                          · {msg.usage.prompt_tokens + msg.usage.completion_tokens} tokens
+                          · {usageTokenCount(msg.usage)} tokens
                         </span>
                       )}
                     </span>
@@ -327,17 +368,48 @@ export default function MessageList({ messages, loading, onRefine, onRetry, onRe
                   {!isStreaming && msg.content && (
                     <div className="flex items-center gap-1 mt-0.5 flex-wrap" style={{ marginLeft: '34px' }}>
                       <button
-                        onClick={() => {
+                        onClick={async () => {
                           const text = typeof msg.content === "string" ? msg.content : "";
-                          navigator.clipboard.writeText(text);
+                          await handleCopyMessage(i, text);
                         }}
-                        className="flex items-center gap-1 text-[10px] text-dark-500 hover:text-dark-300 cursor-pointer px-1.5 py-1 rounded-md hover:bg-white/[0.04] transition-colors"
+                        className={`flex items-center gap-1 text-[10px] cursor-pointer px-1.5 py-1 rounded-md transition-colors ${
+                          copiedMsgIdx === i
+                            ? "text-emerald-400 bg-emerald-500/[0.08]"
+                            : "text-dark-500 hover:text-dark-300 hover:bg-white/[0.04]"
+                        }`}
                       >
-                        <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                          <rect x="9" y="9" width="13" height="13" rx="2" />
-                          <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-                        </svg>
-                        Copy
+                        <AnimatePresence mode="wait" initial={false}>
+                          {copiedMsgIdx === i ? (
+                            <motion.span
+                              key="copied"
+                              initial={{ opacity: 0, scale: 0.85 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              exit={{ opacity: 0, scale: 0.85 }}
+                              transition={{ duration: 0.16, ease }}
+                              className="flex items-center gap-1"
+                            >
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                              Copied
+                            </motion.span>
+                          ) : (
+                            <motion.span
+                              key="copy"
+                              initial={{ opacity: 0, scale: 0.9 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              exit={{ opacity: 0, scale: 0.9 }}
+                              transition={{ duration: 0.14, ease }}
+                              className="flex items-center gap-1"
+                            >
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                                <rect x="9" y="9" width="13" height="13" rx="2" />
+                                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                              </svg>
+                              Copy
+                            </motion.span>
+                          )}
+                        </AnimatePresence>
                       </button>
                       <button
                         onClick={() => onRefine?.(i)}

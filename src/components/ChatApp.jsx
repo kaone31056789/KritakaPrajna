@@ -18,7 +18,7 @@ import { generateAdvisorData } from "../utils/modelAdvisor";
 import { loadAdvisorRankingSignals } from "../utils/advisorRanking";
 import { loadProviderUsage, providerUsageRows, recordProviderUsage } from "../utils/usageTracker";
 import { supportsReasoningModel } from "../utils/reasoningControls";
-import { DEFAULT_SHORTCUTS, eventToShortcut, mergeShortcuts, normalizeShortcutString } from "../utils/keyboardShortcuts";
+import { eventToShortcut, mergeShortcuts, normalizeShortcutString } from "../utils/keyboardShortcuts";
 import {
   USER_MEMORY_STORAGE_KEY,
   DEFAULT_USER_MEMORY,
@@ -33,6 +33,7 @@ import { extractMemoryWithAI } from "../utils/aiMemoryExtractor";
 const ease = [0.4, 0, 0.2, 1];
 const CHATS_KEY = "openrouter_chats";
 const ACTIVE_CHAT_KEY = "openrouter_active_chat";
+const LAST_MODEL_KEY = "openrouter_last_model";
 const MODEL_PREF_KEY = "openrouter_model_pref";
 const TASK_PREF_KEY = "openrouter_task_pref";
 const REASONING_DEPTH_KEY = "openrouter_reasoning_depth";
@@ -141,8 +142,11 @@ function providerLabel(provider) {
 
 export default function ChatApp({ providers, onSaveProviderKey, onRemoveProviderKey, onResetAll }) {
   const [models, setModels] = useState([]);
-  const [selectedModel, setSelectedModel] = useState("");
-  const [selectedTask, setSelectedTask] = useState(() => localStorage.getItem(TASK_PREF_KEY) || "text-generation");
+  const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem(LAST_MODEL_KEY) || "");
+  const [selectedTask, setSelectedTask] = useState(() => {
+    const savedTask = localStorage.getItem(TASK_PREF_KEY) || "text-generation";
+    return (savedTask === "more" || savedTask === "any-to-any") ? "text-generation" : savedTask;
+  });
   const [reasoningDepth, setReasoningDepth] = useState(() => localStorage.getItem(REASONING_DEPTH_KEY) || "balanced");
   const [chats, setChats] = useState(loadChats);
   const [activeChatId, setActiveChatId] = useState(loadActiveId);
@@ -179,6 +183,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
   const [shortcuts, setShortcuts] = useState(() => mergeShortcuts({}));
   const [modelSelectorOpenSignal, setModelSelectorOpenSignal] = useState(0);
   const [userMemory, setUserMemory] = useState(DEFAULT_USER_MEMORY);
+  const userMemoryRef = useRef(DEFAULT_USER_MEMORY);
 
   // Current chat's messages
   const activeChat = chats.find((c) => c.id === activeChatId);
@@ -200,6 +205,11 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
   useEffect(() => {
     saveActiveId(activeChatId);
   }, [activeChatId]);
+
+  useEffect(() => {
+    if (!selectedModel) return;
+    localStorage.setItem(LAST_MODEL_KEY, selectedModel);
+  }, [selectedModel]);
 
   useEffect(() => {
     localStorage.setItem(TASK_PREF_KEY, selectedTask);
@@ -244,6 +254,10 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    userMemoryRef.current = userMemory;
+  }, [userMemory]);
+
   // Recompute smart suggestion when uploads/attachments/model change
   useEffect(() => {
     const taskType = uiTaskToAdvisorTask(selectedTask, "", uploads, attachedFiles);
@@ -265,12 +279,30 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
         if (cancelled) return;
         const sorted = [...data];
         setModels(sorted);
-        // Default to the first free model, or first model overall
-        const free = sorted.find((m) => {
+        if (sorted.length === 0) {
+          setSelectedModel("");
+          return;
+        }
+
+        // Restore the user's last selected model when available.
+        const lastUsedModelId = localStorage.getItem(LAST_MODEL_KEY);
+        const restored = lastUsedModelId ? findModelBySelection(sorted, lastUsedModelId) : null;
+        if (restored) {
+          setSelectedModel(toSelectionId(restored));
+          if (isImageGenModel(restored) && selectedTask !== "text-to-image") {
+            setSelectedTask("text-to-image");
+          }
+          return;
+        }
+
+        // Default to a model matching the current task.
+        const taskModels = filterModelsForTask(sorted, selectedTask);
+        const pool = taskModels.length > 0 ? taskModels : sorted;
+        const free = pool.find((m) => {
           const p = m.pricing;
           return p && Number(p.prompt) === 0 && Number(p.completion) === 0;
         });
-        setSelectedModel(free ? toSelectionId(free) : toSelectionId(sorted[0]) || "");
+        setSelectedModel(free ? toSelectionId(free) : toSelectionId(pool[0]) || "");
       })
       .catch((err) => {
         if (!cancelled) setError("Failed to load models. Check your API keys.");
@@ -312,10 +344,13 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
   }, [uploads, attachedFiles, selectedTask]);
 
   useEffect(() => {
-    const taskModels = filterModelsForTask(models, selectedTask);
-    if (taskModels.length === 0) return;
+    if (!models.length || !selectedModel) return;
 
     const current = findModelBySelection(models, selectedModel);
+    if (!current) return;
+
+    const taskModels = filterModelsForTask(models, selectedTask);
+    if (taskModels.length === 0) return;
     if (current && taskModels.some((m) => modelSelectionId(m) === modelSelectionId(current))) return;
 
     const freeTaskModel = taskModels.find((m) => Number(m.pricing?.prompt) === 0 && Number(m.pricing?.completion) === 0);
@@ -449,9 +484,12 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
       }
 
       // Run smart detection at send time (considers text for coding keywords)
+      const selectedModelObj = findModelBySelection(models, selectedModel);
+      const lockTaskToSelectedModel = selectedTask === "text-to-image" || isImageGenModel(selectedModelObj);
       const autoTask = detectUiTask(processedText, uploads, attachedFiles);
-      if (autoTask !== selectedTask) setSelectedTask(autoTask);
-      const taskType = uiTaskToAdvisorTask(autoTask, processedText, uploads, attachedFiles);
+      const effectiveTask = lockTaskToSelectedModel ? selectedTask : autoTask;
+      if (!lockTaskToSelectedModel && autoTask !== selectedTask) setSelectedTask(autoTask);
+      const taskType = uiTaskToAdvisorTask(effectiveTask, processedText, uploads, attachedFiles);
 
       // ── Show task suggestion banner (coding/vision/document) ──
       if (taskType !== "general") {
@@ -475,7 +513,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
       }
 
       // ── Show cheapest model banner ──
-      const cheapest = findCheapestModel(models, taskType, (m) => supportsTask(m, autoTask));
+      const cheapest = findCheapestModel(models, taskType, (m) => supportsTask(m, effectiveTask));
       if (cheapest && toSelectionId(cheapest.model) !== selectedModel) {
         setCheapestBanner({
           visible: true,
@@ -625,20 +663,49 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
 
       try {
         const currentModelObj = findModelBySelection(models, selectedModel);
+        const shouldRunImageGeneration =
+          !!currentModelObj &&
+          (
+            isImageGenModel(currentModelObj) ||
+            (effectiveTask === "text-to-image" && supportsTask(currentModelObj, "text-to-image"))
+          );
 
         // ── Image generation ──────────────────────────────────────────────────
-        if (isImageGenModel(currentModelObj)) {
-          const { imageUrl } = await routeImageGen(providers, currentModelObj, textContent);
+        if (shouldRunImageGeneration) {
+          const imageResult = await routeImageGen(providers, currentModelObj, textContent);
+          const imageUrl = imageResult?.imageUrl;
+          const pricing = currentModelObj?.pricing;
+          const resolvedUsage = imageResult?.usage && (
+            (imageResult.usage.prompt_tokens || 0) > 0 ||
+            (imageResult.usage.completion_tokens || 0) > 0 ||
+            (imageResult.usage.image_tokens || 0) > 0
+          )
+            ? imageResult.usage
+            : estimateUsageFromMessages([{ role: "user", content: textContent }], "");
+          const apiCost = imageResult?.cost ?? imageResult?.usage?.cost;
+          const cost = (apiCost != null && apiCost >= 0) ? apiCost : calculateCost(resolvedUsage, pricing);
+          const free = isModelFree(pricing);
+          const usageSnapshot = recordProviderUsage(currentModelObj?._provider || "openrouter", resolvedUsage, cost);
+          setProviderUsage(usageSnapshot);
+
           setChats((prev) =>
             prev.map((c) => {
               if (c.id !== chatId) return c;
               const next = [...c.messages];
-              next[next.length - 1] = { ...next[next.length - 1], content: "", _imageUrl: imageUrl };
+              next[next.length - 1] = {
+                ...next[next.length - 1],
+                content: "",
+                _imageUrl: imageUrl,
+                cost,
+                isFree: free,
+                usage: resolvedUsage,
+                _modelUsed: currentModelObj?._selectionId || selectedModel,
+              };
               return { ...c, messages: next };
             })
           );
           setLoading(false);
-          recordSuccess(selectedModel);
+          recordSuccess(selectedModel, Date.now() - startTime);
           return;
         }
 
@@ -681,7 +748,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
         recordSuccess(selectedModel, responseTime);
 
         // Generate advisor data
-        const taskTypeForAdvisor = uiTaskToAdvisorTask(autoTask, processedText || text, uploads, attachedFiles);
+        const taskTypeForAdvisor = uiTaskToAdvisorTask(effectiveTask, processedText || text, uploads, attachedFiles);
         const advisor = generateAdvisorData({
           models,
           currentModelId: currentModelObj?._selectionId || selectedModel,
@@ -715,11 +782,8 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
         if (userMemory.autoMode) {
           extractMemoryWithAI(providers, text.trim(), result.text || "").then((aiMemory) => {
             if (aiMemory && hasUserMemory(aiMemory)) {
-              setUserMemory((prev) => {
-                const merged = mergeUserMemory(prev, aiMemory);
-                handleSaveMemory(merged).catch(() => {});
-                return merged;
-              });
+              const merged = mergeUserMemory(userMemoryRef.current, aiMemory);
+              handleSaveMemory(merged).catch(() => {});
             }
           }).catch(() => {});
         }
@@ -821,13 +885,29 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
     [activeChatId, handleSend]
   );
 
+  const selectModelAndSyncTask = useCallback((modelSelId) => {
+    setSelectedModel(modelSelId);
+
+    const chosen = findModelBySelection(models, modelSelId);
+    if (!chosen) return;
+
+    if (isImageGenModel(chosen)) {
+      if (selectedTask !== "text-to-image") setSelectedTask("text-to-image");
+      return;
+    }
+
+    if (selectedTask === "text-to-image") {
+      setSelectedTask("text-generation");
+    }
+  }, [models, selectedTask]);
+
   /** Called when user picks a model from the picker and wants to retry */
   const handleRetryWithModel = useCallback(
     (modelSelId) => {
       const last = lastRequestRef.current;
       if (!last) return;
       setModelPickerOpen(false);
-      setSelectedModel(modelSelId);
+      selectModelAndSyncTask(modelSelId);
 
       setChats((prev) =>
         prev.map((c) => {
@@ -843,7 +923,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
       setLastError(null);
       setTimeout(() => handleSend(last.text), 80);
     },
-    [activeChatId, handleSend]
+    [activeChatId, handleSend, selectModelAndSyncTask]
   );
 
   /** Called from MessageList retry buttons (on error messages) */
@@ -860,8 +940,8 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
 
   /** Called from ModelAdvisorCard — switch to a suggested model for next message */
   const handleAdvisorSwitch = useCallback((modelId) => {
-    setSelectedModel(modelId);
-  }, []);
+    selectModelAndSyncTask(modelId);
+  }, [selectModelAndSyncTask]);
 
   const handleNewChat = () => {
     handleStop();
@@ -879,10 +959,10 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
   };
 
   const handleAcceptSuggestion = useCallback((modelId) => {
-    setSelectedModel(modelId);
+    selectModelAndSyncTask(modelId);
     setSmartSuggestion(null);
     setSuggestionDismissed(false);
-  }, []);
+  }, [selectModelAndSyncTask]);
 
   const handleDismissSuggestion = useCallback(() => {
     setSuggestionDismissed(true);
@@ -900,8 +980,12 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
       }
 
       const nextTask = detectUiTask(text, uploads, attachedFiles);
-      if (nextTask !== selectedTask) setSelectedTask(nextTask);
-      const taskType = uiTaskToAdvisorTask(nextTask, text, uploads, attachedFiles);
+      const currentModel = findModelBySelection(models, selectedModel);
+      const lockTaskToSelectedModel = selectedTask === "text-to-image" || isImageGenModel(currentModel);
+      const effectiveTask = lockTaskToSelectedModel ? selectedTask : nextTask;
+
+      if (!lockTaskToSelectedModel && nextTask !== selectedTask) setSelectedTask(nextTask);
+      const taskType = uiTaskToAdvisorTask(effectiveTask, text, uploads, attachedFiles);
       if (taskType === "general") {
         setTaskBanner(null);
         setCheapestBanner(null);
@@ -925,7 +1009,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
       }
 
       // Show cheapest banner for detected task
-      const cheapest = findCheapestModel(models, taskType, (m) => supportsTask(m, nextTask));
+      const cheapest = findCheapestModel(models, taskType, (m) => supportsTask(m, effectiveTask));
       if (cheapest && toSelectionId(cheapest.model) !== selectedModel) {
         setCheapestBanner({
           visible: true,
@@ -955,18 +1039,27 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
   const handleSaveShortcuts = useCallback(async (nextShortcuts) => {
     const merged = mergeShortcuts(nextShortcuts);
     setShortcuts(merged);
-    if (window.electronAPI?.setAllShortcuts) {
-      await window.electronAPI.setAllShortcuts(merged);
-    } else {
+    try {
+      if (window.electronAPI?.setAllShortcuts) {
+        await window.electronAPI.setAllShortcuts(merged);
+      } else {
+        localStorage.setItem("openrouter_keyboard_shortcuts", JSON.stringify(merged));
+      }
+    } catch {
       localStorage.setItem("openrouter_keyboard_shortcuts", JSON.stringify(merged));
     }
   }, []);
 
   const handleResetShortcuts = useCallback(async () => {
-    setShortcuts(DEFAULT_SHORTCUTS);
-    if (window.electronAPI?.resetAllShortcuts) {
-      await window.electronAPI.resetAllShortcuts();
-    } else {
+    const resetValue = mergeShortcuts({});
+    setShortcuts(resetValue);
+    try {
+      if (window.electronAPI?.resetAllShortcuts) {
+        await window.electronAPI.resetAllShortcuts();
+      } else {
+        localStorage.removeItem("openrouter_keyboard_shortcuts");
+      }
+    } catch {
       localStorage.removeItem("openrouter_keyboard_shortcuts");
     }
   }, []);
@@ -976,13 +1069,19 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
       const shortcut = eventToShortcut(event);
       if (!shortcut) return;
 
-      const matches = (actionId) => normalizeShortcutString(shortcuts[actionId]) === shortcut;
       const target = event.target;
       const typingTarget = target instanceof HTMLElement && (
         target.tagName === "TEXTAREA" ||
         target.tagName === "INPUT" ||
         target.isContentEditable
       );
+
+      // Do not execute global chat shortcuts while inside Settings.
+      if (showSettings) return;
+
+      const matches = (actionId) => normalizeShortcutString(shortcuts[actionId]) === shortcut;
+
+      if (typingTarget && !matches("openSettings")) return;
 
       if (matches("openSettings")) {
         event.preventDefault();
@@ -1014,8 +1113,6 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
         if (!showSettings) setModelSelectorOpenSignal((v) => v + 1);
         return;
       }
-
-      if (typingTarget) return;
     };
 
     window.addEventListener("keydown", onKeyDown);
@@ -1294,7 +1391,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
             models={models}
             selected={selectedModel}
             selectedModel={findModelBySelection(models, selectedModel)}
-            onSelect={setSelectedModel}
+            onSelect={selectModelAndSyncTask}
             selectedTask={selectedTask}
             onTaskChange={setSelectedTask}
             openSignal={modelSelectorOpenSignal}

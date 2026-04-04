@@ -9,7 +9,7 @@
  * Each value is a string API key or null/undefined if not configured.
  */
 
-import { fetchModels as fetchOpenRouterModels, streamMessage as streamOpenRouter, fetchCredits, generateImage as generateImageOR, IMAGE_GEN_MODELS as OR_IMAGE_MODELS } from "./openrouter";
+import { fetchModels as fetchOpenRouterModels, streamMessage as streamOpenRouter, fetchCredits, generateImage as generateImageOR } from "./openrouter";
 import { fetchModels as fetchOpenAIModels, streamMessage as streamOpenAI } from "./openai";
 import { fetchModels as fetchAnthropicModels, streamMessage as streamAnthropic } from "./anthropic";
 import { fetchModels as fetchHFModels, streamMessage as streamHF, generateImage as generateImageHF, IMAGE_GEN_MODELS as HF_IMAGE_MODELS } from "./huggingface";
@@ -47,6 +47,14 @@ export function hasSuggestions(provider) {
   return PROVIDER_META[provider]?.hasSuggestions ?? false;
 }
 
+function inferImageOutputCapability(model) {
+  const modality = String(model?.architecture?.modality || "").toLowerCase();
+  const outputs = Array.isArray(model?.architecture?.output_modalities)
+    ? model.architecture.output_modalities.map((m) => String(m).toLowerCase())
+    : [];
+  return outputs.includes("image") || modality.includes("->image");
+}
+
 // ── Fetch models from all active providers ───────────────────────────────────
 
 /**
@@ -58,7 +66,15 @@ export function hasSuggestions(provider) {
  */
 export async function fetchAllModels(providerKeys) {
   const results = await Promise.allSettled([
-    providerKeys?.openrouter  ? fetchOpenRouterModels(providerKeys.openrouter).then(ms => ms.map(m => ({ ...m, _provider: "openrouter"  }))) : Promise.resolve([]),
+    providerKeys?.openrouter
+      ? fetchOpenRouterModels(providerKeys.openrouter).then((ms) =>
+          ms.map((m) => ({
+            ...m,
+            _provider: "openrouter",
+            _isImageGen: !!m._isImageGen || inferImageOutputCapability(m),
+          }))
+        )
+      : Promise.resolve([]),
     providerKeys?.openai      ? fetchOpenAIModels(providerKeys.openai)                                                                       : Promise.resolve([]),
     providerKeys?.anthropic   ? fetchAnthropicModels(providerKeys.anthropic)                                                                 : Promise.resolve([]),
     providerKeys?.huggingface ? fetchHFModels(providerKeys.huggingface)                                                                      : Promise.resolve([]),
@@ -70,11 +86,25 @@ export async function fetchAllModels(providerKeys) {
 
   // Append image and video generation models for active providers
   const imageModels = [
-    ...(providerKeys?.openrouter  ? OR_IMAGE_MODELS : []),
     ...(providerKeys?.huggingface ? HF_IMAGE_MODELS : []),
   ].map(withSelectionMeta);
 
-  return [...chatModels, ...imageModels];
+  // De-duplicate by selection id so image model metadata wins when ids overlap.
+  const mergedBySelection = new Map();
+
+  for (const model of chatModels) {
+    mergedBySelection.set(model._selectionId, model);
+  }
+
+  for (const model of imageModels) {
+    const existing = mergedBySelection.get(model._selectionId);
+    mergedBySelection.set(
+      model._selectionId,
+      existing ? { ...existing, ...model } : model
+    );
+  }
+
+  return Array.from(mergedBySelection.values());
 }
 
 /** Returns true if the model is an image generation model */

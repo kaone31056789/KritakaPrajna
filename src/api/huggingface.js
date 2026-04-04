@@ -2,9 +2,14 @@ import { mapReasoningEffort, supportsReasoningModel } from "../utils/reasoningCo
 const API_BASE = "https://router.huggingface.co/v1";
 const HUB_API  = "https://huggingface.co/api/models";
 
+const BLOCKED_MODEL_IDS = new Set([
+  "deepseek-ai/DeepSeek-V3.2",
+]);
+
 // Fallback list — used when Hub API fetch fails.
 // Only small/medium models reliably supported on HuggingFace's free Serverless Inference tier.
 const FALLBACK_MODELS = [
+  "deepseek-ai/DeepSeek-V3.2-Exp",
   "HuggingFaceTB/SmolLM3-3B",
   "HuggingFaceTB/SmolLM2-1.7B-Instruct",
   "Qwen/Qwen2.5-7B-Instruct",
@@ -25,6 +30,7 @@ const PREFERRED_PREFIXES = [
   "openai/gpt-oss",
   "moonshotai/Kimi",
   "zai-org/GLM",
+  "deepseek-ai/DeepSeek-V3",
   "deepseek-ai/DeepSeek-R1",
   "Qwen/Qwen3",
   "Qwen/Qwen2.5-Coder-32B-Instruct",
@@ -69,9 +75,11 @@ function buildRouterModel(raw) {
   const inputPerMillion = Number(raw?.pricing?.input);
   const outputPerMillion = Number(raw?.pricing?.output);
 
+  const id = raw.id || raw.modelId;
+
   return {
-    id: raw.id || raw.modelId,
-    name: idToName(raw.id || raw.modelId),
+    id,
+    name: idToName(id),
     pricing: {
       prompt: Number.isFinite(inputPerMillion) ? String(inputPerMillion / 1_000_000) : "0",
       completion: Number.isFinite(outputPerMillion) ? String(outputPerMillion / 1_000_000) : "0",
@@ -93,7 +101,7 @@ function isLikelyChatModel(modelId) {
   const hints = [
     "instruct", "chat", "-it", "_it", "assistant", "zephyr", "hermes",
     "openhermes", "command-r", "smollm", "phi", "deepseek-r1-distill",
-    "deepseek-r1", "thinking", "aya", "1m",
+    "deepseek-r1", "deepseek-v3", "thinking", "aya", "1m",
     "gemma-4", "gemma-3", "gemma-2", "coder", "reasoner", "kimi", "gpt-oss",
     "glm-4", "llama-4", "llama-3.3", "sonoma", "magistral", "mistral-small",
   ];
@@ -120,6 +128,10 @@ function isNonChatTaskModel(modelId) {
     "moderation", "sentence-transformer", "bge-", "gte-", "jina-embeddings",
   ];
   return blocked.some((hint) => id.includes(hint));
+}
+
+function isBlockedModelId(modelId) {
+  return BLOCKED_MODEL_IDS.has(modelId);
 }
 
 function sortModels(models) {
@@ -151,6 +163,7 @@ async function fetchRouterModels(apiKey) {
     .filter((m) => {
       const modelId = m.id || m.modelId;
       if (!modelId) return false;
+      if (isBlockedModelId(modelId)) return false;
       if (isNonChatTaskModel(modelId)) return false;
       if (!isLikelyChatModel(modelId)) return false;
       if (!isBadVariant(modelId)) return false;
@@ -163,6 +176,204 @@ async function fetchRouterModels(apiKey) {
 function normalizeChatModel(modelId) {
   if (!modelId) return modelId;
   return modelId.includes(":") ? modelId : `${modelId}:fastest`;
+}
+
+function stripRoutingSuffix(modelId) {
+  if (!modelId) return modelId;
+  const idx = modelId.indexOf(":");
+  return idx === -1 ? modelId : modelId.slice(0, idx);
+}
+
+function parseErrorDetail(text) {
+  let detail = text;
+  try {
+    const json = JSON.parse(text);
+    detail = json?.error?.message || json?.error || json?.message || text;
+  } catch {}
+  return String(detail || "Unknown error");
+}
+
+function contentPartToText(part) {
+  if (!part) return "";
+  if (typeof part === "string") return part;
+  if (part.type === "text" && typeof part.text === "string") return part.text;
+  if (part.type === "image_url") return "[Image omitted]";
+  return "";
+}
+
+function contentToText(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.map(contentPartToText).filter(Boolean).join("\n");
+}
+
+function toTextGenerationPrompt(messages) {
+  const lines = [];
+  for (const msg of messages || []) {
+    const role = msg?.role || "user";
+    const text = contentToText(msg?.content).trim();
+    if (!text) continue;
+
+    const label = role === "system"
+      ? "System"
+      : role === "assistant"
+        ? "Assistant"
+        : role === "tool"
+          ? "Tool"
+          : "User";
+
+    lines.push(`${label}: ${text}`);
+  }
+
+  lines.push("Assistant:");
+  return lines.join("\n\n");
+}
+
+function extractGeneratedText(payload, prompt) {
+  let text = "";
+
+  if (Array.isArray(payload)) {
+    text = payload[0]?.generated_text || payload[0]?.text || "";
+  } else if (payload && typeof payload === "object") {
+    text =
+      payload.generated_text ||
+      payload.text ||
+      payload?.choices?.[0]?.message?.content ||
+      payload?.choices?.[0]?.text ||
+      "";
+  } else if (typeof payload === "string") {
+    text = payload;
+  }
+
+  if (text && prompt && text.startsWith(prompt)) {
+    text = text.slice(prompt.length).trimStart();
+  }
+
+  return String(text || "").replace(/^assistant:\s*/i, "").trim();
+}
+
+function shouldUseTextGenerationFallback(status, detail, modelId) {
+  if (![400, 404, 422].includes(status)) return false;
+
+  const lower = String(detail || "").toLowerCase();
+  if (lower.includes("not a chat model")) return true;
+  if (lower.includes("chat template")) return true;
+  if (lower.includes("chat/completions")) return true;
+  if (lower.includes("messages") && lower.includes("unsupported")) return true;
+
+  // DeepSeek V3.2 is often exposed as text-generation on HF instead of chat/completions.
+  return String(modelId || "").toLowerCase().includes("deepseek-v3.2");
+}
+
+async function streamViaCompletions(apiKey, modelId, messages, { onChunk, signal } = {}) {
+  const body = {
+    model: normalizeChatModel(modelId),
+    prompt: toTextGenerationPrompt(messages),
+    stream: true,
+    max_tokens: 2048,
+  };
+
+  const res = await fetch(`${API_BASE}/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`HuggingFace ${res.status}: ${parseErrorDetail(text)}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let full = "";
+  let buffer = "";
+  let usage = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith("data: ")) continue;
+      const payload = trimmed.slice(6);
+      if (payload === "[DONE]") break;
+
+      try {
+        const json = JSON.parse(payload);
+        const token = json.choices?.[0]?.text || json.choices?.[0]?.delta?.content;
+        if (token) {
+          full += token;
+          onChunk?.(full);
+        }
+        if (json.usage) {
+          usage = {
+            prompt_tokens: json.usage.prompt_tokens || 0,
+            completion_tokens: json.usage.completion_tokens || 0,
+            cost: null,
+          };
+        }
+      } catch {}
+    }
+  }
+
+  return { text: full || "(No response)", usage };
+}
+
+async function streamViaTextGeneration(apiKey, modelId, messages, { onChunk, signal } = {}) {
+  const prompt = toTextGenerationPrompt(messages);
+  const resolvedModel = stripRoutingSuffix(modelId);
+
+  const res = await fetch(`https://router.huggingface.co/hf-inference/models/${resolvedModel}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "x-wait-for-model": "true",
+    },
+    body: JSON.stringify({
+      inputs: prompt,
+      parameters: {
+        max_new_tokens: 2048,
+        return_full_text: false,
+      },
+      options: {
+        wait_for_model: true,
+      },
+    }),
+    signal,
+  });
+
+  const rawText = await res.text();
+  if (!res.ok) {
+    throw new Error(`HuggingFace ${res.status}: ${parseErrorDetail(rawText)}`);
+  }
+
+  let payload = rawText;
+  try {
+    payload = JSON.parse(rawText);
+  } catch {}
+
+  if (payload && typeof payload === "object" && !Array.isArray(payload) && payload.error) {
+    throw new Error(`HuggingFace: ${payload.error}`);
+  }
+
+  const text = extractGeneratedText(payload, prompt) || "(No response)";
+  onChunk?.(text);
+
+  return {
+    text,
+    usage: null,
+  };
 }
 
 /**
@@ -204,6 +415,7 @@ export async function fetchModels(apiKey) {
       .filter((m) => {
         const modelId = m.modelId || m.id;
         if (!modelId) return false;
+        if (isBlockedModelId(modelId)) return false;
         if (isNonChatTaskModel(modelId)) return false;
         if (!isLikelyChatModel(modelId)) return false;
         if (!isLikelySupportedSize(modelId)) return false;
@@ -299,11 +511,22 @@ export async function streamMessage(apiKey, modelId, messages, { onChunk, signal
 
   if (!res.ok) {
     const text = await res.text();
-    let detail = text;
-    try {
-      const j = JSON.parse(text);
-      detail = j.error?.message || j.error || text;
-    } catch {}
+    const detail = parseErrorDetail(text);
+    if (shouldUseTextGenerationFallback(res.status, detail, modelId)) {
+      try {
+        return await streamViaCompletions(apiKey, modelId, messages, { onChunk, signal });
+      } catch (completionErr) {
+        const completionMsg = String(completionErr?.message || "").toLowerCase();
+        const canFallbackToTextGen =
+          completionMsg.includes("404") ||
+          completionMsg.includes("not found") ||
+          completionMsg.includes("unsupported") ||
+          completionMsg.includes("endpoint");
+
+        if (!canFallbackToTextGen) throw completionErr;
+        return streamViaTextGeneration(apiKey, modelId, messages, { onChunk, signal });
+      }
+    }
     throw new Error(`HuggingFace ${res.status}: ${detail}`);
   }
 

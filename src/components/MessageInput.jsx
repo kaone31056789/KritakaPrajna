@@ -82,7 +82,7 @@ export default function MessageInput({
   };
 
   return (
-    <div className="shrink-0 pb-5 pt-2 px-4">
+    <div data-message-composer className="shrink-0 pb-5 pt-2 px-4">
       <div className="max-w-3xl mx-auto relative">
         {showReasoningControl && (
           <div className="mb-2 px-1">

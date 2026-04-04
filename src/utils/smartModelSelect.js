@@ -19,7 +19,6 @@ const CODING_KEYWORDS = [
 
 export const TASK_OPTIONS = [
   { id: "text-generation", label: "Text Generation", capability: "text" },
-  { id: "any-to-any", label: "Any-to-Any", capability: "multimodal" },
   { id: "image-to-text", label: "Image-to-Text", capability: "vision" },
   { id: "image-to-image", label: "Image-to-Image", capability: "image-edit" },
   { id: "text-to-image", label: "Text-to-Image", capability: "image-gen" },
@@ -49,7 +48,7 @@ export function detectUiTask(text, uploads = [], attachedFiles = []) {
   if (/(generate|create|make).*(video|clip|animation)/.test(lower)) return "text-to-video";
   if (/(text to speech|tts|voiceover|narrate|read aloud|speak this)/.test(lower)) return "text-to-speech";
   if (/(edit image|modify image|restyle image|image to image|img2img)/.test(lower)) return "image-to-image";
-  if (/(any to any|multimodal|audio and image|video and text)/.test(lower)) return "any-to-any";
+  if (/(any to any|multimodal|audio and image|video and text)/.test(lower)) return "text-generation";
   if (uploads.some((u) => u.type === "pdf") || uploads.some((u) => u.type === "file") || attachedFiles.length > 0) return "text-generation";
 
   return "text-generation";

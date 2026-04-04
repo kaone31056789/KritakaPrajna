@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { TASK_OPTIONS, filterModelsForTask } from "../utils/smartModelSelect";
+import { filterModelsForTask } from "../utils/smartModelSelect";
 
 const ease = [0.4, 0, 0.2, 1];
 const FAVORITES_KEY = "openrouter_favorites";
@@ -286,9 +286,12 @@ export default function ModelSelector({ models, selected, onSelect, selectedMode
   const [warnModel, setWarnModel] = useState(null); // { id, name, est }
   const [collapsedProviders, setCollapsedProviders] = useState({});
   const [favorites, setFavorites] = useState(loadFavorites);
+  const [listMaxHeight, setListMaxHeight] = useState(520);
   const containerRef = useRef(null);
   const searchRef = useRef(null);
   const selectedItemRef = useRef(null);
+  const dropdownPanelRef = useRef(null);
+  const dropdownHeaderRef = useRef(null);
 
   const favSet = useMemo(() => new Set(favorites), [favorites]);
 
@@ -324,6 +327,36 @@ export default function ModelSelector({ models, selected, onSelect, selectedMode
   useEffect(() => {
     if (openSignal > 0) setOpen(true);
   }, [openSignal]);
+
+  const recalcListMaxHeight = useCallback(() => {
+    if (!open) return;
+
+    const panelTop = dropdownPanelRef.current?.getBoundingClientRect().top;
+    if (!Number.isFinite(panelTop)) return;
+
+    const headerHeight = dropdownHeaderRef.current?.getBoundingClientRect().height || 120;
+    const composerTop = document.querySelector("[data-message-composer]")?.getBoundingClientRect().top;
+    const lowerBoundary = Number.isFinite(composerTop) ? composerTop - 10 : window.innerHeight - 24;
+
+    const availableForList = Math.floor(lowerBoundary - panelTop - headerHeight);
+    const boundedHeight = Math.min(520, Math.max(140, availableForList));
+    setListMaxHeight(boundedHeight);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const update = () => recalcListMaxHeight();
+    const frame = window.requestAnimationFrame(update);
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [open, recalcListMaxHeight, warnModel]);
 
   // Derive avg tokens/msg from real usage data so budget indicator reflects actual behaviour
   const avgMsgTokens = useMemo(() => {
@@ -368,16 +401,14 @@ export default function ModelSelector({ models, selected, onSelect, selectedMode
 
   const selectedObj = selectedModel || models.find((m) => selectionId(m) === selected || m.id === selected);
   const currentProvider = selectedObj?._provider || "openrouter";
-  const currentTask = TASK_OPTIONS.find((task) => task.id === selectedTask);
   const taskMenuOptions = [
     { id: "text-generation", label: "Text to Text" },
     { id: "text-to-image", label: "Image Generation" },
     { id: "image-to-text", label: "Image to Text" },
-    { id: "any-to-any", label: "Any to Any" },
     { id: "image-to-image", label: "Image to Image" },
     { id: "text-to-speech", label: "Text to Speech" },
-    { id: "more", label: "More" },
   ];
+  const currentTask = taskMenuOptions.find((task) => task.id === selectedTask);
 
   const handleSelect = (id) => {
     onSelect(id);
@@ -463,13 +494,14 @@ export default function ModelSelector({ models, selected, onSelect, selectedMode
         <AnimatePresence>
           {open && (
             <motion.div
+              ref={dropdownPanelRef}
               initial={{ opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.2, ease }}
               className="absolute z-50 mt-2 w-full min-w-[420px] max-w-[720px] bg-dark-800 border border-white/[0.08] rounded-2xl shadow-2xl shadow-black/40 overflow-hidden"
             >
-              <div className="p-3 border-b border-white/[0.06] space-y-2">
+              <div ref={dropdownHeaderRef} className="p-3 border-b border-white/[0.06] space-y-2">
                 <input
                   ref={searchRef}
                   type="text"
@@ -530,7 +562,7 @@ export default function ModelSelector({ models, selected, onSelect, selectedMode
                 )}
               </div>
 
-              <div className="max-h-[520px] overflow-y-auto py-2">
+              <div className="overflow-y-auto py-2" style={{ maxHeight: `${listMaxHeight}px` }}>
                 {filtered.length === 0 && <div className="px-4 py-6 text-sm text-dark-400 text-center">No models available for this task</div>}
 
                 {favoriteModels.length > 0 && (

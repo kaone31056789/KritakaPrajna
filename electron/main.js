@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, safeStorage, session } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Menu, safeStorage, session, clipboard } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const Store = require("electron-store");
@@ -100,7 +100,16 @@ function getKeyboardShortcuts() {
 }
 
 function setKeyboardShortcuts(shortcuts) {
-  store.set("keyboardShortcuts", shortcuts || {});
+  if (!shortcuts || typeof shortcuts !== "object" || Array.isArray(shortcuts)) return;
+  const MAX_ENTRIES = 100;
+  const MAX_LEN = 200;
+  const sanitized = {};
+  for (const [k, v] of Object.entries(shortcuts).slice(0, MAX_ENTRIES)) {
+    if (typeof k === "string" && typeof v === "string" && k.length <= MAX_LEN && v.length <= MAX_LEN) {
+      sanitized[k] = v;
+    }
+  }
+  store.set("keyboardShortcuts", sanitized);
 }
 
 function resetKeyboardShortcuts() {
@@ -118,11 +127,17 @@ function getUserMemory() {
 }
 
 function setUserMemory(memory) {
+  const MAX_ITEMS = 50;
+  const MAX_STR = 500;
+  const sanitizeArr = (arr) =>
+    Array.isArray(arr)
+      ? arr.slice(0, MAX_ITEMS).map((s) => (typeof s === "string" ? s.slice(0, MAX_STR) : "")).filter(Boolean)
+      : [];
   store.set("userMemory", {
-    preferences: Array.isArray(memory?.preferences) ? memory.preferences : [],
-    coding: Array.isArray(memory?.coding) ? memory.coding : [],
-    context: Array.isArray(memory?.context) ? memory.context : [],
-    autoMode: memory?.autoMode !== false,
+    preferences: sanitizeArr(memory?.preferences),
+    coding:      sanitizeArr(memory?.coding),
+    context:     sanitizeArr(memory?.context),
+    autoMode:    memory?.autoMode !== false,
   });
 }
 
@@ -307,7 +322,7 @@ ipcMain.handle("extract-pdf-text-buffer", async (_event, arrayBuffer) => {
 
 // ── IPC: extract text from PDF ──────────────────────────────────────────────
 ipcMain.handle("extract-pdf-text", async (_event, filePath) => {
-  // PDF extraction is read-only on a user-selected file — no folder-scope restriction needed.
+  if (!isPathAllowed(filePath)) return { error: "Access denied: file is outside the opened folder", text: null };
   try {
     const stat = await fs.promises.stat(filePath);
     if (stat.size > MAX_FILE_SIZE) {
@@ -402,6 +417,16 @@ ipcMain.handle("shortcuts-reset-all", () => { resetKeyboardShortcuts(); });
 ipcMain.handle("memory-get", () => getUserMemory());
 ipcMain.handle("memory-set", (_event, memory) => { setUserMemory(memory); });
 ipcMain.handle("memory-reset", () => { resetUserMemory(); });
+ipcMain.handle("clipboard-write-text", (_event, text) => {
+  try {
+    const MAX_CLIPBOARD = 1_000_000; // 1 MB cap
+    const str = typeof text === "string" ? text : String(text || "");
+    clipboard.writeText(str.slice(0, MAX_CLIPBOARD));
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message || "Clipboard write failed" };
+  }
+});
 
 // ── IPC: window controls ────────────────────────────────────────────────────
 ipcMain.handle("window-minimize", () => { if (mainWindow) mainWindow.minimize(); });

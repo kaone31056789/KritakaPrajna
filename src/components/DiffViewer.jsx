@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { computeDiff } from "../utils/diffEngine";
+import { safeCopyText } from "../utils/clipboard";
 
 const ease = [0.4, 0, 0.2, 1];
 
@@ -54,11 +55,12 @@ export default function DiffViewer({ original, modified, fileName, filePath, onA
     return { adds, removes };
   }, [diff]);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(modified).then(() => {
+  const handleCopy = async () => {
+    const ok = await safeCopyText(modified);
+    if (ok) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    });
+    }
   };
 
   const handleAccept = () => {

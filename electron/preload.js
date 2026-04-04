@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   extractPdfText: (filePath) => ipcRenderer.invoke("extract-pdf-text", filePath),
   extractPdfTextFromBuffer: (arrayBuffer) => ipcRenderer.invoke("extract-pdf-text-buffer", arrayBuffer),
   writeFile: (filePath, content) => ipcRenderer.invoke("write-file", filePath, content),
+  writeClipboardText: (text) => ipcRenderer.invoke("clipboard-write-text", text),
   // Window controls
   windowMinimize: () => ipcRenderer.invoke("window-minimize"),
   windowMaximize: () => ipcRenderer.invoke("window-maximize"),
