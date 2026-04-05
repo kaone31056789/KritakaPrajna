@@ -104,3 +104,66 @@ input:focus, textarea:focus {
   background: #1e293b;
   border-radius: 2px;
 }
+
+/* ── Styled numbered list (keypoints) ── */
+.markdown-body ol.kp-ol {
+  counter-reset: kp-item;
+  list-style: none;
+  padding: 0;
+  margin: 0 0 0.75rem 0;
+}
+
+.markdown-body ol.kp-ol > li.kp-li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  transition: background 0.13s;
+  margin-bottom: 6px;
+}
+
+.markdown-body ol.kp-ol > li.kp-li:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body ol.kp-ol > li.kp-li:hover {
+  background: rgba(255, 255, 255, 0.042);
+}
+
+.markdown-body ol.kp-ol > li.kp-li.kp-point-clickable,
+.markdown-body ul > li.kp-li.kp-point-clickable {
+  cursor: pointer;
+}
+
+.markdown-body ol.kp-ol > li.kp-li.kp-point-clickable:hover,
+.markdown-body ul > li.kp-li.kp-point-clickable:hover {
+  background: rgba(14, 116, 144, 0.16);
+  border-color: rgba(56, 189, 248, 0.28);
+}
+
+.markdown-body li.kp-li.kp-point-clickable:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.55);
+  outline-offset: 2px;
+}
+
+.markdown-body ol.kp-ol > li.kp-li::before {
+  counter-increment: kp-item;
+  content: counter(kp-item);
+  min-width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(251, 191, 36, 0.13);
+  color: rgb(251, 191, 36);
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+  line-height: 1;
+  font-family: "Inter", sans-serif;
+}

@@ -5,6 +5,7 @@ import { extractAllCodeBlocks } from "../utils/diffEngine";
 import { safeCopyText } from "../utils/clipboard";
 import DiffViewer from "./DiffViewer";
 import MarkdownRenderer from "./MarkdownRenderer";
+import WebResultCard from "./WebResultCard";
 
 const ease = [0.4, 0, 0.2, 1];
 const msgVariants = {
@@ -130,15 +131,37 @@ function costLabel(message) {
   return "Cost: --";
 }
 
+function buildSourceUrlMapFromResults(results = []) {
+  const map = {};
+  if (!Array.isArray(results)) return map;
+  results.forEach((src, idx) => {
+    if (!src || !src.url) return;
+    const index = Number(src.index) > 0 ? Number(src.index) : idx + 1;
+    map[String(index)] = src.url;
+  });
+  return map;
+}
+
+function findNearestSourceUrlMap(messages, assistantMsgIndex) {
+  for (let i = assistantMsgIndex - 1; i >= 0; i -= 1) {
+    const candidate = messages[i];
+    if (candidate?.role !== "user") continue;
+    if (Array.isArray(candidate?._webResults) && candidate._webResults.length > 0) {
+      return buildSourceUrlMapFromResults(candidate._webResults);
+    }
+  }
+  return {};
+}
+
 /** Render message content — handles both plain strings and multimodal arrays */
-function MessageContent({ content, isAssistant = false }) {
+function MessageContent({ content, isAssistant = false, onPointClick, sourceUrlMap = null }) {
   if (typeof content === "string") {
     if (isAssistant) {
       const { thinking, isThinking, rest } = parseThinking(content);
       return (
         <>
           {thinking != null && <ThinkingBlock content={thinking} isThinking={isThinking} />}
-          {rest && <MarkdownRenderer content={rest} />}
+          {rest && <MarkdownRenderer content={rest} onPointClick={onPointClick} sourceUrlMap={sourceUrlMap} />}
         </>
       );
     }
@@ -153,7 +176,7 @@ function MessageContent({ content, isAssistant = false }) {
         return (
           <React.Fragment key={idx}>
             {thinking != null && <ThinkingBlock content={thinking} isThinking={isThinking} />}
-            {rest && <MarkdownRenderer content={rest} />}
+            {rest && <MarkdownRenderer content={rest} onPointClick={onPointClick} sourceUrlMap={sourceUrlMap} />}
           </React.Fragment>
         );
       }
@@ -173,7 +196,7 @@ function MessageContent({ content, isAssistant = false }) {
   });
 }
 
-export default function MessageList({ messages, loading, onRefine, onRetry, onRegenerate, lastError }) {
+export default function MessageList({ messages, loading, onRefine, onRetry, onRegenerate, onPointDeepDive, lastError }) {
   const bottomRef = useRef(null);
   const copyResetTimerRef = useRef(null);
   const [dismissedDiffs, setDismissedDiffs] = useState(new Set());
@@ -274,10 +297,12 @@ export default function MessageList({ messages, loading, onRefine, onRetry, onRe
   /* ── Messages ── */
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-3xl mx-auto px-6 py-6 space-y-5">
+      <div className="max-w-[1400px] mx-auto px-6 py-6 space-y-5 w-full">
         {messages.map((msg, i) => {
+          if (msg._hidden) return null;
           const isUser = msg.role === "user";
           const isStreaming = loading && !isUser && i === messages.length - 1;
+          const sourceUrlMap = isUser ? null : findNearestSourceUrlMap(messages, i);
           return (
             <motion.div
               key={i}
@@ -287,7 +312,7 @@ export default function MessageList({ messages, loading, onRefine, onRetry, onRe
               className={`flex ${isUser ? "justify-end" : "justify-start"}`}
             >
               {isUser ? (
-                <div className="flex flex-col items-end gap-1.5 max-w-[80%]">
+                <div className="flex flex-col items-end gap-1.5 max-w-[92%] lg:max-w-[95%]">
                   {/* Attachment chips */}
                   {msg._attachments?.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 justify-end">
@@ -314,6 +339,16 @@ export default function MessageList({ messages, loading, onRefine, onRetry, onRe
                       ))}
                     </div>
                   )}
+                  {/* Web result card — single card for all sources */}
+                  {msg._webResults?.length > 0 && (
+                    <WebResultCard results={msg._webResults} />
+                  )}
+                  {msg._webSearchAttempted && (!msg._webResults || msg._webResults.length === 0) && (
+                    <div className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-lg border border-sky-500/20 bg-sky-500/[0.08] text-sky-200/80">
+                      <span className="w-1.5 h-1.5 rounded-full bg-sky-400/80" />
+                      Web searched, but no reliable live sources were found.
+                    </div>
+                  )}
                   {/* Message text */}
                   {(msg._displayText || typeof msg.content === "string") && (
                     <div className="bg-saffron-600 text-white rounded-2xl rounded-br-sm px-4 py-2.5 min-w-[56px] text-sm leading-relaxed whitespace-pre-wrap break-words shadow-lg shadow-saffron-900/20">
@@ -322,7 +357,7 @@ export default function MessageList({ messages, loading, onRefine, onRetry, onRe
                   )}
                 </div>
               ) : (
-                <div className="flex flex-col items-start gap-1 max-w-[85%]">
+                <div className="flex flex-col items-start gap-1 max-w-[94%] lg:max-w-[96%]">
                   <div className="flex items-start gap-2.5">
                     <AiIcon />
                     <div
@@ -336,7 +371,12 @@ export default function MessageList({ messages, loading, onRefine, onRetry, onRe
                           style={{ maxHeight: 480 }}
                         />
                       ) : (typeof msg.content === "string" ? msg.content : msg.content?.length) ? (
-                        <MessageContent content={msg.content} isAssistant />
+                        <MessageContent
+                          content={msg.content}
+                          isAssistant
+                          onPointClick={onPointDeepDive}
+                          sourceUrlMap={sourceUrlMap}
+                        />
                       ) : (
                         <span className="inline-flex gap-1 text-saffron-400/60">
                           <motion.span animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.2, repeat: Infinity, ease }}>●</motion.span>

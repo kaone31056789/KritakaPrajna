@@ -18,6 +18,10 @@ export default function MessageInput({
   reasoningDepth = "balanced",
   onReasoningDepthChange,
   sendShortcut = "Ctrl+Enter",
+  webSearchEnabled = true,
+  webSearchMode = "fast",
+  onWebSearchToggle,
+  onWebSearchModeChange,
 }) {
   const SLASH_COMMANDS = externalHints || [
     { cmd: "/explain", desc: "Explain a file", arg: "<file>" },
@@ -81,12 +85,16 @@ export default function MessageInput({
     textareaRef.current?.focus();
   };
 
+  const showWebModeControl = webSearchEnabled && onWebSearchModeChange;
+  const showControlBar = showReasoningControl || showWebModeControl;
+
   return (
     <div data-message-composer className="shrink-0 pb-5 pt-2 px-4">
-      <div className="max-w-3xl mx-auto relative">
-        {showReasoningControl && (
-          <div className="mb-2 px-1">
-            <div className="flex flex-wrap items-center gap-2">
+      <div className="max-w-[1400px] mx-auto relative w-full">
+        {showControlBar && (
+          <div className={`mb-2 px-1 flex flex-wrap items-center gap-2 ${showReasoningControl && showWebModeControl ? "justify-between" : "justify-start"}`}>
+            {showReasoningControl && (
+              <div className="flex flex-wrap items-center gap-2">
               <span
                 className="text-[11px] text-dark-400"
                 title="Controls how deeply the AI thinks before answering"
@@ -112,12 +120,49 @@ export default function MessageInput({
                   {option.label}
                 </button>
               ))}
-            </div>
-            {reasoningDepth === "deep" && (
-              <p className="mt-1.5 text-[10px] text-saffron-300/80">
-                Deep reasoning may increase cost and response time.
-              </p>
+              </div>
             )}
+
+            {showWebModeControl && (
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.18, ease }}
+                className="inline-flex items-center gap-1.5 rounded-2xl border border-sky-500/25 bg-dark-900/70 backdrop-blur-md px-2 py-1 shadow-[0_8px_24px_rgba(2,6,23,0.45)]"
+                title="Web search mode"
+              >
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-sky-300/80 px-1">
+                  Web
+                </span>
+                <div className="inline-flex items-center gap-0.5 h-7 rounded-full border border-white/[0.07] bg-white/[0.03] p-0.5">
+                  {[
+                    { id: "fast", label: "Fast" },
+                    { id: "deep", label: "Deep" },
+                  ].map((mode) => (
+                    <button
+                      key={mode.id}
+                      type="button"
+                      onClick={() => onWebSearchModeChange(mode.id)}
+                      className={`h-6 px-2.5 rounded-full text-[10px] font-medium transition-colors cursor-pointer ${
+                        webSearchMode === mode.id
+                          ? "text-sky-200 bg-sky-500/20 border border-sky-400/30"
+                          : "text-dark-400 hover:text-dark-200 hover:bg-white/[0.05] border border-transparent"
+                      }`}
+                    >
+                      {mode.label}
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </div>
+        )}
+
+        {showReasoningControl && reasoningDepth === "deep" && (
+          <div className="mb-2 px-1">
+            <p className="text-[10px] text-saffron-300/80">
+              Deep reasoning may increase cost and response time.
+            </p>
           </div>
         )}
 
@@ -184,6 +229,29 @@ export default function MessageInput({
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
             </svg>
           </motion.button>
+
+          {/* Web search toggle */}
+          {onWebSearchToggle && (
+            <motion.button
+              type="button"
+              onClick={onWebSearchToggle}
+              whileHover={{ scale: 1.08 }}
+              whileTap={{ scale: 0.94 }}
+              transition={{ duration: 0.15, ease }}
+              title={webSearchEnabled ? "Web search: On (click to disable)" : "Web search: Off (click to enable)"}
+              className={`flex items-center gap-1 px-2 h-7 rounded-full text-[11px] font-medium cursor-pointer shrink-0 transition-all border ${
+                webSearchEnabled
+                  ? "text-sky-300 bg-sky-500/10 border-sky-500/25 shadow-[0_0_10px_rgba(14,165,233,0.15)]"
+                  : "text-dark-500 bg-transparent border-white/[0.06] hover:text-dark-300"
+              }`}
+            >
+              <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10" />
+                <path strokeLinecap="round" d="M2 12h20M12 2a15.3 15.3 0 010 20M12 2a15.3 15.3 0 000 20" />
+              </svg>
+              <span>Web</span>
+            </motion.button>
+          )}
 
           <textarea
             ref={textareaRef}

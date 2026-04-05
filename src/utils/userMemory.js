@@ -137,12 +137,197 @@ function normalizeEntryKey(text) {
   return cleanEntry(text).toLowerCase();
 }
 
+function toTitleCase(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\b[a-z]/g, (m) => m.toUpperCase());
+}
+
+function canonicalizeMemoryEntry(category, rawEntry) {
+  const entry = cleanEntry(rawEntry);
+  if (!entry) return "";
+
+  const lower = entry.toLowerCase();
+
+  if (category === "preferences") {
+    if (/\b(short|brief|concise|one[- ]sentence|one sentence|tldr)\b/.test(lower)) {
+      return "User prefers short answers";
+    }
+    if (/\b(step[- ]by[- ]step|walk me through|break it down|one step at a time|structured steps?)\b/.test(lower)) {
+      return "User prefers step-by-step explanations";
+    }
+    if (/\b(detailed|in[- ]depth|thorough|deep analysis|elaborate|expanded explanation)\b/.test(lower)) {
+      return "User prefers detailed explanations";
+    }
+    if (/\b(code[- ]first|code only|only code|just the code|skip explanation|no explanation)\b/.test(lower)) {
+      return "User prefers code-first answers";
+    }
+    const langMatch = lower.match(/\b(?:responses?|answers?)\s+in\s+([a-z]+)\b|\bin\s+(hindi|spanish|french|german|arabic|portuguese|japanese|chinese|korean)\b/i);
+    const lang = langMatch?.[1] || langMatch?.[2];
+    if (lang) {
+      return `User prefers responses in ${toTitleCase(lang)}`;
+    }
+    if (/\b(source|sources|citation|citations|references|web source|current web)\b/.test(lower)) {
+      return "User requests current web sources and citations";
+    }
+  }
+
+  if (category === "coding") {
+    if (/\bclean code|readable|well[- ]structured|maintainable|best practices\b/.test(lower)) {
+      return "User prefers clean, readable code";
+    }
+    if (/\b(with comments|add comments|include comments|commented code|comment the code)\b/.test(lower)) {
+      return "User likes code with comments";
+    }
+    if (/\b(functional|arrow functions?|avoid classes?|no class)\b/.test(lower)) {
+      return "User prefers functional programming style";
+    }
+    if (/\b(async\/await|promises?)\b/.test(lower)) {
+      return "User prefers async/await patterns";
+    }
+    if (/\b(node\.?js|node js|node)\b/.test(lower)) {
+      return "User uses Node.js";
+    }
+    if (/\bkali linux\b/.test(lower)) {
+      return "User works with Kali Linux";
+    }
+    if (/\brufus\b.*\bbootable usb\b|\bbootable usb\b.*\brufus\b/.test(lower)) {
+      return "User uses Rufus for bootable USB creation";
+    }
+
+    const languagePatterns = [
+      { pattern: /\bpython\b/, memory: "User prefers Python" },
+      { pattern: /\btypescript\b|\bts\b/, memory: "User prefers TypeScript" },
+      { pattern: /\bjavascript\b|\bjs\b/, memory: "User prefers JavaScript" },
+      { pattern: /\bc\+\+\b|\bcpp\b/, memory: "User prefers C++" },
+      { pattern: /\bc#\b|\bcsharp\b|\.net\b/, memory: "User prefers C#" },
+      { pattern: /\bjava\b/, memory: "User prefers Java" },
+      { pattern: /\brust\b/, memory: "User prefers Rust" },
+      { pattern: /\bgolang\b|\bgo language\b|\bgo code\b/, memory: "User prefers Go" },
+      { pattern: /\bphp\b/, memory: "User prefers PHP" },
+      { pattern: /\bruby\b/, memory: "User prefers Ruby" },
+      { pattern: /\bswift\b/, memory: "User prefers Swift" },
+      { pattern: /\bkotlin\b/, memory: "User prefers Kotlin" },
+      { pattern: /\bsql\b|\bpostgres\b|\bmysql\b|\bsqlite\b/, memory: "User prefers SQL" },
+    ];
+    for (const item of languagePatterns) {
+      if (item.pattern.test(lower)) return item.memory;
+    }
+  }
+
+  if (category === "context") {
+    if (/\b(dsa|data structures?|algorithms?|competitive programming|leetcode|hackerrank)\b/.test(lower)) {
+      return "User is practicing DSA / competitive programming";
+    }
+    if (/\b(graph algorithms?|graph theory)\b/.test(lower)) {
+      return "User is learning graph algorithms";
+    }
+    if (/\b(interview|interview prep|coding interview|job interview)\b/.test(lower)) {
+      return "User is preparing for coding interviews";
+    }
+    if (/\b(ai app|ai assistant|ai chatbot|llm app|openrouter|openai api|anthropic api|gemini api)\b/.test(lower)) {
+      return "User is building an AI application";
+    }
+    if (/\b(machine learning|\bml\b|deep learning|neural network|pytorch|tensorflow|\bai\b)\b/.test(lower)) {
+      return "User works in machine learning / AI";
+    }
+    if (/\b(terminal commands?|command line|cli|shell commands?)\b/.test(lower)) {
+      return "User is working with terminal commands";
+    }
+    if (/\b(us[- ]iran relations?|iran[- ]us relations?)\b/.test(lower)) {
+      return "User researches US-Iran relations";
+    }
+  }
+
+  return entry;
+}
+
+function simplifyToken(token) {
+  if (token.length <= 4) return token;
+  if (token.endsWith("ing") && token.length > 6) return token.slice(0, -3);
+  if (token.endsWith("ed") && token.length > 5) return token.slice(0, -2);
+  if (token.endsWith("es") && token.length > 5) return token.slice(0, -2);
+  if (token.endsWith("s") && token.length > 4) return token.slice(0, -1);
+  return token;
+}
+
+function entrySignature(category, rawEntry) {
+  const canonical = canonicalizeMemoryEntry(category, rawEntry).toLowerCase();
+  const normalized = canonical
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .replace(/\b(one sentence|one-sentence)\b/g, " short ")
+    .replace(/\bbrief\b|\bconcise\b/g, " short ")
+    .replace(/\banswers?\b/g, " response ")
+    .replace(/\bexplanations?\b/g, " explanation ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const stopwords = new Set([
+    "user",
+    "prefers",
+    "prefer",
+    "likes",
+    "like",
+    "wants",
+    "requests",
+    "is",
+    "are",
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "to",
+    "in",
+    "for",
+    "of",
+    "with",
+    "using",
+    "works",
+    "work",
+    "codes",
+    "code",
+    "response",
+    "style",
+  ]);
+
+  const tokens = normalized
+    .split(" ")
+    .map((t) => simplifyToken(t.trim()))
+    .filter((t) => t && !stopwords.has(t));
+
+  return Array.from(new Set(tokens)).sort().join("|");
+}
+
+function dedupeMemoryCategory(entries, category) {
+  const deduped = [];
+  const seenKeys = new Set();
+  const seenSignatures = new Set();
+
+  for (const rawEntry of entries || []) {
+    const canonical = canonicalizeMemoryEntry(category, rawEntry);
+    if (!canonical) continue;
+
+    const key = normalizeEntryKey(canonical);
+    if (!key || seenKeys.has(key)) continue;
+
+    const signature = entrySignature(category, canonical);
+    if (signature && seenSignatures.has(signature)) continue;
+
+    seenKeys.add(key);
+    if (signature) seenSignatures.add(signature);
+    deduped.push(canonical);
+  }
+
+  return deduped;
+}
+
 export function normalizeUserMemory(memory) {
   const source = memory || {};
   return {
-    preferences: Array.isArray(source.preferences) ? source.preferences.map(cleanEntry).filter(Boolean) : [],
-    coding: Array.isArray(source.coding) ? source.coding.map(cleanEntry).filter(Boolean) : [],
-    context: Array.isArray(source.context) ? source.context.map(cleanEntry).filter(Boolean) : [],
+    preferences: dedupeMemoryCategory(Array.isArray(source.preferences) ? source.preferences : [], "preferences"),
+    coding: dedupeMemoryCategory(Array.isArray(source.coding) ? source.coding : [], "coding"),
+    context: dedupeMemoryCategory(Array.isArray(source.context) ? source.context : [], "context"),
     autoMode: source.autoMode !== false,
   };
 }

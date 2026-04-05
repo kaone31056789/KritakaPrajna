@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { getAutoRun, setAutoRun } from "./TerminalPanel";
 import { DEFAULT_SHORTCUTS, SHORTCUT_ACTIONS, eventToShortcut, findShortcutConflict, getShortcutLabel, isValidShortcut, mergeShortcuts, normalizeShortcutString } from "../utils/keyboardShortcuts";
 import {
   DEFAULT_USER_MEMORY,
@@ -309,9 +310,11 @@ function MemoryEditor({ memory, onSaveMemory, onResetMemory }) {
   const [category, setCategory] = useState("preferences");
   const [editing, setEditing] = useState(null);
   const [error, setError] = useState("");
+  const [expandedSections, setExpandedSections] = useState({});
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
   const [copied, setCopied] = useState(false);
+  const MAX_VISIBLE_MEMORY_CHIPS = 8;
   const [importState, setImportState] = useState({
     open: false,
     method: "ai",
@@ -732,11 +735,19 @@ function MemoryEditor({ memory, onSaveMemory, onResetMemory }) {
             const entries = normalized[section.id] || [];
             if (entries.length === 0) return null;
             const meta = categoryMeta[section.id];
+            const isExpanded = !!expandedSections[section.id];
+            const hiddenCount = Math.max(0, entries.length - MAX_VISIBLE_MEMORY_CHIPS);
+            const visibleEntries = isExpanded
+              ? entries.map((entry, index) => ({ entry, index }))
+              : entries.slice(0, MAX_VISIBLE_MEMORY_CHIPS).map((entry, index) => ({ entry, index }));
             return (
               <div key={section.id} className="space-y-2">
-                <p className={`text-[11px] font-medium uppercase tracking-wider ${meta.accent}`}>{section.label}</p>
+                <p className={`text-[11px] font-medium uppercase tracking-wider ${meta.accent}`}>
+                  {section.label}
+                  <span className="ml-1 text-[10px] text-dark-500 normal-case tracking-normal">({entries.length})</span>
+                </p>
                 <div className="flex flex-wrap gap-1.5">
-                  {entries.map((entry, index) => {
+                  {visibleEntries.map(({ entry, index }) => {
                     const isEditing = editing?.category === section.id && editing?.index === index;
                     return isEditing ? (
                       <div
@@ -779,6 +790,24 @@ function MemoryEditor({ memory, onSaveMemory, onResetMemory }) {
                       </div>
                     );
                   })}
+                  {hiddenCount > 0 && !isExpanded && (
+                    <button
+                      type="button"
+                      onClick={() => setExpandedSections((prev) => ({ ...prev, [section.id]: true }))}
+                      className="inline-flex items-center rounded-full px-3 py-1.5 text-xs border border-dark-600/60 text-dark-300 hover:text-dark-100 hover:border-dark-500/70 bg-dark-800/70 hover:bg-dark-800 transition-colors cursor-pointer"
+                    >
+                      +{hiddenCount} more
+                    </button>
+                  )}
+                  {hiddenCount > 0 && isExpanded && (
+                    <button
+                      type="button"
+                      onClick={() => setExpandedSections((prev) => ({ ...prev, [section.id]: false }))}
+                      className="inline-flex items-center rounded-full px-3 py-1.5 text-xs border border-dark-600/60 text-dark-300 hover:text-dark-100 hover:border-dark-500/70 bg-dark-800/70 hover:bg-dark-800 transition-colors cursor-pointer"
+                    >
+                      Show less
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -1061,6 +1090,148 @@ function MemoryEditor({ memory, onSaveMemory, onResetMemory }) {
   );
 }
 
+// ── HuggingFace Usage Tab ─────────────────────────────────────────────────────
+
+function HFUsageTab({ hfKey }) {
+  const [info, setInfo] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    if (!hfKey) return;
+    setLoading(true); setErr("");
+    fetch("https://huggingface.co/api/whoami-v2", {
+      headers: { Authorization: `Bearer ${hfKey}` },
+    })
+      .then((r) => r.json())
+      .then((data) => { setInfo(data); setLoading(false); })
+      .catch(() => { setErr("Could not fetch account info."); setLoading(false); });
+  }, [hfKey]);
+
+  const openBilling = () => {
+    if (window.electronAPI?.openExternal) {
+      window.electronAPI.openExternal("https://huggingface.co/settings/billing");
+    } else {
+      window.open("https://huggingface.co/settings/billing", "_blank", "noopener");
+    }
+  };
+  const openZeroGPU = () => {
+    if (window.electronAPI?.openExternal) {
+      window.electronAPI.openExternal("https://huggingface.co/settings/inference-api");
+    } else {
+      window.open("https://huggingface.co/settings/inference-api", "_blank", "noopener");
+    }
+  };
+
+  if (!hfKey) {
+    return (
+      <div className="rounded-xl border border-dark-700/50 bg-dark-800 p-6 text-center space-y-2">
+        <svg className="w-8 h-8 mx-auto text-dark-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+        </svg>
+        <p className="text-sm text-dark-400">Connect your HuggingFace key in General settings to view usage.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Account card */}
+      <div className="rounded-xl border border-[#f5a623]/20 bg-[#f5a623]/[0.04] p-4 space-y-3">
+        <div className="flex items-center gap-2.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-[#f5a623] shrink-0" />
+          <span className="text-sm font-semibold text-dark-100">HuggingFace Account</span>
+          {loading && <span className="text-[11px] text-dark-500 ml-auto">Loading…</span>}
+        </div>
+
+        {err && <p className="text-xs text-red-400">{err}</p>}
+
+        {info && !loading && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              {info.avatarUrl && (
+                <img src={info.avatarUrl} alt="" className="w-8 h-8 rounded-full object-cover" />
+              )}
+              <div>
+                <p className="text-sm font-medium text-white">{info.fullname || info.name}</p>
+                <p className="text-[11px] text-dark-400">@{info.name}</p>
+              </div>
+              <span className="ml-auto text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-2 py-0.5 font-medium">✓ Connected</span>
+            </div>
+            {info.email && (
+              <p className="text-[11px] text-dark-500">{info.email}</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Live usage — links to HF pages */}
+      <div className="grid grid-cols-2 gap-3">
+        <button
+          onClick={openBilling}
+          className="rounded-xl border border-dark-700/50 bg-dark-800 p-4 text-left hover:border-[#f5a623]/30 hover:bg-[#f5a623]/[0.03] transition-colors cursor-pointer group"
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <svg className="w-4 h-4 text-[#f5a623]/70" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75" />
+            </svg>
+            <span className="text-xs font-semibold text-dark-200 group-hover:text-white transition-colors">Billing & Credits</span>
+            <svg className="w-3 h-3 text-dark-500 ml-auto group-hover:text-dark-300" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+            </svg>
+          </div>
+          <p className="text-[11px] text-dark-500">View balance, credits, and payment history on HuggingFace</p>
+        </button>
+
+        <button
+          onClick={openZeroGPU}
+          className="rounded-xl border border-dark-700/50 bg-dark-800 p-4 text-left hover:border-sky-500/30 hover:bg-sky-500/[0.03] transition-colors cursor-pointer group"
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <svg className="w-4 h-4 text-sky-400/70" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" />
+            </svg>
+            <span className="text-xs font-semibold text-dark-200 group-hover:text-white transition-colors">Inference API</span>
+            <svg className="w-3 h-3 text-dark-500 ml-auto group-hover:text-dark-300" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+            </svg>
+          </div>
+          <p className="text-[11px] text-dark-500">View ZeroGPU quota and inference usage limits</p>
+        </button>
+      </div>
+
+      {/* Hub rate limits info */}
+      <div className="rounded-xl border border-dark-700/50 bg-dark-800 p-4 space-y-3">
+        <p className="text-xs font-semibold text-dark-300 uppercase tracking-wider">Hub Rate Limits (free tier)</p>
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { label: "Hub APIs", limit: "1k req / 5 min" },
+            { label: "Resolvers", limit: "5k req / 5 min" },
+            { label: "Pages", limit: "200 req / 5 min" },
+          ].map((item) => (
+            <div key={item.label} className="bg-dark-900/50 border border-dark-700/30 rounded-lg p-3 text-center">
+              <p className="text-[11px] font-medium text-dark-200">{item.label}</p>
+              <p className="text-[10px] text-dark-500 mt-0.5">{item.limit}</p>
+            </div>
+          ))}
+        </div>
+        <p className="text-[10px] text-dark-500">Rate limits reset every 5 minutes. Upgrade your HF plan for higher limits.</p>
+      </div>
+
+      {/* Quick link */}
+      <button
+        onClick={openBilling}
+        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-[#f5a623]/20 text-[#f5a623]/80 hover:bg-[#f5a623]/10 text-xs font-medium cursor-pointer transition-colors"
+      >
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+        </svg>
+        Open HuggingFace Billing Dashboard
+      </button>
+    </div>
+  );
+}
+
 export default function SettingsPanel({
   providers, onSaveProviderKey, onRemoveProviderKey, onResetAll,
   onClose, modelPref, onSaveModelPref,
@@ -1074,6 +1245,14 @@ export default function SettingsPanel({
   const [editingCmd, setEditingCmd] = useState(null);
   const [cmdError, setCmdError] = useState("");
   const [activeTab, setActiveTab] = useState("general");
+
+  // Terminal auto-run setting
+  const [autoRun, setAutoRunState] = useState(getAutoRun);
+  const handleAutoRunToggle = () => {
+    const next = !autoRun;
+    setAutoRun(next);      // persist + broadcast to all TerminalPanels
+    setAutoRunState(next);
+  };
 
   // System prompt editor
   const [editingPrompt, setEditingPrompt] = useState(false);
@@ -1104,8 +1283,9 @@ export default function SettingsPanel({
           <div className="flex bg-dark-800 border border-dark-700/50 rounded-xl p-1 gap-1">
             {[
               { id: "general", label: "General" },
+              { id: "usage", label: "HF Usage" },
               { id: "memory", label: "Memory" },
-              { id: "shortcuts", label: "Keyboard Shortcuts" },
+              { id: "shortcuts", label: "Shortcuts" },
             ].map((tab) => (
               <motion.button
                 key={tab.id}
@@ -1277,6 +1457,44 @@ export default function SettingsPanel({
                 )}
               </div>
             </div>
+          </section>
+
+          {/* Terminal */}
+          <section className="space-y-3">
+            <h3 className="text-xs font-semibold text-dark-300 uppercase tracking-wider">Terminal</h3>
+            <p className="text-xs text-dark-400">
+              Control whether shell commands suggested by the AI run automatically or wait for your approval.
+            </p>
+            <div className="flex items-center justify-between rounded-xl bg-dark-800 border border-dark-700/50 px-4 py-3">
+              <div>
+                <p className="text-sm text-dark-100 font-medium">Auto-run commands</p>
+                <p className="text-xs text-dark-400 mt-0.5">
+                  {autoRun ? "Commands execute immediately — like Claude Code" : "Commands wait for your approval before running"}
+                </p>
+              </div>
+              <button
+                onClick={handleAutoRunToggle}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                  autoRun ? "bg-emerald-500" : "bg-dark-600"
+                }`}
+                role="switch"
+                aria-checked={autoRun}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                    autoRun ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
+            </div>
+            {autoRun && (
+              <p className="text-[11px] text-amber-400/70 flex items-center gap-1.5">
+                <svg className="w-3 h-3 shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                </svg>
+                Auto-run is ON. You can still click Edit or Kill on any command panel.
+              </p>
+            )}
           </section>
 
           {/* System Prompt */}
@@ -1523,6 +1741,10 @@ export default function SettingsPanel({
             </motion.button>
           </section>
           </>
+          )}
+
+          {activeTab === "usage" && (
+            <HFUsageTab hfKey={providers?.huggingface || null} />
           )}
 
           {activeTab === "shortcuts" && (

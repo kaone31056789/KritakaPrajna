@@ -1,5 +1,6 @@
 import { extractParamBillions, qualityScore, isFreeModel, supportsVision, supportsTask } from "./smartModelSelect";
 import { getModelHealth } from "./rateLimiter";
+import { supportsReasoningModel } from "./reasoningControls";
 
 const CACHE_KEY = "openrouter_advisor_rankings_v1";
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
@@ -29,6 +30,48 @@ const HF_BENCHMARK_PRIORS = [
 
 function clamp(value, min = 0, max = 100) {
   return Math.max(min, Math.min(max, value));
+}
+
+function normalizeAdvisorContext(context = {}) {
+  return {
+    webSearchUsed: !!context.webSearchUsed,
+    explicitWebIntent: !!context.explicitWebIntent,
+    webSearchMode: context.webSearchMode === "deep" ? "deep" : "fast",
+    terminalIntent: !!context.terminalIntent,
+    reasoningDepth:
+      context.reasoningDepth === "fast" || context.reasoningDepth === "deep"
+        ? context.reasoningDepth
+        : "balanced",
+  };
+}
+
+function normalizeWeights(weights) {
+  const cleaned = {};
+  let total = 0;
+
+  Object.entries(weights).forEach(([key, value]) => {
+    const n = Math.max(0, Number(value) || 0);
+    cleaned[key] = n;
+    total += n;
+  });
+
+  if (total <= 0) {
+    return {
+      quality: 0.4,
+      cost: 0.3,
+      speed: 0.1,
+      availability: 0.2,
+      capability: 0,
+      context: 0,
+      reasoning: 0,
+    };
+  }
+
+  const normalized = {};
+  Object.keys(cleaned).forEach((key) => {
+    normalized[key] = cleaned[key] / total;
+  });
+  return normalized;
 }
 
 function normalizeRepoId(model) {
@@ -123,40 +166,127 @@ function qualitySignal(model, hfSignals = {}) {
   return clamp(Math.round(parts.reduce((sum, value) => sum + value, 0)));
 }
 
-function scoreWeightsForTask(taskType) {
-  if (taskType === "coding") {
-    return { quality: 0.5, cost: 0.2, speed: 0.1, availability: 0.2 };
+function reasoningCapabilityScore(model) {
+  if (supportsReasoningModel(model)) return 100;
+
+  const id = (model?.id || "").toLowerCase();
+  if (/(claude|gpt-4|o1\b|o3\b|o4\b|gemini|deepseek-r1|qwen3|glm-4\.5|kimi-k2)/.test(id)) {
+    return 88;
   }
-  if (taskType === "vision") {
-    return { quality: 0.45, cost: 0.15, speed: 0.1, availability: 0.2, capability: 0.1 };
-  }
-  return { quality: 0.4, cost: 0.3, speed: 0.1, availability: 0.2 };
+
+  const params = extractParamBillions(model);
+  if (params >= 70) return 84;
+  if (params >= 30) return 76;
+  if (params >= 10) return 68;
+  if (params > 0) return 58;
+  return 52;
 }
 
-function taskCapabilityBoost(model, taskType) {
+function codingCapabilityScore(model) {
+  const id = (model?.id || "").toLowerCase();
+  if (/(coder|codestral|deepseek|claude|gpt-4|qwen.*coder|starcoder|codellama|phind)/.test(id)) {
+    return 100;
+  }
+  if (/(llama|mistral|qwen|gemma|phi|mixtral)/.test(id)) {
+    return 78;
+  }
+  return 62;
+}
+
+function scoreWeightsForTask(taskType, context = {}) {
+  const ctx = normalizeAdvisorContext(context);
+  const webNeed = ctx.webSearchUsed || ctx.explicitWebIntent;
+
+  let weights;
+  if (taskType === "coding") {
+    weights = { quality: 0.45, cost: 0.18, speed: 0.12, availability: 0.17, capability: 0.08, context: 0, reasoning: 0 };
+  } else if (taskType === "vision") {
+    weights = { quality: 0.42, cost: 0.14, speed: 0.1, availability: 0.17, capability: 0.11, context: 0.06, reasoning: 0 };
+  } else if (taskType === "document") {
+    weights = { quality: 0.36, cost: 0.2, speed: 0.1, availability: 0.15, capability: 0.04, context: 0.15, reasoning: 0 };
+  } else {
+    weights = { quality: 0.4, cost: 0.28, speed: 0.1, availability: 0.2, capability: 0.02, context: 0, reasoning: 0 };
+  }
+
+  if (webNeed) {
+    if (ctx.webSearchMode === "deep") {
+      weights.context += 0.12;
+      weights.reasoning += 0.08;
+      weights.quality += 0.05;
+      weights.availability += 0.04;
+      weights.cost -= 0.07;
+      weights.speed -= 0.04;
+    } else {
+      weights.context += 0.08;
+      weights.reasoning += 0.03;
+      weights.quality += 0.03;
+      weights.availability += 0.03;
+      weights.cost -= 0.05;
+      weights.speed -= 0.02;
+    }
+  }
+
+  if (ctx.terminalIntent) {
+    weights.capability += 0.12;
+    weights.availability += 0.05;
+    weights.quality += 0.02;
+    weights.cost -= 0.05;
+    weights.context += 0.01;
+  }
+
+  if (ctx.reasoningDepth === "deep") {
+    weights.reasoning += 0.08;
+    weights.quality += 0.04;
+    weights.speed -= 0.04;
+    weights.cost -= 0.03;
+  } else if (ctx.reasoningDepth === "fast") {
+    weights.speed += 0.06;
+    weights.cost += 0.05;
+    weights.reasoning -= 0.04;
+    weights.context -= 0.01;
+  }
+
+  return normalizeWeights(weights);
+}
+
+function taskCapabilityBoost(model, taskType, context = {}) {
+  const ctx = normalizeAdvisorContext(context);
+  const webNeed = ctx.webSearchUsed || ctx.explicitWebIntent;
+
   if (taskType === "vision") return supportsVision(model) ? 100 : 0;
-  if (taskType === "coding") {
-    const id = (model?.id || "").toLowerCase();
-    return /(coder|codestral|deepseek|claude|gpt-4o|qwen.*coder|starcoder|codellama)/.test(id) ? 100 : 65;
+
+  if (taskType === "coding" || ctx.terminalIntent) {
+    return codingCapabilityScore(model);
   }
-  return 100;
+
+  if (webNeed) {
+    const contextReady = contextScore(model);
+    const reasoningReady = reasoningCapabilityScore(model);
+    return clamp(Math.round(contextReady * 0.6 + reasoningReady * 0.4));
+  }
+
+  return 88;
 }
 
-export function buildUnifiedModelProfile(model, taskType = "general", hfSignals = {}) {
-  const weights = scoreWeightsForTask(taskType);
+export function buildUnifiedModelProfile(model, taskType = "general", hfSignals = {}, advisorContext = {}) {
+  const ctx = normalizeAdvisorContext(advisorContext);
+  const weights = scoreWeightsForTask(taskType, ctx);
   const quality = qualitySignal(model, hfSignals);
   const costScore = inverseCostScore(model);
   const speed = speedScore(model);
   const availability = availabilityScore(model);
-  const capability = taskCapabilityBoost(model, taskType);
+  const capability = taskCapabilityBoost(model, taskType, ctx);
   const context = contextScore(model);
+  const reasoning = reasoningCapabilityScore(model);
 
   const finalScore = clamp(Math.round(
     quality * (weights.quality || 0) +
     costScore * (weights.cost || 0) +
     speed * (weights.speed || 0) +
     availability * (weights.availability || 0) +
-    capability * (weights.capability || 0)
+    capability * (weights.capability || 0) +
+    context * (weights.context || 0) +
+    reasoning * (weights.reasoning || 0)
   ));
 
   return {
@@ -179,11 +309,14 @@ export function buildUnifiedModelProfile(model, taskType = "general", hfSignals 
     speedScore: speed,
     contextLength: Number(model?.context_length) || 0,
     contextScore: context,
+    reasoningScore: reasoning,
     availabilityScore: availability,
     costScore,
     capabilityScore: capability,
     finalScore,
     isFree: isFreeModel(model),
+    scoreWeights: weights,
+    advisorContext: ctx,
     sourceSignals: {
       hasHfSignal: !!hfSignals[normalizeRepoId(model)],
       hasBenchmarkPrior: benchmarkPrior(model) != null,
@@ -197,15 +330,15 @@ export function filterRankableModels(models, taskType) {
   return models.filter((model) => !String(model?.id || "").startsWith("openrouter/"));
 }
 
-export function rankModelsForTask(models, taskType = "general", hfSignals = {}) {
+export function rankModelsForTask(models, taskType = "general", hfSignals = {}, advisorContext = {}) {
   return filterRankableModels(models, taskType)
-    .map((model) => ({ model, profile: buildUnifiedModelProfile(model, taskType, hfSignals) }))
+    .map((model) => ({ model, profile: buildUnifiedModelProfile(model, taskType, hfSignals, advisorContext) }))
     .sort((a, b) => b.profile.finalScore - a.profile.finalScore);
 }
 
-export function bestValueForTask(models, taskType = "general", hfSignals = {}) {
+export function bestValueForTask(models, taskType = "general", hfSignals = {}, advisorContext = {}) {
   const ranked = filterRankableModels(models, taskType).map((model) => {
-    const profile = buildUnifiedModelProfile(model, taskType, hfSignals);
+    const profile = buildUnifiedModelProfile(model, taskType, hfSignals, advisorContext);
     const valueScore = Math.round(
       profile.qualityScore * 0.55 +
       profile.costScore * 0.3 +

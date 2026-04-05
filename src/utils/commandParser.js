@@ -25,6 +25,32 @@ const BUILTIN_COMMANDS = {
       "Provide a concise summary of this file: what it does, its exports/API, dependencies, and key implementation details.\n\n📎 FILE: {{fileName}}\n```\n{{code}}\n```",
     builtin: true,
   },
+
+  // ── Feature test commands (noFile: true — no file argument required) ────────
+  "test-terminal": {
+    prefix: "/test-terminal",
+    description: "Test the terminal execution feature",
+    noFile: true,
+    promptTemplate:
+      "TERMINAL FEATURE TEST.\n\nYour ONLY job is to output this exact fenced code block — nothing else before it:\n\n```bash\nnode --version && npm --version\n```\n\nAfter the code block, in one sentence explain what it checks.",
+    builtin: true,
+  },
+  "test-web": {
+    prefix: "/test-web",
+    description: "Test the web browsing feature",
+    noFile: true,
+    promptTemplate:
+      "WEB BROWSING FEATURE TEST.\n\nThe system has fetched this URL for you: https://api.github.com/zen\n\nLook at the 🌐 WEB CONTEXT block above. Quote the exact text returned by that API, then in one sentence explain what the GitHub Zen API is.",
+    builtin: true,
+  },
+  "test-features": {
+    prefix: "/test-features",
+    description: "Test both terminal and web browsing features together",
+    noFile: true,
+    promptTemplate:
+      "FEATURES TEST — respond in exactly two parts:\n\n**Part 1 — Web:** The system fetched https://api.github.com/zen for you. Check the 🌐 WEB CONTEXT block above and quote what it says.\n\n**Part 2 — Terminal:** Output this exact fenced block:\n\n```bash\necho \"Both features work!\" && node --version\n```\n\nDo not skip either part.",
+    builtin: true,
+  },
 };
 
 // ── Custom commands persistence ─────────────────────────────────────────────
@@ -74,6 +100,11 @@ export function parseCommand(text, customCommands = []) {
   const cmds = allCommands(customCommands);
   for (const [name, cmd] of Object.entries(cmds)) {
     if (trimmed.toLowerCase().startsWith(cmd.prefix)) {
+      // noFile commands: no file argument needed — the rest is optional extra context
+      if (cmd.noFile) {
+        const extra = trimmed.slice(cmd.prefix.length).trim();
+        return { command: name, filePath: null, rest: extra, noFile: true };
+      }
       const after = trimmed.slice(cmd.prefix.length).trim();
       const spaceIdx = after.indexOf(" ");
       const filePath = spaceIdx > 0 ? after.slice(0, spaceIdx).trim() : after;
@@ -94,6 +125,13 @@ export function buildCommandPrompt(command, fileName, code, extra = "", customCo
   const cmds = allCommands(customCommands);
   const cmd = cmds[command];
   if (!cmd) return code;
+
+  // noFile commands: promptTemplate is used as-is, no file substitution
+  if (cmd.noFile) {
+    let prompt = cmd.promptTemplate;
+    if (extra) prompt += `\n\nAdditional context: ${extra}`;
+    return prompt;
+  }
 
   let prompt = cmd.promptTemplate
     .replace(/\{\{fileName\}\}/g, fileName)
@@ -139,6 +177,6 @@ export function getAllCommandHints(customCommands = []) {
   return Object.entries(cmds).map(([, c]) => ({
     cmd: c.prefix,
     desc: c.description || "",
-    arg: "<file>",
+    arg: c.noFile ? "" : "<file>",
   }));
 }

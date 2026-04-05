@@ -150,6 +150,7 @@ function AdvisorContent({ advisorData, onSwitchModel, loading }) {
     budgetEstMonthly,
     estMonthlyCost,
     rankingSources,
+    featureSignals,
     providerPicks,
   } = advisorData;
 
@@ -423,6 +424,11 @@ function AdvisorContent({ advisorData, onSwitchModel, loading }) {
                 <div className="flex flex-wrap gap-1.5 pt-1">
                   {rankingSources?.huggingFace && <Badge color="purple">HF quality signal</Badge>}
                   {rankingSources?.openRouter && <Badge color="blue">OpenRouter pricing signal</Badge>}
+                  {featureSignals?.webSearchUsed && <Badge color="blue">Web-aware ({featureSignals.webSearchMode})</Badge>}
+                  {!featureSignals?.webSearchUsed && featureSignals?.explicitWebIntent && <Badge color="blue">Web-intent prompt</Badge>}
+                  {featureSignals?.terminalIntent && <Badge color="purple">Terminal intent</Badge>}
+                  {featureSignals?.reasoningDepth === "deep" && <Badge color="saffron">Deep reasoning</Badge>}
+                  {featureSignals?.reasoningDepth === "fast" && <Badge color="emerald">Fast reasoning</Badge>}
                   <Badge color={isCodingTask ? "purple" : taskType === "vision" ? "blue" : "saffron"}>{taskLabel}</Badge>
                 </div>
                 {providerPicks?.length > 0 && (

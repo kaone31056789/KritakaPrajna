@@ -4,7 +4,7 @@
 
 ### AI Desktop Workspace for Builders, Researchers, and Power Users
 
-<a href="https://github.com/kaone31056789/KritakaPrajna/releases"><img src="https://img.shields.io/badge/Release-v2.7.0-22c55e?style=for-the-badge&logo=github" alt="Release"></a>
+<a href="https://github.com/kaone31056789/KritakaPrajna/releases"><img src="https://img.shields.io/badge/Release-v2.7.5-22c55e?style=for-the-badge&logo=github" alt="Release"></a>
 <img src="https://img.shields.io/badge/Windows-Supported-2563eb?style=for-the-badge&logo=windows" alt="Windows">
 <img src="https://img.shields.io/badge/Electron-35.x-0ea5e9?style=for-the-badge&logo=electron" alt="Electron">
 <img src="https://img.shields.io/badge/React-18-0891b2?style=for-the-badge&logo=react" alt="React">
@@ -35,7 +35,7 @@
 10. [Project Structure](#project-structure)
 11. [Security and Privacy](#security-and-privacy)
 12. [Troubleshooting](#troubleshooting)
-13. [Release Notes (v2.7.0)](#release-notes-v270)
+13. [Release Notes (v2.7.5)](#release-notes-v275)
 14. [Contributing](#contributing)
 15. [Support](#support)
 
@@ -182,7 +182,7 @@ Actual model availability depends on active provider keys and provider-side mode
 ### Option A: Installer (Recommended)
 
 1. Open Releases: https://github.com/kaone31056789/KritakaPrajna/releases
-2. Download `KritakaPrajna-Setup-2.7.0.exe`
+2. Download `KritakaPrajna-Setup-2.7.5.exe`
 3. Install and launch
 4. Add your API keys in Settings
 
@@ -279,7 +279,7 @@ dist/               Installer output (generated)
 - Remove stale generated artifacts from `build/` and `dist/`.
 - Re-run `npm install` and then `npm run dist`.
 
-## Release Notes (v2.7.0)
+## Release Notes (v2.7.5)
 
 - Expanded and polished project documentation
 - Improved web context behavior and response-state continuity

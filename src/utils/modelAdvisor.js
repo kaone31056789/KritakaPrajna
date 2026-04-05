@@ -44,14 +44,27 @@ function selectionId(model) {
   return model?._selectionId || model?.id || "";
 }
 
-export function buildModelProfile(model, taskType = "general", rankingSignals = {}) {
-  const unified = buildUnifiedModelProfile(model, taskType, rankingSignals);
+function normalizeAdvisorContext(advisorContext = {}) {
+  return {
+    webSearchUsed: !!advisorContext.webSearchUsed,
+    webSearchMode: advisorContext.webSearchMode === "deep" ? "deep" : "fast",
+    terminalIntent: !!advisorContext.terminalIntent,
+    explicitWebIntent: !!advisorContext.explicitWebIntent,
+    reasoningDepth:
+      advisorContext.reasoningDepth === "fast" || advisorContext.reasoningDepth === "deep"
+        ? advisorContext.reasoningDepth
+        : "balanced",
+  };
+}
+
+export function buildModelProfile(model, taskType = "general", rankingSignals = {}, advisorContext = {}) {
+  const unified = buildUnifiedModelProfile(model, taskType, rankingSignals, advisorContext);
   return {
     id: selectionId(model),
     rawId: model.id,
     name: shortName(model.id),
     capabilityScore: unified.qualityScore,
-    codingScore: buildUnifiedModelProfile(model, "coding", rankingSignals).finalScore,
+    codingScore: buildUnifiedModelProfile(model, "coding", rankingSignals, advisorContext).finalScore,
     speedScore: unified.speedScore,
     costPer1M: costPer1MTokens(model),
     costLabel: formatPricePer1M(model),
@@ -77,22 +90,25 @@ export function generateAdvisorData({
   preference = "auto",
   monthlyBudget = null,
   rankingSignals = {},
+  advisorContext = {},
 }) {
   if (!models || models.length === 0) return null;
+
+  const normalizedContext = normalizeAdvisorContext(advisorContext);
 
   const realModels = models.filter((m) => !m.id.startsWith("openrouter/") && !isModelUnavailable(selectionId(m)));
   const currentModel = realModels.find((m) => selectionId(m) === currentModelId || m.id === currentModelId);
   if (!currentModel) return null;
 
   const capable = taskType === "vision" ? realModels.filter(supportsVision) : [...realModels];
-  const ranked = rankModelsForTask(capable, taskType, rankingSignals);
-  const currentProfile = buildModelProfile(currentModel, taskType, rankingSignals);
+  const ranked = rankModelsForTask(capable, taskType, rankingSignals, normalizedContext);
+  const currentProfile = buildModelProfile(currentModel, taskType, rankingSignals, normalizedContext);
   const currentScore = currentProfile.finalScore;
 
   const bestOverall = ranked[0] || null;
   const bestFreeRanked = ranked.find(({ profile }) => profile.isFree) || null;
   const bestPaidRanked = ranked.find(({ profile }) => !profile.isFree) || null;
-  const bestValueRanked = bestValueForTask(capable, taskType, rankingSignals);
+  const bestValueRanked = bestValueForTask(capable, taskType, rankingSignals, normalizedContext);
   const providerPicks = [];
   const providerSeen = new Set();
   ranked.forEach(({ model, profile }) => {
@@ -110,7 +126,7 @@ export function generateAdvisorData({
   let cheaperAlternative = null;
   if (!currentProfile.isFree) {
     const cheaper = capable
-      .map((model) => ({ model, profile: buildUnifiedModelProfile(model, taskType, rankingSignals) }))
+      .map((model) => ({ model, profile: buildUnifiedModelProfile(model, taskType, rankingSignals, normalizedContext) }))
       .filter(({ model, profile }) =>
         selectionId(model) !== currentModelId &&
         model.id !== currentModelId &&
@@ -164,7 +180,7 @@ export function generateAdvisorData({
   } : null;
 
   const cheapestPaidCandidate = capable
-    .map((model) => ({ model, profile: buildUnifiedModelProfile(model, taskType, rankingSignals) }))
+    .map((model) => ({ model, profile: buildUnifiedModelProfile(model, taskType, rankingSignals, normalizedContext) }))
     .filter(({ model, profile }) =>
       !profile.isFree &&
       selectionId(model) !== currentModelId &&
@@ -197,7 +213,7 @@ export function generateAdvisorData({
     budgetEstMonthly = (currentCostPer1M / 1_000_000) * MONTHLY_TOKENS;
 
     const budgetCandidates = capable
-      .map((model) => ({ model, profile: buildUnifiedModelProfile(model, taskType, rankingSignals) }))
+      .map((model) => ({ model, profile: buildUnifiedModelProfile(model, taskType, rankingSignals, normalizedContext) }))
       .filter(({ model, profile }) =>
         !profile.isFree &&
         selectionId(model) !== currentModelId &&
@@ -226,7 +242,8 @@ export function generateAdvisorData({
     const codingRanked = rankModelsForTask(
       capable.filter((m) => CODING_MODELS.some((p) => m.id.toLowerCase().includes(p))),
       "coding",
-      rankingSignals
+      rankingSignals,
+      normalizedContext
     );
     const bestCodingFree = codingRanked.find(({ profile }) => profile.isFree) || null;
     const bestCodingPaid = codingRanked.find(({ profile }) => !profile.isFree) || null;
@@ -269,6 +286,7 @@ export function generateAdvisorData({
       huggingFace: Object.keys(rankingSignals || {}).length > 0,
       openRouter: models.some((m) => m._provider === "openrouter"),
     },
+    featureSignals: normalizedContext,
     providerPicks,
     budgetPick,
     monthlyBudget: monthlyBudget > 0 ? monthlyBudget : null,

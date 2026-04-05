@@ -29,10 +29,13 @@ import {
   hasUserMemory,
 } from "../utils/userMemory";
 import { extractMemoryWithAI } from "../utils/aiMemoryExtractor";
+import { fetchAllWebContent, buildWebContext, parseWebCommand, extractUrlsFromText, fetchWebPage, webSearch, deepArticleSearch, mergeWebSources } from "../utils/webFetcher";
+import { isTerminalIntent, isWebIntent, isDetailedIntent, isRealWorldQuery, isNewsIntent, buildSearchQuery } from "../utils/intentDetector";
 
 const ease = [0.4, 0, 0.2, 1];
 const CHATS_KEY = "openrouter_chats";
 const ACTIVE_CHAT_KEY = "openrouter_active_chat";
+const SECONDARY_CHAT_KEY = "openrouter_secondary_chat";
 const LAST_MODEL_KEY = "openrouter_last_model";
 const MODEL_PREF_KEY = "openrouter_model_pref";
 const TASK_PREF_KEY = "openrouter_task_pref";
@@ -40,18 +43,50 @@ const REASONING_DEPTH_KEY = "openrouter_reasoning_depth";
 const SYSTEM_PROMPT_KEY = "openrouter_system_prompt";
 const ADVISOR_PREFS_KEY = "openrouter_advisor_prefs";
 
-const DEFAULT_SYSTEM_PROMPT = `You are KritakaPrajna, an expert AI coding assistant. Follow this reasoning framework for every request:
+const DEFAULT_SYSTEM_PROMPT = `You are KritakaPrajna, an expert AI assistant. Be direct and concise — lead with the answer, not the reasoning process. Never show "Approach", "Analyze", "Reason", or "Solve" headers.
 
-## Approach
-1. **Analyze** — Understand the intent, identify the core problem, and note constraints.
-2. **Reason** — Think step-by-step. Consider edge cases, trade-offs, and alternatives.
-3. **Solve** — Produce a clear, correct solution.
+## Coding
+- Provide code in fenced code blocks with the correct language tag.
+- Prefer minimal, targeted changes. Explain briefly what you changed and why.
 
-## Output Format
-- Start with a brief explanation of what you found or what you're doing and why.
-- Then provide the updated/complete code in a fenced code block.
-- If there are multiple issues, list each one before the fix.
-- Be concise but thorough. Prefer minimal, targeted changes over rewrites.`;
+## Terminal Commands — MANDATORY RULE
+ANY shell, CLI, or script command you suggest MUST be in a fenced code block with language \`bash\`, \`sh\`, \`cmd\`, or \`powershell\`. Choose the shell that matches the runtime OS (Windows -> powershell/cmd, macOS/Linux -> bash/sh). Never write commands as plain text.
+
+## Terminal Output Feedback
+When you receive terminal output (formatted as "Terminal command completed: ..."), analyze it:
+- If exit code is 0: briefly confirm what succeeded.
+- If exit code is non-0 or shows an error: diagnose the problem and suggest a fix with a new \`\`\`bash block.
+- If a tool is missing (e.g. "command not found"): provide the install command.
+
+## Web Sources
+When 🌐 WEB SOURCES are provided, answer using that content and cite sources as [1], [2] etc. at the end of relevant sentences. Keep source sections compact: no duplicate sources and max 5 unique source lines in any final "Sources" block.`;
+
+const WEB_INTENT_HINT = `\n\n[SYSTEM NOTE: The user is asking for real-time or recent information. Web search was attempted but returned no results. Do NOT say you cannot browse the internet. Instead, answer using your training knowledge up to your cutoff date, clearly state your knowledge cutoff, and provide your best answer with any relevant details you know. If specific recent events are beyond your cutoff, say so briefly and give context from what you do know.]`;
+const EXPLICIT_WEB_TRIGGER_RE = /\b(websearch|web\s*search|search (the )?(web|internet|online)|browse (the )?(web|internet|online)|look (it )?up( online| on (the )?web)?|find (latest|recent|current) (news|updates?|info|information)|do (a )?web\s*search|use (the )?web|from (the )?web)\b/i;
+
+function detectPlatformFromNavigator() {
+  const ua = String(navigator?.userAgent || "").toLowerCase();
+  if (ua.includes("windows")) return "win32";
+  if (ua.includes("mac os") || ua.includes("macos")) return "darwin";
+  if (ua.includes("linux")) return "linux";
+  return "unknown";
+}
+
+function buildTerminalIntentHint(platformInfo) {
+  const platform = platformInfo?.platform || detectPlatformFromNavigator();
+  if (platform === "win32") {
+    return `\n\n[SYSTEM NOTE: The user wants a terminal command on Windows. Use Windows-native commands and respond with a \`\`\`powershell fenced block (or \`\`\`cmd when needed). Do NOT use Linux/macOS commands like sudo, apt, or bash unless the user explicitly asks for WSL/Linux.]`;
+  }
+  if (platform === "darwin") {
+    return `\n\n[SYSTEM NOTE: The user wants a terminal command on macOS. Use macOS-compatible commands and respond with a \`\`\`bash or \`\`\`sh fenced block.]`;
+  }
+  return `\n\n[SYSTEM NOTE: The user wants a terminal command. Respond with the command inside a \`\`\`bash or \`\`\`sh fenced code block — not as plain text or inline code.]`;
+}
+
+function preferredTerminalFence(platformInfo) {
+  const platform = platformInfo?.platform || detectPlatformFromNavigator();
+  return platform === "win32" ? "powershell" : "bash";
+}
 
 function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -76,6 +111,14 @@ function loadActiveId() {
 
 function saveActiveId(id) {
   localStorage.setItem(ACTIVE_CHAT_KEY, id);
+}
+
+function loadSecondaryId() {
+  return localStorage.getItem(SECONDARY_CHAT_KEY) || "";
+}
+
+function saveSecondaryId(id) {
+  localStorage.setItem(SECONDARY_CHAT_KEY, id || "");
 }
 
 /** Derive a title from the first user message, or fallback */
@@ -150,6 +193,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
   const [reasoningDepth, setReasoningDepth] = useState(() => localStorage.getItem(REASONING_DEPTH_KEY) || "balanced");
   const [chats, setChats] = useState(loadChats);
   const [activeChatId, setActiveChatId] = useState(loadActiveId);
+  const [secondaryChatId, setSecondaryChatId] = useState(loadSecondaryId);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showSettings, setShowSettings] = useState(false);
@@ -160,6 +204,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
   const [suggestionDismissed, setSuggestionDismissed] = useState(false);
   const [modelPref, setModelPref] = useState(() => localStorage.getItem(MODEL_PREF_KEY) || "auto");
   const [lifetimeCost, setLifetimeCost] = useState(null); // { total_credits, total_usage } from API
+  const [appVersion, setAppVersion] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [customCommands, setCustomCommands] = useState(loadCustomCommands);
   const [systemPrompt, setSystemPrompt] = useState(() => localStorage.getItem(SYSTEM_PROMPT_KEY) || DEFAULT_SYSTEM_PROMPT);
@@ -172,22 +217,37 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
   // ── Last request tracking (for retry/regenerate) ──
   const lastRequestRef = useRef(null); // { text, uploads, attachedFiles, modelUsed, chatId }
 
+  // ── Terminal output feedback: read AI output and react ──────────────────────
+  // Ref so the event handler always sees the latest handleSend without re-subscribing
+  const handleSendRef = useRef(null);
+
   // ── Prompt-based banners state ──
   const [taskBanner, setTaskBanner] = useState(null); // { visible, taskType, suggestedModelId }
   const [rateLimitBanner, setRateLimitBanner] = useState(null); // { visible, modelId, fallbackModelId }
   const [cheapestBanner, setCheapestBanner] = useState(null); // { visible, cheapestLabel, cheapestModelId, currentModelId }
   const [lastError, setLastError] = useState(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchingChatId, setSearchingChatId] = useState(null);
+  const [webPreparingChatId, setWebPreparingChatId] = useState(null);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [webSearchMode, setWebSearchMode] = useState(() => {
+    try { return localStorage.getItem("kp_web_mode") === "deep" ? "deep" : "fast"; } catch { return "fast"; }
+  });
   const [advisorOpen, setAdvisorOpen] = useState(false);
   const [advisorSignals, setAdvisorSignals] = useState({});
   const [providerUsage, setProviderUsage] = useState(() => loadProviderUsage());
   const [shortcuts, setShortcuts] = useState(() => mergeShortcuts({}));
   const [modelSelectorOpenSignal, setModelSelectorOpenSignal] = useState(0);
   const [userMemory, setUserMemory] = useState(DEFAULT_USER_MEMORY);
+  const [platformInfo, setPlatformInfo] = useState(null);
   const userMemoryRef = useRef(DEFAULT_USER_MEMORY);
+  const searchTokenRef = useRef(0);
 
   // Current chat's messages
   const activeChat = chats.find((c) => c.id === activeChatId);
   const messages = activeChat?.messages || [];
+  const secondaryChat = chats.find((c) => c.id === secondaryChatId && c.id !== activeChatId) || null;
+  const splitViewActive = !!secondaryChat;
 
   // Latest advisor data from the most recent AI message
   const latestAdvisor = React.useMemo(() => {
@@ -205,6 +265,65 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
   useEffect(() => {
     saveActiveId(activeChatId);
   }, [activeChatId]);
+
+  useEffect(() => {
+    saveSecondaryId(secondaryChatId);
+  }, [secondaryChatId]);
+
+  useEffect(() => {
+    if (!secondaryChatId) return;
+    if (!chats.some((c) => c.id === secondaryChatId) || secondaryChatId === activeChatId) {
+      setSecondaryChatId("");
+    }
+  }, [secondaryChatId, chats, activeChatId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fallbackPlatform = {
+      platform: detectPlatformFromNavigator(),
+      preferredShell: detectPlatformFromNavigator() === "win32" ? "powershell" : "bash",
+    };
+
+    const loadPlatformInfo = async () => {
+      try {
+        if (window.electronAPI?.getPlatformInfo) {
+          const info = await window.electronAPI.getPlatformInfo();
+          if (!cancelled && info?.platform) {
+            setPlatformInfo(info);
+            return;
+          }
+        }
+      } catch {
+        // fallback below
+      }
+
+      if (!cancelled) setPlatformInfo(fallbackPlatform);
+    };
+
+    loadPlatformInfo();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadVersion = async () => {
+      try {
+        if (window.electronAPI?.getAppVersion) {
+          const version = await window.electronAPI.getAppVersion();
+          if (!cancelled && typeof version === "string") {
+            setAppVersion(version.trim());
+          }
+        }
+      } catch {
+        if (!cancelled) setAppVersion("");
+      }
+    };
+
+    loadVersion();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (!selectedModel) return;
@@ -257,6 +376,17 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
   useEffect(() => {
     userMemoryRef.current = userMemory;
   }, [userMemory]);
+
+  // Fail-safe: clear stuck search indicator if a web request hangs too long.
+  useEffect(() => {
+    if (!isSearching) return;
+    const timeout = setTimeout(() => {
+      setIsSearching(false);
+      setSearchingChatId(null);
+      searchTokenRef.current += 1;
+    }, 25000);
+    return () => clearTimeout(timeout);
+  }, [isSearching]);
 
   // Recompute smart suggestion when uploads/attachments/model change
   useEffect(() => {
@@ -433,6 +563,11 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
 
   const handleSaveMemory = useCallback(async (nextMemory) => {
     const normalized = normalizeUserMemory(nextMemory);
+    const currentNormalized = normalizeUserMemory(userMemoryRef.current);
+    if (JSON.stringify(normalized) === JSON.stringify(currentNormalized)) {
+      return;
+    }
+
     setUserMemory(normalized);
     localStorage.setItem(USER_MEMORY_STORAGE_KEY, JSON.stringify(normalized));
     if (window.electronAPI?.setMemory) {
@@ -450,7 +585,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
   }, []);
 
   const handleSend = useCallback(
-    async (text) => {
+    async (text, opts = {}) => {
       if (!text.trim() || !selectedModel) return;
 
       // ── Slash command parsing ──
@@ -458,28 +593,33 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
       let processedText = text;
 
       if (parsed) {
-        // Try to resolve file from attachments first
-        let fileData = resolveFromAttachments(parsed.filePath, attachedFiles, uploads);
-
-        // If not found in attachments, try reading via Electron IPC
-        if (!fileData && window.electronAPI) {
-          try {
-            const result = await window.electronAPI.readFile(parsed.filePath);
-            if (result.content && !result.error) {
-              const sep = parsed.filePath.includes("\\") ? "\\" : "/";
-              const fileName = parsed.filePath.split(sep).pop();
-              fileData = { name: fileName, content: result.content };
-            }
-          } catch {
-            // File not found — show error
-          }
-        }
-
-        if (fileData) {
-          processedText = buildCommandPrompt(parsed.command, fileData.name, fileData.content, parsed.rest, customCommands);
+        if (parsed.noFile) {
+          // No-arg commands: promptTemplate is the full prompt, no file needed
+          processedText = buildCommandPrompt(parsed.command, "", "", parsed.rest, customCommands);
         } else {
-          setError(`File not found: ${parsed.filePath}. Attach a file or provide a full path.`);
-          return;
+          // Try to resolve file from attachments first
+          let fileData = resolveFromAttachments(parsed.filePath, attachedFiles, uploads);
+
+          // If not found in attachments, try reading via Electron IPC
+          if (!fileData && window.electronAPI) {
+            try {
+              const result = await window.electronAPI.readFile(parsed.filePath);
+              if (result.content && !result.error) {
+                const sep = parsed.filePath.includes("\\") ? "\\" : "/";
+                const fileName = parsed.filePath.split(sep).pop();
+                fileData = { name: fileName, content: result.content };
+              }
+            } catch {
+              // File not found — show error
+            }
+          }
+
+          if (fileData) {
+            processedText = buildCommandPrompt(parsed.command, fileData.name, fileData.content, parsed.rest, customCommands);
+          } else {
+            setError(`File not found: ${parsed.filePath}. Attach a file or provide a full path.`);
+            return;
+          }
         }
       }
 
@@ -543,7 +683,11 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
         });
       }
 
-      let chatId = activeChatId;
+      let chatId = opts.targetChatId || activeChatId;
+
+      if (opts.targetChatId && opts.targetChatId !== activeChatId) {
+        setActiveChatId(opts.targetChatId);
+      }
 
       // If no active chat, create one
       if (!chatId) {
@@ -559,6 +703,167 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
 
       // Build the text portion — use processedText if command was parsed
       let textContent = parsed ? processedText : text.trim();
+      const selectedSupportsVision = !!selectedModelObj && supportsTask(selectedModelObj, "image-to-text");
+      let googleScreenshotForModel = null;
+
+      // ── Intent detection & tool injection ────────────────────────────────────
+      // Runs on every message (not just slash commands) to give the AI context
+      // about available tools and optionally pre-fetch web results.
+      let webResults = [];
+      let didAttemptWebSearch = false;
+      const rawText = text.trim();
+      let advisorContext = {
+        webSearchUsed: false,
+        webSearchMode: webSearchMode === "deep" ? "deep" : "fast",
+        explicitWebIntent: false,
+        terminalIntent: false,
+        reasoningDepth,
+      };
+
+      if (!parsed) {
+        const hasWebCommand = !!parseWebCommand(rawText);
+        const hasUrls = extractUrlsFromText(rawText).length > 0;
+        const detailed = isDetailedIntent(rawText);
+        // Expand web intent: explicit keywords OR (detailed + real-world topic)
+        const webIntent = isWebIntent(rawText) || (detailed && isRealWorldQuery(rawText));
+        const newsIntent = isNewsIntent(rawText);
+        const geopoliticsIntent = /\b(war|conflict|ceasefire|invasion|occupation|airstrike|missile|sanction|blockade|siege|coup|protest|uprising|revolution|treaty|alliance|summit|election|vote|crisis|iran|iraq|ukraine|russia|china|israel|palestine|gaza|syria|yemen|north korea|taiwan|india|pakistan|nato|un|opec|brics|geopolit)\b/i.test(rawText);
+        const shouldIncludeNews = newsIntent || geopoliticsIntent;
+        const utilityIntent = /\b(download|install|installer|setup|how (do i|to)|steps?|guide|tutorial|official (site|website)|where can i download)\b/i.test(rawText);
+        const terminalIntent = isTerminalIntent(rawText);
+        const terminalHint = buildTerminalIntentHint(platformInfo);
+        const explicitWebPrompt = hasWebCommand || EXPLICIT_WEB_TRIGGER_RE.test(rawText);
+        const query = buildSearchQuery(rawText) || rawText.slice(0, 100);
+        const forceDeepMode = webSearchMode === "deep";
+        const shouldDoDeepSearch = detailed || forceDeepMode;
+        advisorContext = {
+          ...advisorContext,
+          terminalIntent,
+          explicitWebIntent: explicitWebPrompt,
+          webSearchMode: shouldDoDeepSearch ? "deep" : "fast",
+        };
+        // Web mode is strictly user-controlled: no autonomous or prompt-based bypass.
+        const webModeActive =
+          webSearchEnabled &&
+          !terminalIntent &&
+          rawText.length >= 3;
+        const shouldUseDetailedContext = shouldDoDeepSearch;
+
+        const startSearchRun = () => {
+          const token = ++searchTokenRef.current;
+          setSearchingChatId(chatId);
+          setIsSearching(true);
+          return token;
+        };
+        const stopSearchRun = (token) => {
+          if (searchTokenRef.current === token) {
+            setIsSearching(false);
+            setSearchingChatId(null);
+          }
+        };
+
+        // ── Web: fetch URLs / commands / comprehensive web-intent research
+        if (webSearchEnabled && (hasWebCommand || hasUrls) && window.electronAPI?.fetchWebPage) {
+          const token = startSearchRun();
+          didAttemptWebSearch = true;
+          try { webResults = await fetchAllWebContent(rawText); } finally { stopSearchRun(token); }
+        } else if (webModeActive && !hasUrls) {
+          // Default: fast general web search. Deep mode is only used when user explicitly asks for details.
+          const token = startSearchRun();
+          didAttemptWebSearch = true;
+          try {
+            if (shouldDoDeepSearch) {
+              const tasks = [];
+              if (window.electronAPI?.deepSearch) {
+                tasks.push(deepArticleSearch(query));
+              }
+              if (window.electronAPI?.googleAiSearch || window.electronAPI?.searchWeb) {
+                tasks.push(webSearch(query, { detailed: true, includeNews: shouldIncludeNews }));
+              }
+
+              if (tasks.length > 0) {
+                const settled = await Promise.allSettled(tasks);
+                const arrays = settled
+                  .filter((r) => r.status === "fulfilled" && Array.isArray(r.value))
+                  .map((r) => r.value);
+                webResults = mergeWebSources(...arrays);
+              }
+            } else if (window.electronAPI?.googleAiSearch || window.electronAPI?.searchWeb) {
+              // Fast path for normal prompts: broad web crawl, add news only when explicitly requested.
+              webResults = await webSearch(query, { detailed: false, includeNews: shouldIncludeNews });
+            }
+
+            // If explicit web intent produced no results, try one deeper fallback.
+            if (webResults.length === 0 && webIntent && window.electronAPI?.deepSearch) {
+              const fallbackDeep = await deepArticleSearch(query);
+              webResults = mergeWebSources(fallbackDeep);
+            }
+
+            // Non-news fallback: retry broader deep crawl for utility/how-to prompts.
+            if (
+              webResults.length === 0 &&
+              webSearchEnabled &&
+              !newsIntent &&
+              utilityIntent &&
+              window.electronAPI?.deepSearch
+            ) {
+              const fallbackUtility = await deepArticleSearch(query);
+              webResults = mergeWebSources(fallbackUtility);
+            }
+
+            // Last-resort fallback: when Web mode is ON, allow news-backed fallback
+            // only for explicit news prompts.
+            if (
+              webResults.length === 0 &&
+              webSearchEnabled &&
+              shouldIncludeNews &&
+              (window.electronAPI?.googleAiSearch || window.electronAPI?.searchWeb)
+            ) {
+              const fallbackAny = await webSearch(query, {
+                detailed: shouldDoDeepSearch,
+                includeNews: true,
+              });
+              webResults = mergeWebSources(fallbackAny);
+            }
+          } finally {
+            stopSearchRun(token);
+          }
+        }
+
+        // Prepend web context to the message sent to AI
+        advisorContext = {
+          ...advisorContext,
+          webSearchUsed: webResults.length > 0,
+        };
+
+        if (webResults.length > 0) {
+          const webContext = buildWebContext(webResults, { detailed: shouldUseDetailedContext });
+          if (webContext) textContent = webContext + textContent;
+
+          if (selectedSupportsVision) {
+            const withShot = webResults.find(
+              (s) => typeof s?._googleScreenshotDataUrl === "string" && s._googleScreenshotDataUrl.startsWith("data:image/")
+            );
+            if (withShot?._googleScreenshotDataUrl) {
+              googleScreenshotForModel = withShot._googleScreenshotDataUrl;
+              textContent =
+                `[WEB NOTE: A live Google search screenshot is attached as additional context. Use copied web text for citations.]\n\n` +
+                textContent;
+            }
+          }
+        }
+
+        // ── Terminal: inject hint only when NOT a web search request
+        // (avoids the model suggesting terminal commands for web queries)
+        if (terminalIntent && !webIntent) {
+          textContent = textContent + terminalHint;
+        }
+
+        // ── Web intent but search returned nothing: nudge AI to acknowledge its limits
+        if (webIntent && didAttemptWebSearch && webResults.length === 0) {
+          textContent = textContent + WEB_INTENT_HINT;
+        }
+      }
 
       // Prepend sidebar-attached file blocks (skip if command already injected file)
       if (!parsed && attachedFiles.length > 0) {
@@ -590,6 +895,17 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
         content = textContent;
       }
 
+      const modelOnlyImages =
+        googleScreenshotForModel && selectedSupportsVision
+          ? [{ type: "image_url", image_url: { url: googleScreenshotForModel } }]
+          : [];
+
+      const contentForSend = modelOnlyImages.length === 0
+        ? content
+        : Array.isArray(content)
+          ? [...modelOnlyImages, ...content]
+          : [...modelOnlyImages, { type: "text", text: textContent }];
+
       const autoMemory = userMemory.autoMode ? detectMemoryFromMessage(text.trim()) : DEFAULT_USER_MEMORY;
       const effectiveMemory =
         userMemory.autoMode && hasUserMemory(autoMemory)
@@ -614,6 +930,9 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
         content,
         _displayText: text.trim(),
         _attachments: allAttachments.length > 0 ? allAttachments : undefined,
+        _webResults: webResults.length > 0 ? webResults : undefined,
+        _webSearchAttempted: didAttemptWebSearch,
+        _hidden: opts.silent || false,
       };
       const aiMsg = { role: "assistant", content: "" };
 
@@ -654,7 +973,10 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
       abortRef.current = controller;
 
       // Build the messages to send (without the empty AI placeholder)
-      const history = [...(chats.find((c) => c.id === chatId)?.messages || []), userMsg];
+      const outboundUserMsg = contentForSend === content
+        ? userMsg
+        : { ...userMsg, content: contentForSend };
+      const history = [...(chats.find((c) => c.id === chatId)?.messages || []), outboundUserMsg];
       const systemMsg = {
         role: "system",
         content: buildSystemPromptWithMemory(systemPrompt, effectiveMemory),
@@ -710,6 +1032,12 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
         }
 
 
+        if (didAttemptWebSearch) {
+          setWebPreparingChatId(chatId);
+        }
+
+        let receivedFirstChunk = false;
+
         const result = await routeStream(
           providers,
           currentModelObj || { id: selectedModel.includes("::") ? selectedModel.split("::").slice(1).join("::") : selectedModel, _provider: "openrouter" },
@@ -718,6 +1046,10 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
             signal: controller.signal,
             reasoningDepth,
             onChunk: (fullText) => {
+              if (!receivedFirstChunk) {
+                receivedFirstChunk = true;
+                setWebPreparingChatId((prev) => (prev === chatId ? null : prev));
+              }
               setChats((prev) =>
                 prev.map((c) => {
                   if (c.id !== chatId) return c;
@@ -759,6 +1091,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
           preference: advisorPrefs?.preferBest ? "best" : advisorPrefs?.preferFree ? "free" : modelPref,
           monthlyBudget: advisorPrefs?.monthlyBudget || null,
           rankingSignals: advisorSignals,
+          advisorContext,
         });
 
         setChats((prev) =>
@@ -843,13 +1176,18 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
       } finally {
         abortRef.current = null;
         setLoading(false);
+        setWebPreparingChatId((prev) => (prev === chatId ? null : prev));
       }
     },
-    [providers, selectedModel, activeChatId, chats, attachedFiles, uploads, models, systemPrompt, advisorPrefs, modelPref, advisorSignals, reasoningDepth, userMemory, handleSaveMemory]
+    [providers, selectedModel, activeChatId, chats, attachedFiles, uploads, models, systemPrompt, advisorPrefs, modelPref, advisorSignals, reasoningDepth, userMemory, webSearchMode, platformInfo, handleSaveMemory]
   );
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
+    searchTokenRef.current += 1;
+    setIsSearching(false);
+    setSearchingChatId(null);
+    setWebPreparingChatId(null);
   }, []);
 
   /**
@@ -926,6 +1264,39 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
     [activeChatId, handleSend, selectModelAndSyncTask]
   );
 
+  // Keep ref current so the event handler never captures a stale closure
+  useEffect(() => { handleSendRef.current = handleSend; }, [handleSend]);
+
+  // Listen for terminal command completions and feed output back to the AI
+  useEffect(() => {
+    const shellFence = preferredTerminalFence(platformInfo);
+
+    const handler = (e) => {
+      const { cmd, output, exitCode, blocked } = e.detail || {};
+      if (!cmd || !handleSendRef.current) return;
+
+      const trimmedOutput = (output || "").slice(0, 4000); // cap size
+      const status = blocked
+        ? `Command was blocked by safety filter.`
+        : exitCode === 0
+        ? `Command succeeded (exit 0).`
+        : `Command failed (exit ${exitCode}).`;
+
+      const feedbackText =
+        `Terminal command completed:\n` +
+        `\`\`\`\n$ ${cmd}\n${trimmedOutput}\n\`\`\`\n` +
+        `${status}\n\n` +
+        (exitCode !== 0 || blocked
+          ? `Analyze this output. If a tool is missing or an error occurred, diagnose it and provide a fix as a \`\`\`${shellFence} code block.`
+          : `Briefly confirm what this output means in one sentence.`);
+
+      handleSendRef.current(feedbackText, { silent: true });
+    };
+
+    window.addEventListener("kp-command-done", handler);
+    return () => window.removeEventListener("kp-command-done", handler);
+  }, [platformInfo]);
+
   /** Called from MessageList retry buttons (on error messages) */
   const handleRetry = useCallback(
     (mode) => handleRetryOrRegenerate(mode),
@@ -937,6 +1308,21 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
     (mode) => handleRetryOrRegenerate(mode),
     [handleRetryOrRegenerate]
   );
+
+  /** Called when user clicks a generated key point to request an in-depth follow-up. */
+  const handlePointDeepDive = useCallback((pointText, targetChatId = activeChatId) => {
+    const topic = String(pointText || "").replace(/\s+/g, " ").trim();
+    if (!topic) return;
+
+    const deepPrompt =
+      `Provide a deep analysis of this specific point using current web sources:\n\n` +
+      `"${topic}"\n\n` +
+      `Cover background, latest developments, key actors, evidence, competing perspectives, risks, and near-term outlook. ` +
+      `Cite sources as [1], [2], etc.`;
+
+    // Run as hidden follow-up so only the assistant output is shown.
+    handleSend(deepPrompt, { silent: true, targetChatId });
+  }, [handleSend, activeChatId]);
 
   /** Called from ModelAdvisorCard — switch to a suggested model for next message */
   const handleAdvisorSwitch = useCallback((modelId) => {
@@ -954,9 +1340,20 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
   const handleSelectChat = (id) => {
     if (id === activeChatId) return;
     handleStop();
+    if (secondaryChatId === id && activeChatId) {
+      setSecondaryChatId(activeChatId);
+    }
     setActiveChatId(id);
     setError("");
   };
+
+  const handleToggleSecondaryChat = useCallback((id) => {
+    if (!id || id === activeChatId) {
+      setSecondaryChatId("");
+      return;
+    }
+    setSecondaryChatId((prev) => (prev === id ? "" : id));
+  }, [activeChatId]);
 
   const handleAcceptSuggestion = useCallback((modelId) => {
     selectModelAndSyncTask(modelId);
@@ -1029,11 +1426,25 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
   }, [models, selectedModel, modelPref, uploads, attachedFiles, selectedTask]);
 
   const handleDeleteChat = (id) => {
-    setChats((prev) => prev.filter((c) => c.id !== id));
-    if (activeChatId === id) {
-      const remaining = chats.filter((c) => c.id !== id);
-      setActiveChatId(remaining[0]?.id || "");
-    }
+    setChats((prev) => {
+      const remaining = prev.filter((c) => c.id !== id);
+
+      if (secondaryChatId === id) {
+        setSecondaryChatId("");
+      }
+
+      if (activeChatId === id) {
+        const nextActive = remaining[0]?.id || "";
+        setActiveChatId(nextActive);
+
+        if (secondaryChatId && (secondaryChatId === id || secondaryChatId === nextActive)) {
+          const nextSecondary = remaining.find((c) => c.id !== nextActive)?.id || "";
+          setSecondaryChatId(nextSecondary);
+        }
+      }
+
+      return remaining;
+    });
   };
 
   const handleSaveShortcuts = useCallback(async (nextShortcuts) => {
@@ -1119,6 +1530,58 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [shortcuts, showSettings, loading, handleRetry]);
 
+  const renderChatPane = (chat, paneLabel) => {
+    if (!chat) return null;
+    const paneChatId = chat.id;
+    const paneMessages = chat.messages || [];
+    const paneActive = paneChatId === activeChatId;
+
+    return (
+      <div
+        key={`pane-${paneLabel}-${paneChatId}`}
+        className={`min-h-0 flex flex-col rounded-2xl border overflow-hidden ${
+          paneActive
+            ? "border-saffron-500/20 bg-dark-900/45"
+            : "border-white/[0.07] bg-dark-900/30"
+        }`}
+      >
+        <div
+          onClick={() => handleSelectChat(paneChatId)}
+          className={`shrink-0 px-4 py-2.5 border-b cursor-pointer ${
+            paneActive
+              ? "border-saffron-500/15 bg-saffron-500/[0.06]"
+              : "border-white/[0.05] bg-dark-900/40 hover:bg-dark-800/45"
+          }`}
+          title={paneActive ? "Active chat" : "Click to focus this chat"}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-medium text-dark-100 truncate">{chat.title || "New Chat"}</span>
+            <span className={`text-[10px] uppercase tracking-wider ${paneActive ? "text-saffron-300" : "text-dark-500"}`}>
+              {paneActive ? "Active" : "Side"}
+            </span>
+          </div>
+        </div>
+
+        <MessageList
+          messages={paneMessages}
+          loading={loading && paneActive}
+          lastError={paneActive ? lastError : null}
+          onRetry={handleRetry}
+          onRegenerate={handleRegenerate}
+          onPointDeepDive={(pointText) => handlePointDeepDive(pointText, paneChatId)}
+          onRefine={(msgIdx) => {
+            const aiMsg = paneMessages[msgIdx];
+            if (!aiMsg || aiMsg.role !== "assistant" || !aiMsg.content) return;
+            handleSend(
+              "Refine your previous answer: be more precise, fix any issues, and improve the code quality. Keep the same format.",
+              { targetChatId: paneChatId }
+            );
+          }}
+        />
+      </div>
+    );
+  };
+
   return (
     <div className="h-full flex flex-col bg-dark-950">
       <TitleBar sidebarOpen={sidebarOpen} onToggleSidebar={() => setSidebarOpen((v) => !v)} toggleShortcut={shortcuts.toggleSidebar} />
@@ -1168,6 +1631,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
           <div className="space-y-1">
             {chats.map((chat) => {
               const isActive = chat.id === activeChatId;
+              const isSecondary = chat.id === secondaryChatId;
               return (
                 <motion.div
                   key={chat.id}
@@ -1176,13 +1640,34 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
                   className={`group text-sm rounded-xl px-3.5 py-2.5 flex items-center gap-2.5 cursor-pointer transition-colors ${
                     isActive
                       ? "bg-dark-800/50 text-dark-100 border border-saffron-500/15"
+                      : isSecondary
+                        ? "bg-sky-500/[0.07] text-sky-100 border border-sky-500/20"
                       : "text-dark-300 hover:bg-dark-800/30 hover:text-dark-100 border border-transparent"
                   }`}
                 >
-                  {isActive && (
+                  {(isActive || isSecondary) && (
                     <div className="w-1.5 h-1.5 rounded-full bg-saffron-500/60 shrink-0" />
                   )}
                   <span className="truncate flex-1">{chat.title}</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleToggleSecondaryChat(chat.id);
+                    }}
+                    className={`shrink-0 p-0.5 rounded transition-all cursor-pointer ${
+                      isSecondary
+                        ? "opacity-100 text-sky-300 bg-sky-500/15"
+                        : "opacity-0 group-hover:opacity-100 text-dark-400 hover:text-sky-300 hover:bg-dark-600/60"
+                    }`}
+                    title={isSecondary ? "Close split view for this chat" : "Open this chat in split view"}
+                    aria-label={isSecondary ? "Close split view" : "Open in split view"}
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25v13.5A2.25 2.25 0 0118.75 21H5.25A2.25 2.25 0 013 18.75V5.25z" />
+                      <path strokeLinecap="round" d="M12 3v18" />
+                    </svg>
+                  </button>
                   <button
                     type="button"
                     onClick={(e) => {
@@ -1200,6 +1685,22 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
               );
             })}
           </div>
+
+          {splitViewActive && secondaryChat && (
+            <div className="mt-3 px-2 py-2 rounded-lg border border-sky-500/20 bg-sky-500/[0.06] flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-[10px] uppercase tracking-wider text-sky-300/80 font-semibold">Split View</p>
+                <p className="text-[11px] text-sky-100/80 truncate">Secondary: {secondaryChat.title}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSecondaryChatId("")}
+                className="shrink-0 px-2 py-1 text-[10px] rounded-md text-sky-200 hover:text-white hover:bg-sky-500/20 border border-sky-500/25 cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Usage panel */}
@@ -1328,7 +1829,17 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
               <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
-            Settings
+            <span className="inline-flex items-center gap-1.5">
+              <span>Settings</span>
+              {appVersion && (
+                <span
+                  className="text-[10px] font-semibold text-saffron-300"
+                  style={{ textShadow: "0 0 6px rgba(251,191,36,0.85), 0 0 14px rgba(251,191,36,0.45)" }}
+                >
+                  v{appVersion}
+                </span>
+              )}
+            </span>
           </motion.button>
         </div>
 
@@ -1469,18 +1980,71 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
         </AnimatePresence>
 
         {/* Messages */}
-        <MessageList
-          messages={messages}
-          loading={loading}
-          lastError={lastError}
-          onRetry={handleRetry}
-          onRegenerate={handleRegenerate}
-          onRefine={(msgIdx) => {
-            const aiMsg = messages[msgIdx];
-            if (!aiMsg || aiMsg.role !== "assistant" || !aiMsg.content) return;
-            handleSend("Refine your previous answer: be more precise, fix any issues, and improve the code quality. Keep the same format.");
-          }}
-        />
+        {splitViewActive ? (
+          <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-2 gap-3 px-3 py-3">
+            {renderChatPane(activeChat, "primary")}
+            {renderChatPane(secondaryChat, "secondary")}
+          </div>
+        ) : (
+          <MessageList
+            messages={messages}
+            loading={loading}
+            lastError={lastError}
+            onRetry={handleRetry}
+            onRegenerate={handleRegenerate}
+            onPointDeepDive={handlePointDeepDive}
+            onRefine={(msgIdx) => {
+              const aiMsg = messages[msgIdx];
+              if (!aiMsg || aiMsg.role !== "assistant" || !aiMsg.content) return;
+              handleSend("Refine your previous answer: be more precise, fix any issues, and improve the code quality. Keep the same format.");
+            }}
+          />
+        )}
+
+        {/* Web search animation */}
+        <AnimatePresence>
+          {((isSearching && searchingChatId === activeChatId) || (loading && webPreparingChatId === activeChatId)) && (
+            <motion.div
+              key="searching"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 8 }}
+              transition={{ duration: 0.2, ease }}
+              className="flex justify-end px-6 pb-2 shrink-0"
+            >
+              <div className="flex items-center gap-2.5 bg-sky-500/[0.08] border border-sky-500/20 rounded-2xl rounded-br-sm px-4 py-2.5 max-w-[80%]">
+                {/* Animated globe */}
+                <div className="relative shrink-0 w-4 h-4">
+                  <svg className="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="10" />
+                    <path strokeLinecap="round" d="M2 12h20M12 2a15.3 15.3 0 010 20M12 2a15.3 15.3 0 000 20" />
+                  </svg>
+                  <motion.div
+                    className="absolute inset-0 rounded-full border border-sky-400/30"
+                    animate={{ scale: [1, 1.6, 1.6], opacity: [0.6, 0, 0] }}
+                    transition={{ duration: 1.4, repeat: Infinity, ease: "easeOut" }}
+                  />
+                </div>
+                <span className="text-[12px] text-sky-300/80 font-medium">
+                  {isSearching
+                    ? (webSearchMode === "deep" ? "Deep web research" : "Searching the web")
+                    : "Preparing answer from web context"}
+                </span>
+                {/* Pulsing dots */}
+                <span className="flex gap-0.5 items-center">
+                  {[0, 0.2, 0.4].map((delay, i) => (
+                    <motion.span
+                      key={i}
+                      className="w-1 h-1 rounded-full bg-sky-400/60"
+                      animate={{ opacity: [0.2, 1, 0.2] }}
+                      transition={{ duration: 1, repeat: Infinity, ease, delay }}
+                    />
+                  ))}
+                </span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Attached files & uploads preview */}
         <AnimatePresence>
@@ -1492,7 +2056,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
               transition={{ duration: 0.2, ease }}
               className="px-5 pt-2 pb-1 shrink-0 overflow-hidden"
             >
-              <div className="max-w-3xl mx-auto flex flex-wrap gap-2">
+              <div className="max-w-[1400px] mx-auto flex flex-wrap gap-2 w-full">
                 {/* Sidebar-attached text files */}
                 {attachedFiles.map((f) => (
                   <span
@@ -1559,6 +2123,14 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
           )}
         </AnimatePresence>
 
+        {splitViewActive && activeChat && (
+          <div className="px-5 pt-1 pb-0.5 shrink-0">
+            <div className="max-w-[1400px] mx-auto text-[11px] text-sky-300/75">
+              Sending to: <span className="text-sky-200 font-medium">{activeChat.title || "New Chat"}</span>
+            </div>
+          </div>
+        )}
+
         {/* Input */}
         <MessageInput
           onSend={handleSend}
@@ -1572,6 +2144,16 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
           reasoningDepth={reasoningDepth}
           onReasoningDepthChange={setReasoningDepth}
           sendShortcut={shortcuts.sendMessage}
+          webSearchEnabled={webSearchEnabled}
+          webSearchMode={webSearchMode}
+          onWebSearchToggle={() => {
+            setWebSearchEnabled((prev) => !prev);
+          }}
+          onWebSearchModeChange={(mode) => {
+            const nextMode = mode === "deep" ? "deep" : "fast";
+            setWebSearchMode(nextMode);
+            try { localStorage.setItem("kp_web_mode", nextMode); } catch {}
+          }}
         />
       </motion.div>
       )}
