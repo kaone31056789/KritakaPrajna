@@ -1,98 +1,127 @@
+<div align="center">
+
 # KritakaPrajna
 
-<p align="left">
-  <a href="https://github.com/kaone31056789/KritakaPrajna/releases"><img src="https://img.shields.io/badge/Release-v2.7.0-22c55e?style=for-the-badge" alt="Release"></a>
-  <img src="https://img.shields.io/badge/Platform-Windows-2563eb?style=for-the-badge" alt="Platform">
-  <img src="https://img.shields.io/badge/Electron-35.x-0ea5e9?style=for-the-badge" alt="Electron">
-  <img src="https://img.shields.io/badge/React-18-0891b2?style=for-the-badge" alt="React">
-  <img src="https://img.shields.io/badge/Status-Active-f59e0b?style=for-the-badge" alt="Status">
-</p>
+### Desktop AI Assistant for serious builders
 
-KritakaPrajna is a desktop AI assistant built with Electron + React that brings multiple model providers into one premium chat experience.
+<a href="https://github.com/kaone31056789/KritakaPrajna/releases"><img src="https://img.shields.io/badge/Release-v2.7.0-22c55e?style=for-the-badge&logo=github" alt="Release v2.7.0"></a>
+<img src="https://img.shields.io/badge/Windows-Ready-2563eb?style=for-the-badge&logo=windows" alt="Windows Ready">
+<img src="https://img.shields.io/badge/Electron-35.x-0ea5e9?style=for-the-badge&logo=electron" alt="Electron 35.x">
+<img src="https://img.shields.io/badge/React-18-0891b2?style=for-the-badge&logo=react" alt="React 18">
+<img src="https://img.shields.io/badge/Open%20Source-Yes-f59e0b?style=for-the-badge" alt="Open Source">
 
-It is free to use, open-source, and optimized for power users who want fast model switching, live web context, cost visibility, and practical coding workflows.
+<br>
 
-## Highlights
+<img src="https://img.shields.io/badge/Multi%20Provider-OpenRouter%20%7C%20HF%20%7C%20OpenAI%20%7C%20Anthropic-7c3aed?style=flat-square" alt="Multi Provider">
+<img src="https://img.shields.io/badge/Web%20Context-Fast%20%26%20Deep-0284c7?style=flat-square" alt="Web Context">
+<img src="https://img.shields.io/badge/Model%20Advisor-Smart%20Scoring-f59e0b?style=flat-square" alt="Model Advisor">
+<img src="https://img.shields.io/badge/Installer-NSIS%20Auto%20Update-16a34a?style=flat-square" alt="Installer NSIS">
 
-- Multi-provider routing in one app: OpenRouter, Hugging Face, OpenAI, and Anthropic.
-- Smart model advisor with cost/performance tradeoff recommendations.
-- Live web-context mode with source-aware responses.
-- Terminal-aware markdown blocks and command workflow support.
-- Split-chat and advanced prompt workflows for deeper analysis.
-- Local key storage and desktop-first UX.
+</div>
 
-## Screenshots
+---
 
-### Splash
-![Splash Screen](Screenshots/splash.png)
+## Why KritakaPrajna
 
-### Main Chat
-![Main Chat](Screenshots/chat.png)
+KritakaPrajna gives you one place to chat, code, search the web, evaluate model cost/quality, and ship faster. It is designed like a practical desktop control center, not a toy chat window.
 
-## Core Features
+If you switch providers often, compare models by task, and want web-aware answers with visible source behavior, this app is built for that workflow.
 
-### 1. Unified Provider Access
+## At a Glance
 
-Switch providers without leaving the app.
+| Capability | What you get |
+|---|---|
+| Unified model access | OpenRouter, Hugging Face, OpenAI, Anthropic in one UI |
+| Smart advisor | Task-aware + cost-aware + context-aware model picks |
+| Web mode | Fast mode for speed, Deep mode for breadth |
+| Builder UX | Markdown rendering, terminal command flow, retry/regenerate cycles |
+| Desktop polish | Native window controls, updater support, installer delivery |
 
-- OpenRouter for broad model catalog and pricing flexibility.
-- Hugging Face for free and OSS-heavy options.
-- OpenAI and Anthropic support for premium model workflows.
+## Visual Tour
 
-### 2. Smart Model Advisor
+| Splash | Main Workspace |
+|---|---|
+| ![Splash Screen](Screenshots/splash.png) | ![Main Chat](Screenshots/chat.png) |
 
-Built-in advisor helps pick the best model based on real context.
+## Feature Deep Dive
 
-- Task-aware suggestions (coding, vision, general, document).
-- Cost-aware alternatives and value picks.
-- Feature-aware scoring (web usage, reasoning depth, terminal intent).
+### 1) Multi-Provider Routing
 
-### 3. Web-Aware Responses
+Use one desktop app to access different ecosystems.
 
-The web layer fetches and injects live context before the model answers.
+- OpenRouter for broad model catalog and flexible pricing
+- Hugging Face for OSS and free-friendly workflows
+- OpenAI / Anthropic for premium model quality
 
-- Fast mode for speed-first browsing.
-- Deep mode for broader context gathering.
-- Source tracking and citation-friendly context formatting.
+### 2) Smart Model Advisor
 
-### 4. Developer Workflow UX
+Advisor logic goes beyond static "best model" picks.
 
-Designed for actual coding sessions.
+- Scores models by task fit, cost, speed, and availability
+- Considers runtime context (web mode, reasoning depth, terminal intent)
+- Suggests alternatives: value pick, free pick, better paid option
 
-- Markdown + syntax highlighting.
-- Terminal-style command integration in assistant output.
-- File context, diff workflows, and practical retry/regenerate controls.
+### 3) Web-Aware Answering
 
-### 5. Desktop Experience
+The app can fetch live web context before model generation.
 
-Purpose-built Electron desktop app.
+- Fast mode: low-latency context fetch
+- Deep mode: broader retrieval + stronger context for analysis
+- Source-aware flow and explicit "no reliable sources" state when needed
 
-- Custom title bar and native window controls.
-- Auto-update plumbing with release assets.
-- Installer-based Windows delivery.
+### 4) Productive Coding Workflow
 
-## Quick Start (Installer)
+- Rich markdown + code highlighting
+- Terminal-oriented command handling
+- Regenerate/refine loops for iterative code quality
+- File and upload-aware prompting
 
-1. Open Releases: https://github.com/kaone31056789/KritakaPrajna/releases
-2. Download `KritakaPrajna-Setup-2.7.0.exe`
-3. Install and launch KritakaPrajna
-4. Add provider API keys from Settings
+### 5) Desktop-First Packaging
 
-## Run From Source
+- Electron desktop runtime
+- NSIS installer packaging
+- Release asset pipeline for updates
+
+## Architecture Snapshot
+
+```mermaid
+flowchart LR
+  UI[React Desktop UI] --> ORCH[Chat Orchestration]
+  ORCH --> ADVISE[Model Advisor]
+  ORCH --> WEB[Web Context Layer]
+  ORCH --> ROUTER[Provider Router]
+
+  ROUTER --> OPR[OpenRouter]
+  ROUTER --> HF[Hugging Face]
+  ROUTER --> OAI[OpenAI]
+  ROUTER --> ANT[Anthropic]
+
+  WEB --> FETCH[Search + Fetch + Merge]
+  ADVISE --> SCORE[Task and Context Scoring]
+```
+
+## Install (Recommended)
+
+1. Go to Releases: https://github.com/kaone31056789/KritakaPrajna/releases
+2. Download: `KritakaPrajna-Setup-2.7.0.exe`
+3. Install and launch the app
+4. Add your API keys in Settings
+
+## Build From Source
 
 ### Prerequisites
 
 - Node.js 18+
 - npm 9+
-- Windows (recommended for installer workflow)
+- Windows recommended for installer generation
 
-### Install Dependencies
+### Setup
 
 ```bash
 npm install
 ```
 
-### Start App (React + Electron)
+### Run Dev App
 
 ```bash
 npm start
@@ -104,7 +133,7 @@ npm start
 npm run build
 ```
 
-### Build Installer
+### Build Windows Installer
 
 ```bash
 npm run dist
@@ -112,14 +141,14 @@ npm run dist
 
 ## Configuration
 
-Provider API keys are managed inside the app Settings panel.
+Set provider credentials from the app Settings panel.
 
-- OpenRouter key
+- OpenRouter API key
 - Hugging Face token
-- OpenAI key
-- Anthropic key
+- OpenAI API key
+- Anthropic API key
 
-Keys are stored locally on your machine for desktop usage.
+Credentials are stored locally for desktop runtime.
 
 ## Tech Stack
 
@@ -131,49 +160,49 @@ Keys are stored locally on your machine for desktop usage.
 - react-syntax-highlighter
 - electron-builder
 
-## Project Structure
+## Repository Layout
 
 ```text
-electron/         Main process + preload bridge
-src/components/   UI components and chat experience
-src/api/          Provider adapters and routing
-src/utils/        Advisor, costs, memory, intents, helpers
-assets/           Logos and build resources
-Screenshots/      README visuals
+electron/         Main process, IPC, preload bridge
+src/components/   Interface and workflow components
+src/api/          Provider adapters and model routing
+src/utils/        Advisor, web, memory, intent, cost, helper logic
+assets/           Build resources, icons, logos
+Screenshots/      Documentation visuals
 ```
 
-## Security Notes
+## Security and Reliability
 
-- API credentials are kept in local desktop storage.
-- Electron IPC boundaries are enforced via preload bridge.
-- Release flow includes dependency audit checks.
+- Local storage for API credentials in desktop context
+- Context-isolated Electron bridge model
+- Release-time dependency checks and packaging validation
 
-## v2.7.0 Release Focus
+## v2.7.0 Focus
 
-- Better web flow and fallback behavior
-- Improved model advisor context scoring
-- Refined UI interactions and desktop workflow polish
-- Updated release metadata and installer packaging
+- Better web behavior and clearer retrieval states
+- Stronger advisor scoring with runtime signal awareness
+- Workflow and UI refinements for daily use
+- Updated installer and release metadata
 
 ## Contributing
 
-Issues and pull requests are welcome.
+PRs and issues are welcome.
 
-If you submit changes, include:
+When submitting changes, include:
 
-- Clear problem statement
-- Reproduction steps (if bug)
-- Before/after behavior summary
-- Screenshots for UI changes when applicable
+- Clear summary of behavior change
+- Reproduction steps (for bugs)
+- Before/after notes
+- Screenshots for UI updates
 
 ## Support
 
-Use GitHub Issues for:
-
-- Bug reports
-- Feature requests
-- Release feedback
+Use GitHub Issues for bugs, feature ideas, and release feedback.
 
 ---
 
+<div align="center">
+
 Built by Parikshit
+
+</div>
