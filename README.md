@@ -2,138 +2,217 @@
 
 # KritakaPrajna
 
-### Desktop AI Assistant for serious builders
+### AI Desktop Workspace for Builders, Researchers, and Power Users
 
-<a href="https://github.com/kaone31056789/KritakaPrajna/releases"><img src="https://img.shields.io/badge/Release-v2.7.0-22c55e?style=for-the-badge&logo=github" alt="Release v2.7.0"></a>
-<img src="https://img.shields.io/badge/Windows-Ready-2563eb?style=for-the-badge&logo=windows" alt="Windows Ready">
-<img src="https://img.shields.io/badge/Electron-35.x-0ea5e9?style=for-the-badge&logo=electron" alt="Electron 35.x">
-<img src="https://img.shields.io/badge/React-18-0891b2?style=for-the-badge&logo=react" alt="React 18">
-<img src="https://img.shields.io/badge/Open%20Source-Yes-f59e0b?style=for-the-badge" alt="Open Source">
+<a href="https://github.com/kaone31056789/KritakaPrajna/releases"><img src="https://img.shields.io/badge/Release-v2.7.0-22c55e?style=for-the-badge&logo=github" alt="Release"></a>
+<img src="https://img.shields.io/badge/Windows-Supported-2563eb?style=for-the-badge&logo=windows" alt="Windows">
+<img src="https://img.shields.io/badge/Electron-35.x-0ea5e9?style=for-the-badge&logo=electron" alt="Electron">
+<img src="https://img.shields.io/badge/React-18-0891b2?style=for-the-badge&logo=react" alt="React">
+<img src="https://img.shields.io/badge/License-Open--source-f59e0b?style=for-the-badge" alt="Open Source">
 
 <br>
 
-<img src="https://img.shields.io/badge/Multi%20Provider-OpenRouter%20%7C%20HF%20%7C%20OpenAI%20%7C%20Anthropic-7c3aed?style=flat-square" alt="Multi Provider">
-<img src="https://img.shields.io/badge/Web%20Context-Fast%20%26%20Deep-0284c7?style=flat-square" alt="Web Context">
-<img src="https://img.shields.io/badge/Model%20Advisor-Smart%20Scoring-f59e0b?style=flat-square" alt="Model Advisor">
-<img src="https://img.shields.io/badge/Installer-NSIS%20Auto%20Update-16a34a?style=flat-square" alt="Installer NSIS">
+<img src="https://img.shields.io/badge/Providers-OpenRouter%20%7C%20HuggingFace%20%7C%20OpenAI%20%7C%20Anthropic-7c3aed?style=flat-square" alt="Providers">
+<img src="https://img.shields.io/badge/Web%20Mode-Fast%20%2B%20Deep-0284c7?style=flat-square" alt="Web Mode">
+<img src="https://img.shields.io/badge/Model%20Advisor-Cost%20%2B%20Quality%20Scoring-f59e0b?style=flat-square" alt="Advisor">
+<img src="https://img.shields.io/badge/Installer-NSIS%20via%20electron--builder-16a34a?style=flat-square" alt="Installer">
 
 </div>
 
 ---
 
-## Why KritakaPrajna
+## Table of Contents
 
-KritakaPrajna gives you one place to chat, code, search the web, evaluate model cost/quality, and ship faster. It is designed like a practical desktop control center, not a toy chat window.
+1. [What Is KritakaPrajna](#what-is-kritakaprajna)
+2. [Why It Is Different](#why-it-is-different)
+3. [Visual Preview](#visual-preview)
+4. [Capability Overview](#capability-overview)
+5. [Architecture](#architecture)
+6. [Provider and Task Coverage](#provider-and-task-coverage)
+7. [Built-in Commands and Shortcuts](#built-in-commands-and-shortcuts)
+8. [Install and Run](#install-and-run)
+9. [Configuration](#configuration)
+10. [Project Structure](#project-structure)
+11. [Security and Privacy](#security-and-privacy)
+12. [Troubleshooting](#troubleshooting)
+13. [Release Notes (v2.7.0)](#release-notes-v270)
+14. [Contributing](#contributing)
+15. [Support](#support)
 
-If you switch providers often, compare models by task, and want web-aware answers with visible source behavior, this app is built for that workflow.
+## What Is KritakaPrajna
 
-## At a Glance
+KritakaPrajna is a desktop AI workspace that combines:
 
-| Capability | What you get |
+- multi-provider model access,
+- web-aware context retrieval,
+- model quality/cost guidance,
+- and coding-friendly interaction patterns
+
+in a single Electron application.
+
+It is designed for users who want a practical daily driver for building software, researching topics, and comparing model outcomes without constantly switching tools.
+
+## Why It Is Different
+
+| Area | KritakaPrajna approach |
 |---|---|
-| Unified model access | OpenRouter, Hugging Face, OpenAI, Anthropic in one UI |
-| Smart advisor | Task-aware + cost-aware + context-aware model picks |
-| Web mode | Fast mode for speed, Deep mode for breadth |
-| Builder UX | Markdown rendering, terminal command flow, retry/regenerate cycles |
-| Desktop polish | Native window controls, updater support, installer delivery |
+| Provider switching | One interface across OpenRouter, Hugging Face, OpenAI, Anthropic |
+| Model selection | Advisor scoring based on task + runtime context + cost |
+| Web behavior | Fast and Deep retrieval modes, source injection, no-result handling |
+| Coding workflow | Markdown rendering, syntax highlighting, terminal command integration |
+| Desktop UX | Native window controls, updater flow, installer packaging |
 
-## Visual Tour
+## Visual Preview
 
-| Splash | Main Workspace |
+| Splash | Main Chat Workspace |
 |---|---|
-| ![Splash Screen](Screenshots/splash.png) | ![Main Chat](Screenshots/chat.png) |
+| ![Splash](Screenshots/splash.png) | ![Chat](Screenshots/chat.png) |
 
-## Feature Deep Dive
+## Capability Overview
 
-### 1) Multi-Provider Routing
+### Multi-Provider AI Routing
 
-Use one desktop app to access different ecosystems.
+- OpenRouter for wide model catalog and pricing flexibility
+- Hugging Face for open/free model options
+- OpenAI and Anthropic for premium model workflows
 
-- OpenRouter for broad model catalog and flexible pricing
-- Hugging Face for OSS and free-friendly workflows
-- OpenAI / Anthropic for premium model quality
+### Smart Model Advisor
 
-### 2) Smart Model Advisor
+The advisor uses scoring profiles that include:
 
-Advisor logic goes beyond static "best model" picks.
+- task type (coding, vision, document, general),
+- estimated quality,
+- cost per million tokens,
+- availability signal,
+- speed profile,
+- feature context such as web mode, terminal intent, reasoning depth.
 
-- Scores models by task fit, cost, speed, and availability
-- Considers runtime context (web mode, reasoning depth, terminal intent)
-- Suggests alternatives: value pick, free pick, better paid option
+### Web Context Layer
 
-### 3) Web-Aware Answering
+The app can automatically fetch and inject live web data before response generation.
 
-The app can fetch live web context before model generation.
+- Fast mode: lower-latency context retrieval
+- Deep mode: broader retrieval for richer analysis
+- explicit source metadata attached to message state
+- clear fallback message when no reliable sources are found
 
-- Fast mode: low-latency context fetch
-- Deep mode: broader retrieval + stronger context for analysis
-- Source-aware flow and explicit "no reliable sources" state when needed
+### Terminal-Centric Interaction
 
-### 4) Productive Coding Workflow
+Shell code blocks can be treated as executable command panels in desktop runtime.
 
-- Rich markdown + code highlighting
-- Terminal-oriented command handling
-- Regenerate/refine loops for iterative code quality
-- File and upload-aware prompting
+- Ask mode (manual run)
+- Auto-run mode (optional)
+- run/edit/kill workflow
+- command completion output can be fed back into assistant flow
 
-### 5) Desktop-First Packaging
+### Memory and Preferences
 
-- Electron desktop runtime
-- NSIS installer packaging
-- Release asset pipeline for updates
+User memory supports three categories:
 
-## Architecture Snapshot
+- Preferences
+- Coding Style
+- Context Memory
+
+with optional auto-detection from conversation patterns.
+
+## Architecture
 
 ```mermaid
 flowchart LR
-  UI[React Desktop UI] --> ORCH[Chat Orchestration]
-  ORCH --> ADVISE[Model Advisor]
-  ORCH --> WEB[Web Context Layer]
+  UI[React UI] --> ORCH[Chat Orchestrator]
   ORCH --> ROUTER[Provider Router]
+  ORCH --> WEB[Web Fetcher]
+  ORCH --> ADVISE[Model Advisor]
+  ORCH --> MEM[User Memory]
 
-  ROUTER --> OPR[OpenRouter]
+  ROUTER --> OR[OpenRouter]
   ROUTER --> HF[Hugging Face]
-  ROUTER --> OAI[OpenAI]
-  ROUTER --> ANT[Anthropic]
+  ROUTER --> OA[OpenAI]
+  ROUTER --> AN[Anthropic]
 
-  WEB --> FETCH[Search + Fetch + Merge]
-  ADVISE --> SCORE[Task and Context Scoring]
+  WEB --> FETCH[Search and Page Fetch]
+  ADVISE --> SCORE[Task + Cost + Context Scoring]
 ```
 
-## Install (Recommended)
+## Provider and Task Coverage
 
-1. Go to Releases: https://github.com/kaone31056789/KritakaPrajna/releases
-2. Download: `KritakaPrajna-Setup-2.7.0.exe`
-3. Install and launch the app
+| Task / Capability | Notes |
+|---|---|
+| Text generation | Primary default mode |
+| Image-to-text | Vision-capable model path |
+| Text-to-image | Supported through routed model capability checks |
+| Image-to-image | Capability-gated model filtering |
+| Text-to-video | Capability-gated model filtering |
+| Text-to-speech | Capability-gated model filtering |
+
+Actual model availability depends on active provider keys and provider-side model status.
+
+## Built-in Commands and Shortcuts
+
+### Slash Commands
+
+| Command | Purpose |
+|---|---|
+| `/explain <file>` | Explain a file in detail |
+| `/fix <file>` | Review and fix issues in a file |
+| `/summarize <file>` | Summarize file role/API/dependencies |
+| `/test-terminal` | Terminal feature test prompt |
+| `/test-web` | Web feature test prompt |
+| `/test-features` | Combined web + terminal test prompt |
+
+### Default Shortcuts
+
+| Action | Shortcut |
+|---|---|
+| Send Message | `Ctrl+Enter` |
+| New Chat | `Ctrl+N` |
+| Open Settings | `Ctrl+,` |
+| Retry Response | `Ctrl+R` |
+| Toggle Sidebar | `Ctrl+B` |
+| Open Model Selector | `Ctrl+K` |
+
+### Reasoning Modes
+
+- Fast
+- Balanced
+- Deep
+
+## Install and Run
+
+### Option A: Installer (Recommended)
+
+1. Open Releases: https://github.com/kaone31056789/KritakaPrajna/releases
+2. Download `KritakaPrajna-Setup-2.7.0.exe`
+3. Install and launch
 4. Add your API keys in Settings
 
-## Build From Source
+### Option B: Run from Source
 
-### Prerequisites
+#### Prerequisites
 
 - Node.js 18+
 - npm 9+
-- Windows recommended for installer generation
+- Windows recommended for installer build path
 
-### Setup
+#### Install dependencies
 
 ```bash
 npm install
 ```
 
-### Run Dev App
+#### Start development app
 
 ```bash
 npm start
 ```
 
-### Build Web Bundle
+#### Build production bundle
 
 ```bash
 npm run build
 ```
 
-### Build Windows Installer
+#### Build Windows installer
 
 ```bash
 npm run dist
@@ -141,63 +220,86 @@ npm run dist
 
 ## Configuration
 
-Set provider credentials from the app Settings panel.
+### API Providers
 
-- OpenRouter API key
-- Hugging Face token
-- OpenAI API key
-- Anthropic API key
+Configure inside Settings:
 
-Credentials are stored locally for desktop runtime.
+- OpenRouter key
+- OpenAI key
+- Anthropic key
+- Hugging Face key
 
-## Tech Stack
+### Local Settings
 
-- Electron
-- React
-- Tailwind CSS
-- Framer Motion
-- react-markdown + remark-gfm
-- react-syntax-highlighter
-- electron-builder
+The app stores local runtime preferences such as:
 
-## Repository Layout
+- selected model and task preferences,
+- keyboard shortcuts,
+- user memory entries,
+- command panel mode,
+- chat/session state.
+
+## Project Structure
 
 ```text
-electron/         Main process, IPC, preload bridge
-src/components/   Interface and workflow components
-src/api/          Provider adapters and model routing
-src/utils/        Advisor, web, memory, intent, cost, helper logic
-assets/           Build resources, icons, logos
-Screenshots/      Documentation visuals
+electron/           Main process, IPC handlers, preload bridge
+public/             Static app shell
+src/
+  api/              Provider adapters and routing logic
+  components/       UI, chat, settings, advisor, renderers
+  utils/            Advisor ranking, intents, memory, cost, parsing helpers
+assets/             Icons and packaging resources
+Screenshots/        Documentation images
+build/              Production web output (generated)
+dist/               Installer output (generated)
 ```
 
-## Security and Reliability
+## Security and Privacy
 
-- Local storage for API credentials in desktop context
-- Context-isolated Electron bridge model
-- Release-time dependency checks and packaging validation
+- API credentials are managed locally in desktop context.
+- Electron uses context isolation and preload bridge exposure.
+- Command execution path includes safety checks for blocked dangerous patterns.
+- Release pipeline uses dependency audit checks and packaging verification.
 
-## v2.7.0 Focus
+## Troubleshooting
 
-- Better web behavior and clearer retrieval states
-- Stronger advisor scoring with runtime signal awareness
-- Workflow and UI refinements for daily use
-- Updated installer and release metadata
+### App starts but models are missing
+
+- Verify provider keys in Settings.
+- Check network/API status for selected providers.
+
+### Web mode appears to return no sources
+
+- Try Deep mode for broader retrieval.
+- Rephrase with more explicit search terms.
+- Check whether query needs current-event/news signals.
+
+### Installer build fails
+
+- Remove stale generated artifacts from `build/` and `dist/`.
+- Re-run `npm install` and then `npm run dist`.
+
+## Release Notes (v2.7.0)
+
+- Expanded and polished project documentation
+- Improved web context behavior and response-state continuity
+- Enhanced model advisor context-aware scoring
+- Updated installer assets and release metadata
 
 ## Contributing
 
-PRs and issues are welcome.
+Issues and pull requests are welcome.
 
-When submitting changes, include:
+When contributing, include:
 
-- Clear summary of behavior change
-- Reproduction steps (for bugs)
-- Before/after notes
-- Screenshots for UI updates
+- clear summary of the change,
+- reproduction steps for fixes,
+- impact notes (before/after),
+- screenshots for UI changes where relevant.
 
 ## Support
 
-Use GitHub Issues for bugs, feature ideas, and release feedback.
+For help, bugs, feature requests, and release feedback, use GitHub Issues.
 
 ---
 
