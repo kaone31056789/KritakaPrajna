@@ -64,9 +64,17 @@ It is designed for users who want a practical daily driver for building software
 
 ## Visual Preview
 
-| API Onboarding | Main Chat Workspace | Settings Panel |
-|---|---|---|
-| ![API Onboarding](Screenshots/v2.8-api-key-screen.png) | ![Main Chat](Screenshots/v2.8-main-chat.png) | ![Settings Panel](Screenshots/v2.8-settings-panel.png) |
+### API Onboarding
+
+[![API Onboarding](Screenshots/v2.8-api-key-screen.png)](Screenshots/v2.8-api-key-screen.png)
+
+### Main Chat Workspace
+
+[![Main Chat Workspace](Screenshots/v2.8-main-chat.png)](Screenshots/v2.8-main-chat.png)
+
+### Settings Panel
+
+[![Settings Panel](Screenshots/v2.8-settings-panel.png)](Screenshots/v2.8-settings-panel.png)
 
 ## Capability Overview
 
