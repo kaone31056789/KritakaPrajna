@@ -17,6 +17,11 @@ export default function MessageInput({
   showReasoningControl = false,
   reasoningDepth = "balanced",
   onReasoningDepthChange,
+  responseLength = "medium",
+  onResponseLengthChange,
+  estimatedTokens = 0,
+  lastSentTokens = 0,
+  lastReceivedTokens = 0,
   sendShortcut = "Ctrl+Enter",
   webSearchEnabled = true,
   webSearchMode = "fast",
@@ -86,13 +91,14 @@ export default function MessageInput({
   };
 
   const showWebModeControl = webSearchEnabled && onWebSearchModeChange;
-  const showControlBar = showReasoningControl || showWebModeControl;
+  const showResponseLengthControl = !!onResponseLengthChange;
+  const showControlBar = showReasoningControl || showWebModeControl || showResponseLengthControl;
 
   return (
     <div data-message-composer className="shrink-0 pb-5 pt-2 px-4">
       <div className="max-w-[1400px] mx-auto relative w-full">
         {showControlBar && (
-          <div className={`mb-2 px-1 flex flex-wrap items-center gap-2 ${showReasoningControl && showWebModeControl ? "justify-between" : "justify-start"}`}>
+          <div className="mb-2 px-1 flex flex-wrap items-center gap-2 justify-between">
             {showReasoningControl && (
               <div className="flex flex-wrap items-center gap-2">
               <span
@@ -150,6 +156,41 @@ export default function MessageInput({
                       }`}
                     >
                       {mode.label}
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+
+            {showResponseLengthControl && (
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.18, ease }}
+                className="inline-flex items-center gap-1.5 rounded-2xl border border-amber-500/25 bg-dark-900/70 backdrop-blur-md px-2 py-1 shadow-[0_8px_24px_rgba(2,6,23,0.45)]"
+                title="Response length"
+              >
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-300/85 px-1">
+                  Reply
+                </span>
+                <div className="inline-flex items-center gap-0.5 h-7 rounded-full border border-white/[0.07] bg-white/[0.03] p-0.5">
+                  {[
+                    { id: "short", label: "Short", hint: "~128" },
+                    { id: "medium", label: "Medium", hint: "~512" },
+                    { id: "long", label: "Long", hint: "~1024" },
+                  ].map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => onResponseLengthChange(option.id)}
+                      className={`h-6 px-2.5 rounded-full text-[10px] font-medium transition-colors cursor-pointer ${
+                        responseLength === option.id
+                          ? "text-amber-200 bg-amber-500/20 border border-amber-400/30"
+                          : "text-dark-400 hover:text-dark-200 hover:bg-white/[0.05] border border-transparent"
+                      }`}
+                      title={`${option.label} response (${option.hint} tokens)`}
+                    >
+                      {option.label}
                     </button>
                   ))}
                 </div>
@@ -296,6 +337,15 @@ export default function MessageInput({
             </motion.button>
           )}
         </motion.form>
+
+        <div className="mt-1.5 px-1 flex items-center justify-between text-[10px]">
+          <span className={estimatedTokens > 3000 ? "text-amber-300" : "text-dark-500"}>
+            Est. input: ~{Math.max(0, Math.round(Number(estimatedTokens) || 0))} tokens
+          </span>
+          <span className="text-dark-500">
+            Last: {Math.max(0, Math.round(Number(lastSentTokens) || 0))} in / {Math.max(0, Math.round(Number(lastReceivedTokens) || 0))} out
+          </span>
+        </div>
       </div>
     </div>
   );

@@ -18,6 +18,7 @@ import { generateAdvisorData } from "../utils/modelAdvisor";
 import { loadAdvisorRankingSignals } from "../utils/advisorRanking";
 import { loadProviderUsage, providerUsageRows, recordProviderUsage } from "../utils/usageTracker";
 import { supportsReasoningModel } from "../utils/reasoningControls";
+import { fetchCloudUsage as fetchOllamaCloudUsage } from "../api/ollama";
 import { eventToShortcut, mergeShortcuts, normalizeShortcutString } from "../utils/keyboardShortcuts";
 import {
   USER_MEMORY_STORAGE_KEY,
@@ -31,6 +32,25 @@ import {
 import { extractMemoryWithAI } from "../utils/aiMemoryExtractor";
 import { fetchAllWebContent, buildWebContext, parseWebCommand, extractUrlsFromText, fetchWebPage, webSearch, deepArticleSearch, mergeWebSources } from "../utils/webFetcher";
 import { isTerminalIntent, isWebIntent, isDetailedIntent, isRealWorldQuery, isNewsIntent, buildSearchQuery } from "../utils/intentDetector";
+import {
+  DEFAULT_TOKEN_OPTIMIZATION_CONFIG,
+  buildFallbackHistorySummary,
+  buildHistorySummaryPrompt,
+  buildSlidingWindowHistory,
+  compressSystemPrompt,
+  enforceInputTokenBudget,
+  estimateTokensFromMessages,
+  estimateTokensFromText,
+  normalizeUserInputForSend,
+  pickCheapestSummaryModel,
+  resolveGenerationSettings,
+} from "../utils/tokenOptimizer";
+import {
+  getCachedResponseEntry,
+  loadSessionResponseCache,
+  makeResponseCacheKey,
+  setCachedResponseEntry,
+} from "../utils/responseCache";
 
 const ease = [0.4, 0, 0.2, 1];
 const CHATS_KEY = "openrouter_chats";
@@ -42,24 +62,19 @@ const TASK_PREF_KEY = "openrouter_task_pref";
 const REASONING_DEPTH_KEY = "openrouter_reasoning_depth";
 const SYSTEM_PROMPT_KEY = "openrouter_system_prompt";
 const ADVISOR_PREFS_KEY = "openrouter_advisor_prefs";
+const RESPONSE_LENGTH_KEY = "openrouter_response_length";
+const HISTORY_WINDOW_KEY = "openrouter_history_window";
+const MAX_INPUT_TOKENS_KEY = "openrouter_max_input_tokens";
+const MAX_USER_CHARS_KEY = "openrouter_max_user_chars";
 
-const DEFAULT_SYSTEM_PROMPT = `You are KritakaPrajna, an expert AI assistant. Be direct and concise — lead with the answer, not the reasoning process. Never show "Approach", "Analyze", "Reason", or "Solve" headers.
-
-## Coding
-- Provide code in fenced code blocks with the correct language tag.
-- Prefer minimal, targeted changes. Explain briefly what you changed and why.
-
-## Terminal Commands — MANDATORY RULE
-ANY shell, CLI, or script command you suggest MUST be in a fenced code block with language \`bash\`, \`sh\`, \`cmd\`, or \`powershell\`. Choose the shell that matches the runtime OS (Windows -> powershell/cmd, macOS/Linux -> bash/sh). Never write commands as plain text.
-
-## Terminal Output Feedback
-When you receive terminal output (formatted as "Terminal command completed: ..."), analyze it:
-- If exit code is 0: briefly confirm what succeeded.
-- If exit code is non-0 or shows an error: diagnose the problem and suggest a fix with a new \`\`\`bash block.
-- If a tool is missing (e.g. "command not found"): provide the install command.
-
-## Web Sources
-When 🌐 WEB SOURCES are provided, answer using that content and cite sources as [1], [2] etc. at the end of relevant sentences. Keep source sections compact: no duplicate sources and max 5 unique source lines in any final "Sources" block.`;
+// TOKEN OPTIMIZATION: concise default system instructions (bullet-heavy, low token overhead).
+const DEFAULT_SYSTEM_PROMPT = `KritakaPrajna assistant rules:
+- Answer directly and concisely.
+- Do not use reasoning headers like "Approach", "Analyze", "Reason", or "Solve".
+- For code: use fenced code blocks with language tags; keep edits minimal and explain briefly.
+- For terminal commands: always use fenced blocks. Windows -> powershell/cmd, macOS/Linux -> bash/sh.
+- For terminal output: confirm success on exit 0; diagnose failures and provide a fixed command block.
+- For web sources: cite as [1], [2] and keep final source list concise (max 5 unique lines).`;
 
 const WEB_INTENT_HINT = `\n\n[SYSTEM NOTE: The user is asking for real-time or recent information. Web search was attempted but returned no results. Do NOT say you cannot browse the internet. Instead, answer using your training knowledge up to your cutoff date, clearly state your knowledge cutoff, and provide your best answer with any relevant details you know. If specific recent events are beyond your cutoff, say so briefly and give context from what you do know.]`;
 const EXPLICIT_WEB_TRIGGER_RE = /\b(websearch|web\s*search|search (the )?(web|internet|online)|browse (the )?(web|internet|online)|look (it )?up( online| on (the )?web)?|find (latest|recent|current) (news|updates?|info|information)|do (a )?web\s*search|use (the )?web|from (the )?web)\b/i;
@@ -121,6 +136,24 @@ function saveSecondaryId(id) {
   localStorage.setItem(SECONDARY_CHAT_KEY, id || "");
 }
 
+function loadNumericSetting(key, fallback, min = 1, max = 20000) {
+  try {
+    const parsed = Number(localStorage.getItem(key));
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.min(max, Math.max(min, Math.round(parsed)));
+  } catch {
+    return fallback;
+  }
+}
+
+function loadResponseLengthSetting() {
+  try {
+    const raw = String(localStorage.getItem(RESPONSE_LENGTH_KEY) || "").trim();
+    if (["short", "medium", "long"].includes(raw)) return raw;
+  } catch {}
+  return "medium";
+}
+
 /** Derive a title from the first user message, or fallback */
 function deriveTitle(messages) {
   const first = messages.find((m) => m.role === "user");
@@ -177,10 +210,26 @@ function providerLabel(provider) {
   switch (provider) {
     case "openrouter": return "OpenRouter";
     case "huggingface": return "Hugging Face";
+    case "ollama": return "Ollama";
     case "openai": return "OpenAI";
     case "anthropic": return "Anthropic";
     default: return provider || "Unknown";
   }
+}
+
+function isOllamaCloudKeyConfig(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return false;
+  return !/^https?:\/\//i.test(raw) && !raw.includes("localhost") && !raw.includes("127.0.0.1");
+}
+
+function formatCloudUsagePercent(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount < 0) return "n/a";
+  if (amount >= 99.95) return "100%";
+  if (amount >= 10) return `${Math.round(amount)}%`;
+  if (amount >= 1) return `${amount.toFixed(1)}%`;
+  return `${amount.toFixed(2)}%`;
 }
 
 export default function ChatApp({ providers, onSaveProviderKey, onRemoveProviderKey, onResetAll }) {
@@ -208,11 +257,17 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [customCommands, setCustomCommands] = useState(loadCustomCommands);
   const [systemPrompt, setSystemPrompt] = useState(() => localStorage.getItem(SYSTEM_PROMPT_KEY) || DEFAULT_SYSTEM_PROMPT);
+  const [responseLength, setResponseLength] = useState(loadResponseLengthSetting);
   const [advisorPrefs, setAdvisorPrefs] = useState(() => {
     try { return JSON.parse(localStorage.getItem(ADVISOR_PREFS_KEY)) || { preferFree: false, preferBest: false, showAdvisor: true }; }
     catch { return { preferFree: false, preferBest: false, showAdvisor: true }; }
   });
+  const [tokenNotice, setTokenNotice] = useState("");
+  const [draftInputText, setDraftInputText] = useState("");
+  const [lastTokenStats, setLastTokenStats] = useState({ sent: 0, received: 0 });
   const abortRef = useRef(null);
+  const responseCacheRef = useRef(loadSessionResponseCache());
+  const systemPromptCacheRef = useRef(new Map());
 
   // ── Last request tracking (for retry/regenerate) ──
   const lastRequestRef = useRef(null); // { text, uploads, attachedFiles, modelUsed, chatId }
@@ -236,12 +291,33 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
   const [advisorOpen, setAdvisorOpen] = useState(false);
   const [advisorSignals, setAdvisorSignals] = useState({});
   const [providerUsage, setProviderUsage] = useState(() => loadProviderUsage());
+  const [ollamaCloudUsage, setOllamaCloudUsage] = useState(null);
   const [shortcuts, setShortcuts] = useState(() => mergeShortcuts({}));
   const [modelSelectorOpenSignal, setModelSelectorOpenSignal] = useState(0);
   const [userMemory, setUserMemory] = useState(DEFAULT_USER_MEMORY);
   const [platformInfo, setPlatformInfo] = useState(null);
   const userMemoryRef = useRef(DEFAULT_USER_MEMORY);
   const searchTokenRef = useRef(0);
+
+  // TOKEN OPTIMIZATION: configurable defaults persisted via localStorage keys.
+  const historyWindowSize = loadNumericSetting(
+    HISTORY_WINDOW_KEY,
+    DEFAULT_TOKEN_OPTIMIZATION_CONFIG.historyWindowSize,
+    4,
+    30
+  );
+  const maxInputTokens = loadNumericSetting(
+    MAX_INPUT_TOKENS_KEY,
+    DEFAULT_TOKEN_OPTIMIZATION_CONFIG.maxInputTokens,
+    500,
+    20000
+  );
+  const maxUserChars = loadNumericSetting(
+    MAX_USER_CHARS_KEY,
+    DEFAULT_TOKEN_OPTIMIZATION_CONFIG.maxUserChars,
+    500,
+    20000
+  );
 
   // Current chat's messages
   const activeChat = chats.find((c) => c.id === activeChatId);
@@ -256,6 +332,78 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
     }
     return null;
   }, [messages]);
+
+  const usageSnapshot = React.useMemo(() => {
+    const sessionCostValue = calcSessionCost(chats);
+    const selectedModelLabel = selectedModel
+      ? providerLabel(selectedModel.split("/")[0]) || selectedModel.split("/")[0]
+      : "—";
+
+    let monthlyLabel = null;
+    let monthlyIsPaid = false;
+
+    const currentModelObj = findModelBySelection(models, selectedModel);
+    const pricing = currentModelObj?.pricing;
+    if (pricing) {
+      const promptPrice = Number(pricing.prompt) || 0;
+      const completionPrice = Number(pricing.completion) || 0;
+
+      if (promptPrice === 0 && completionPrice === 0) {
+        monthlyLabel = "Free";
+      } else {
+        const connectedProviders = Object.entries(providers || {})
+          .filter(([, key]) => !!key)
+          .map(([provider]) => provider);
+
+        const allRows = providerUsageRows(providerUsage, connectedProviders);
+        const totalCost = allRows.reduce((sum, row) => sum + row.cost, 0);
+        const totalReqs = allRows.reduce((sum, row) => sum + row.requests, 0);
+        const MSGS_PER_DAY = 20;
+
+        let monthly;
+        if (totalReqs > 0) {
+          monthly = (totalCost / totalReqs) * MSGS_PER_DAY * 30;
+        } else {
+          monthly = ((promptPrice * 500) + (completionPrice * 800)) * MSGS_PER_DAY * 30;
+        }
+
+        const label = monthly < 0.001
+          ? "<$0.01"
+          : monthly < 1
+            ? `$${monthly.toFixed(2)}`
+            : `$${monthly.toFixed(1)}`;
+
+        monthlyLabel = `${label}/mo`;
+        monthlyIsPaid = true;
+      }
+    }
+
+    const providerRows = providerUsageRows(
+      providerUsage,
+      Object.entries(providers || {}).filter(([, key]) => !!key).map(([provider]) => provider)
+    )
+      .filter((row) => row.requests > 0)
+      .map((row) => ({
+        provider: row.provider,
+        label: providerLabel(row.provider),
+        costLabel: row.cost > 0 ? formatCost(row.cost) : "Free",
+        hasCost: row.cost > 0,
+      }));
+
+    const creditsValue = (lifetimeCost && lifetimeCost.total_credits > 0)
+      ? Math.max(0, (lifetimeCost.total_credits || 0) - (lifetimeCost.total_usage || 0))
+      : null;
+
+    return {
+      sessionCostLabel: formatCost(sessionCostValue),
+      sessionCostHasValue: sessionCostValue > 0,
+      selectedModelLabel,
+      monthlyLabel,
+      monthlyIsPaid,
+      providerRows,
+      creditsLabel: creditsValue == null ? null : formatCost(creditsValue),
+    };
+  }, [chats, lifetimeCost, models, providerUsage, providers, selectedModel]);
 
   // Persist chats to localStorage whenever they change
   useEffect(() => {
@@ -339,6 +487,10 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
   }, [reasoningDepth]);
 
   useEffect(() => {
+    localStorage.setItem(RESPONSE_LENGTH_KEY, responseLength);
+  }, [responseLength]);
+
+  useEffect(() => {
     let cancelled = false;
     const loadShortcuts = async () => {
       try {
@@ -388,6 +540,12 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
     return () => clearTimeout(timeout);
   }, [isSearching]);
 
+  useEffect(() => {
+    if (!tokenNotice) return;
+    const timeout = setTimeout(() => setTokenNotice(""), 4200);
+    return () => clearTimeout(timeout);
+  }, [tokenNotice]);
+
   // Recompute smart suggestion when uploads/attachments/model change
   useEffect(() => {
     const taskType = uiTaskToAdvisorTask(selectedTask, "", uploads, attachedFiles);
@@ -428,11 +586,9 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
         // Default to a model matching the current task.
         const taskModels = filterModelsForTask(sorted, selectedTask);
         const pool = taskModels.length > 0 ? taskModels : sorted;
-        const free = pool.find((m) => {
-          const p = m.pricing;
-          return p && Number(p.prompt) === 0 && Number(p.completion) === 0;
-        });
-        setSelectedModel(free ? toSelectionId(free) : toSelectionId(pool[0]) || "");
+        // TOKEN OPTIMIZATION: default to the cheapest available model.
+        const cheapest = findCheapestModel(pool, "general");
+        setSelectedModel(cheapest?.model ? toSelectionId(cheapest.model) : toSelectionId(pool[0]) || "");
       })
       .catch((err) => {
         if (!cancelled) setError("Failed to load models. Check your API keys.");
@@ -465,6 +621,58 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
     if (!orKey) return;
     fetchCredits(orKey).then((c) => { if (c) setLifetimeCost(c); });
   }, [providers?.openrouter]);
+
+  // Fetch Ollama cloud usage percentages for sidebar display when using cloud API key.
+  useEffect(() => {
+    let cancelled = false;
+    const ollamaValue = String(providers?.ollama || "").trim();
+
+    if (!ollamaValue) {
+      setOllamaCloudUsage(null);
+      return () => { cancelled = true; };
+    }
+
+    if (!isOllamaCloudKeyConfig(ollamaValue)) {
+      setOllamaCloudUsage({ status: "local" });
+      return () => { cancelled = true; };
+    }
+
+    setOllamaCloudUsage((prev) => ({
+      status: "loading",
+      sessionPercent: prev?.sessionPercent ?? null,
+      weeklyPercent: prev?.weeklyPercent ?? null,
+      sessionReset: prev?.sessionReset || "",
+      weeklyReset: prev?.weeklyReset || "",
+    }));
+
+    fetchOllamaCloudUsage(ollamaValue)
+      .then((result) => {
+        if (cancelled) return;
+
+        const sessionPercent = Number(result?.session?.percentUsed);
+        const weeklyPercent = Number(result?.weekly?.percentUsed);
+
+        setOllamaCloudUsage({
+          status: result?.available ? "ready" : "partial",
+          sessionPercent: Number.isFinite(sessionPercent) ? sessionPercent : null,
+          weeklyPercent: Number.isFinite(weeklyPercent) ? weeklyPercent : null,
+          sessionReset: String(result?.session?.resetsIn || ""),
+          weeklyReset: String(result?.weekly?.resetsIn || ""),
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setOllamaCloudUsage((prev) => ({
+          status: "error",
+          sessionPercent: prev?.sessionPercent ?? null,
+          weeklyPercent: prev?.weeklyPercent ?? null,
+          sessionReset: prev?.sessionReset || "",
+          weeklyReset: prev?.weeklyReset || "",
+        }));
+      });
+
+    return () => { cancelled = true; };
+  }, [providers?.ollama]);
 
   useEffect(() => {
     const autoTask = detectUiTask("", uploads, attachedFiles);
@@ -584,13 +792,114 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
     }
   }, []);
 
+  const getOptimizedSystemPrompt = useCallback((basePrompt, memoryState) => {
+    // TOKEN OPTIMIZATION: cache compressed system prompts so we do not rebuild each request.
+    const mergedPrompt = buildSystemPromptWithMemory(basePrompt, memoryState);
+    const cacheKey = `${basePrompt}::${JSON.stringify(memoryState || {})}`;
+    if (systemPromptCacheRef.current.has(cacheKey)) {
+      return systemPromptCacheRef.current.get(cacheKey);
+    }
+
+    const compressed = compressSystemPrompt(mergedPrompt);
+    systemPromptCacheRef.current.set(cacheKey, compressed);
+
+    // Keep cache bounded.
+    if (systemPromptCacheRef.current.size > 24) {
+      const firstKey = systemPromptCacheRef.current.keys().next().value;
+      systemPromptCacheRef.current.delete(firstKey);
+    }
+
+    return compressed;
+  }, []);
+
+  const summarizeOverflowHistory = useCallback(
+    async ({ overflowMessages, existingSummary, signal }) => {
+      if (!Array.isArray(overflowMessages) || overflowMessages.length === 0) {
+        return existingSummary || "";
+      }
+
+      const fallback = buildFallbackHistorySummary(
+        overflowMessages,
+        existingSummary,
+        DEFAULT_TOKEN_OPTIMIZATION_CONFIG.summaryCharLimit
+      );
+
+      const summaryModel = pickCheapestSummaryModel(models, providers);
+      if (!summaryModel) return fallback;
+
+      const prompt = buildHistorySummaryPrompt(
+        overflowMessages,
+        existingSummary,
+        DEFAULT_TOKEN_OPTIMIZATION_CONFIG.summaryCharLimit
+      );
+
+      try {
+        const result = await routeStream(
+          providers,
+          summaryModel,
+          [
+            { role: "system", content: prompt.system },
+            { role: "user", content: prompt.user },
+          ],
+          {
+            signal,
+            reasoningDepth: "fast",
+            maxTokens: DEFAULT_TOKEN_OPTIMIZATION_CONFIG.summaryMaxTokens,
+            temperature: 0.2,
+            topP: 0.8,
+          }
+        );
+
+        const summary = String(result?.text || "").trim();
+        if (!summary) return fallback;
+        return summary.slice(0, DEFAULT_TOKEN_OPTIMIZATION_CONFIG.summaryCharLimit);
+      } catch {
+        return fallback;
+      }
+    },
+    [models, providers]
+  );
+
+  const estimatedComposerTokens = React.useMemo(() => {
+    const normalized = normalizeUserInputForSend(draftInputText, { maxChars: maxUserChars });
+    if (!normalized.text) return 0;
+
+    const chatHistory = messages.filter((m) => m.role === "user" || m.role === "assistant");
+    const windowed = buildSlidingWindowHistory(chatHistory, historyWindowSize);
+
+    const estimateMessages = [
+      {
+        role: "system",
+        content: getOptimizedSystemPrompt(systemPrompt, userMemory),
+      },
+      ...windowed.recentMessages,
+      { role: "user", content: normalized.text },
+    ];
+
+    return estimateTokensFromMessages(estimateMessages);
+  }, [draftInputText, maxUserChars, messages, historyWindowSize, getOptimizedSystemPrompt, systemPrompt, userMemory]);
+
   const handleSend = useCallback(
     async (text, opts = {}) => {
-      if (!text.trim() || !selectedModel) return;
+      if (!selectedModel) return;
+
+      // TOKEN OPTIMIZATION: normalize noisy input and enforce max character limit.
+      const normalizedInput = normalizeUserInputForSend(text, { maxChars: maxUserChars });
+      if (!normalizedInput.text.trim()) return;
+
+      if (normalizedInput.truncated) {
+        setTokenNotice(`Input truncated to ${maxUserChars} characters to reduce token usage.`);
+      } else {
+        setTokenNotice("");
+      }
+
+      setDraftInputText("");
+      const sendText = normalizedInput.text;
 
       // ── Slash command parsing ──
-      const parsed = parseCommand(text, customCommands);
-      let processedText = text;
+      let fileData = null;
+      const parsed = parseCommand(sendText, customCommands);
+      let processedText = sendText;
 
       if (parsed) {
         if (parsed.noFile) {
@@ -598,7 +907,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
           processedText = buildCommandPrompt(parsed.command, "", "", parsed.rest, customCommands);
         } else {
           // Try to resolve file from attachments first
-          let fileData = resolveFromAttachments(parsed.filePath, attachedFiles, uploads);
+          fileData = resolveFromAttachments(parsed.filePath, attachedFiles, uploads);
 
           // If not found in attachments, try reading via Electron IPC
           if (!fileData && window.electronAPI) {
@@ -702,7 +1011,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
       const textUploads = uploads.filter((u) => u.type !== "image" && u.content);
 
       // Build the text portion — use processedText if command was parsed
-      let textContent = parsed ? processedText : text.trim();
+      let textContent = parsed ? processedText : sendText.trim();
       const selectedSupportsVision = !!selectedModelObj && supportsTask(selectedModelObj, "image-to-text");
       let googleScreenshotForModel = null;
 
@@ -711,7 +1020,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
       // about available tools and optionally pre-fetch web results.
       let webResults = [];
       let didAttemptWebSearch = false;
-      const rawText = text.trim();
+      const rawText = sendText.trim();
       let advisorContext = {
         webSearchUsed: false,
         webSearchMode: webSearchMode === "deep" ? "deep" : "fast",
@@ -906,7 +1215,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
           ? [...modelOnlyImages, ...content]
           : [...modelOnlyImages, { type: "text", text: textContent }];
 
-      const autoMemory = userMemory.autoMode ? detectMemoryFromMessage(text.trim()) : DEFAULT_USER_MEMORY;
+      const autoMemory = userMemory.autoMode ? detectMemoryFromMessage(sendText.trim()) : DEFAULT_USER_MEMORY;
       const effectiveMemory =
         userMemory.autoMode && hasUserMemory(autoMemory)
           ? mergeUserMemory(userMemory, autoMemory)
@@ -928,7 +1237,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
       const userMsg = {
         role: "user",
         content,
-        _displayText: text.trim(),
+        _displayText: sendText.trim(),
         _attachments: allAttachments.length > 0 ? allAttachments : undefined,
         _webResults: webResults.length > 0 ? webResults : undefined,
         _webSearchAttempted: didAttemptWebSearch,
@@ -961,7 +1270,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
 
       // ── Store last request for retry/regenerate ──
       lastRequestRef.current = {
-        text,
+        text: sendText,
         uploads: [...uploads],
         attachedFiles: [...attachedFiles],
         modelUsed: selectedModel,
@@ -972,19 +1281,118 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
       const controller = new AbortController();
       abortRef.current = controller;
 
-      // Build the messages to send (without the empty AI placeholder)
+      // Build the outbound user message (without the empty AI placeholder)
       const outboundUserMsg = contentForSend === content
         ? userMsg
         : { ...userMsg, content: contentForSend };
-      const history = [...(chats.find((c) => c.id === chatId)?.messages || []), outboundUserMsg];
-      const systemMsg = {
-        role: "system",
-        content: buildSystemPromptWithMemory(systemPrompt, effectiveMemory),
-      };
-      const toSend = [systemMsg, ...history];
+
+      const currentModelObj = findModelBySelection(models, selectedModel);
+      const providerForRequest = currentModelObj?._provider || "openrouter";
+      const generationSettings = resolveGenerationSettings(providerForRequest, responseLength);
+
+      // TOKEN OPTIMIZATION: session cache shortcut for repeated prompts.
+      const cacheKey = makeResponseCacheKey({
+        provider: providerForRequest,
+        modelId: currentModelObj?.id || selectedModel,
+        userText: processedText,
+      });
+      const cachedEntry = getCachedResponseEntry(responseCacheRef.current, cacheKey);
+      if (cachedEntry) {
+        const cachedText = String(cachedEntry.response || "").trim() || "(No response)";
+        const cachedUsage = cachedEntry.usage || null;
+        const sentTokens = cachedUsage?.prompt_tokens || estimateTokensFromText(processedText);
+        const receivedTokens = cachedUsage?.completion_tokens || estimateTokensFromText(cachedText);
+
+        setChats((prev) =>
+          prev.map((c) => {
+            if (c.id !== chatId) return c;
+            const next = [...c.messages];
+            const last = next[next.length - 1];
+            next[next.length - 1] = {
+              ...last,
+              content: cachedText,
+              usage: cachedUsage,
+              _cached: true,
+              _modelUsed: currentModelObj?._selectionId || selectedModel,
+            };
+            return { ...c, messages: next };
+          })
+        );
+
+        setLastTokenStats({ sent: sentTokens, received: receivedTokens });
+        console.info("[TOKEN OPTIMIZATION] cache hit: response served from session cache.");
+        abortRef.current = null;
+        setLoading(false);
+        recordSuccess(selectedModel, Date.now() - startTime);
+        return;
+      }
+
+      // TOKEN OPTIMIZATION: sliding history window + rolling summary context.
+      const chatSnapshot = chats.find((c) => c.id === chatId);
+      const apiHistory = [...(chatSnapshot?.messages || []), outboundUserMsg]
+        .filter((m) => m.role === "user" || m.role === "assistant");
+
+      const firstWindow = buildSlidingWindowHistory(apiHistory, historyWindowSize);
+      let summaryText = String(chatSnapshot?._historySummary || "");
+      let summaryCursor = Number(chatSnapshot?._historyCursor || 0);
+      if (!Number.isFinite(summaryCursor) || summaryCursor < 0) summaryCursor = 0;
+      if (summaryCursor > firstWindow.overflowCount) summaryCursor = firstWindow.overflowCount;
+
+      if (firstWindow.overflowCount > summaryCursor) {
+        const newlyOverflowed = apiHistory.slice(summaryCursor, firstWindow.overflowCount);
+        summaryText = await summarizeOverflowHistory({
+          overflowMessages: newlyOverflowed,
+          existingSummary: summaryText,
+          signal: controller.signal,
+        });
+        summaryCursor = firstWindow.overflowCount;
+
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === chatId
+              ? { ...c, _historySummary: summaryText, _historyCursor: summaryCursor }
+              : c
+          )
+        );
+      }
+
+      const secondWindow = buildSlidingWindowHistory(apiHistory, historyWindowSize);
+      const optimizedSystemPrompt = getOptimizedSystemPrompt(systemPrompt, effectiveMemory);
+      const promptHash = `${optimizedSystemPrompt.length}:${optimizedSystemPrompt.slice(0, 64)}`;
+      const canUsePromptReference = chatSnapshot?._systemPromptHash === promptHash;
+      const systemSeed = canUsePromptReference
+        ? "Continue following the established system directives for this chat: concise answers, fenced code blocks, and strict shell/web formatting rules."
+        : optimizedSystemPrompt;
+      const systemWithSummary = summaryText
+        ? `${systemSeed}\n\n[Condensed conversation context]\n${summaryText}`
+        : systemSeed;
+
+      if (!canUsePromptReference) {
+        setChats((prev) =>
+          prev.map((c) =>
+            c.id === chatId
+              ? { ...c, _systemPromptHash: promptHash }
+              : c
+          )
+        );
+      }
+
+      let toSend = [
+        { role: "system", content: systemWithSummary },
+        ...secondWindow.recentMessages,
+      ];
+
+      const budgetApplied = enforceInputTokenBudget(toSend, maxInputTokens);
+      toSend = budgetApplied.messages;
+
+      if (budgetApplied.droppedCount > 0) {
+        setTokenNotice(`Trimmed ${budgetApplied.droppedCount} old message(s) to stay under ~${maxInputTokens} tokens.`);
+      }
+
+      setLastTokenStats((prev) => ({ ...prev, sent: budgetApplied.estimatedTokens }));
+      console.info(`[TOKEN OPTIMIZATION] estimated prompt tokens: ${budgetApplied.estimatedTokens}`);
 
       try {
-        const currentModelObj = findModelBySelection(models, selectedModel);
         const shouldRunImageGeneration =
           !!currentModelObj &&
           (
@@ -1009,6 +1417,13 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
           const free = isModelFree(pricing);
           const usageSnapshot = recordProviderUsage(currentModelObj?._provider || "openrouter", resolvedUsage, cost);
           setProviderUsage(usageSnapshot);
+          setLastTokenStats({
+            sent: resolvedUsage?.prompt_tokens || estimateTokensFromText(textContent),
+            received:
+              resolvedUsage?.completion_tokens ||
+              resolvedUsage?.image_tokens ||
+              0,
+          });
 
           setChats((prev) =>
             prev.map((c) => {
@@ -1045,6 +1460,9 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
           {
             signal: controller.signal,
             reasoningDepth,
+            maxTokens: generationSettings.maxTokens,
+            temperature: generationSettings.temperature,
+            topP: generationSettings.topP,
             onChunk: (fullText) => {
               if (!receivedFirstChunk) {
                 receivedFirstChunk = true;
@@ -1075,12 +1493,23 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
         const usageSnapshot = recordProviderUsage(currentModelObj?._provider || "openrouter", resolvedUsage, cost);
         setProviderUsage(usageSnapshot);
 
+        const receivedTokens = resolvedUsage?.completion_tokens || estimateTokensFromText(result.text || "");
+        const sentTokens = resolvedUsage?.prompt_tokens || budgetApplied.estimatedTokens;
+        setLastTokenStats({ sent: sentTokens, received: receivedTokens });
+        console.info(`[TOKEN OPTIMIZATION] tokens sent≈${sentTokens} received≈${receivedTokens}`);
+
+        responseCacheRef.current = setCachedResponseEntry(responseCacheRef.current, cacheKey, {
+          response: result.text || "",
+          usage: resolvedUsage,
+          modelUsed: currentModelObj?._selectionId || selectedModel,
+        });
+
         // Record success for rate limiter
         const responseTime = Date.now() - startTime;
         recordSuccess(selectedModel, responseTime);
 
         // Generate advisor data
-        const taskTypeForAdvisor = uiTaskToAdvisorTask(effectiveTask, processedText || text, uploads, attachedFiles);
+        const taskTypeForAdvisor = uiTaskToAdvisorTask(effectiveTask, processedText || sendText, uploads, attachedFiles);
         const advisor = generateAdvisorData({
           models,
           currentModelId: currentModelObj?._selectionId || selectedModel,
@@ -1113,7 +1542,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
 
         // Use a free HuggingFace model in the background to extract memory from this exchange
         if (userMemory.autoMode) {
-          extractMemoryWithAI(providers, text.trim(), result.text || "").then((aiMemory) => {
+          extractMemoryWithAI(providers, sendText.trim(), result.text || "").then((aiMemory) => {
             if (aiMemory && hasUserMemory(aiMemory)) {
               const merged = mergeUserMemory(userMemoryRef.current, aiMemory);
               handleSaveMemory(merged).catch(() => {});
@@ -1137,7 +1566,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
           recordFailure(selectedModel, errMsg);
 
           // Show rate limit banner — prefer same-provider fallback, then cross-provider
-          const taskType = uiTaskToAdvisorTask(selectedTask, text, uploads, attachedFiles);
+          const taskType = uiTaskToAdvisorTask(selectedTask, sendText, uploads, attachedFiles);
           const sameProviderFallback = findFallbackModel(models.filter((m) => supportsTask(m, selectedTask)), selectedModel, taskType, qualityScore);
           const crossProviderFallback = !sameProviderFallback
             ? suggestFallbackAcrossProviders(models, selectedModel, providers)
@@ -1179,7 +1608,31 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
         setWebPreparingChatId((prev) => (prev === chatId ? null : prev));
       }
     },
-    [providers, selectedModel, activeChatId, chats, attachedFiles, uploads, models, systemPrompt, advisorPrefs, modelPref, advisorSignals, reasoningDepth, userMemory, webSearchMode, platformInfo, handleSaveMemory]
+    [
+      providers,
+      selectedModel,
+      activeChatId,
+      chats,
+      attachedFiles,
+      uploads,
+      models,
+      systemPrompt,
+      advisorPrefs,
+      modelPref,
+      advisorSignals,
+      reasoningDepth,
+      userMemory,
+      webSearchMode,
+      platformInfo,
+      handleSaveMemory,
+      selectedTask,
+      maxUserChars,
+      maxInputTokens,
+      historyWindowSize,
+      responseLength,
+      summarizeOverflowHistory,
+      getOptimizedSystemPrompt,
+    ]
   );
 
   const handleStop = useCallback(() => {
@@ -1368,6 +1821,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
   /** Debounced live detection of task type from input text */
   const inputDebounceRef = useRef(null);
   const handleInputTextChange = useCallback((text) => {
+    setDraftInputText(text || "");
     clearTimeout(inputDebounceRef.current);
     inputDebounceRef.current = setTimeout(() => {
       if (!text || text.length < 10) {
@@ -1774,6 +2228,24 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
           </div>
 
           {/* ── Providers ── */}
+          {isOllamaCloudKeyConfig(providers?.ollama) && (
+            <div className="space-y-1.5 border-t border-white/[0.04] pt-2">
+              <p className="text-[10px] text-dark-500 uppercase tracking-wider">Ollama Cloud</p>
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-dark-400">Session</span>
+                <span className="text-emerald-300 font-medium">{formatCloudUsagePercent(ollamaCloudUsage?.sessionPercent)}</span>
+              </div>
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-dark-400">Weekly</span>
+                <span className="text-emerald-300 font-medium">{formatCloudUsagePercent(ollamaCloudUsage?.weeklyPercent)}</span>
+              </div>
+              {ollamaCloudUsage?.status === "loading" && (
+                <p className="text-[10px] text-dark-500">Syncing cloud usage...</p>
+              )}
+            </div>
+          )}
+
+          {/* ── Providers ── */}
           {(() => {
             const rows = providerUsageRows(
               providerUsage,
@@ -1885,6 +2357,8 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
           memory={userMemory}
           onSaveMemory={handleSaveMemory}
           onResetMemory={handleResetMemory}
+          providerUsage={providerUsage}
+          usageSnapshot={usageSnapshot}
         />
         </motion.div>
       ) : (
@@ -1975,6 +2449,20 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
                 </button>
               </div>
             )}
+          </motion.div>
+        )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+        {tokenNotice && !error && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.18, ease }}
+            className="bg-amber-500/10 border-b border-amber-500/20 text-amber-300 text-xs px-5 py-2 shrink-0 overflow-hidden"
+          >
+            {tokenNotice}
           </motion.div>
         )}
         </AnimatePresence>
@@ -2143,6 +2631,11 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
           showReasoningControl={supportsReasoningModel(findModelBySelection(models, selectedModel))}
           reasoningDepth={reasoningDepth}
           onReasoningDepthChange={setReasoningDepth}
+          responseLength={responseLength}
+          onResponseLengthChange={setResponseLength}
+          estimatedTokens={estimatedComposerTokens}
+          lastSentTokens={lastTokenStats.sent}
+          lastReceivedTokens={lastTokenStats.received}
           sendShortcut={shortcuts.sendMessage}
           webSearchEnabled={webSearchEnabled}
           webSearchMode={webSearchMode}

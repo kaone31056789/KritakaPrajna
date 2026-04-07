@@ -13,6 +13,7 @@ import {
   removeUserMemoryEntry,
   updateUserMemoryEntry,
 } from "../utils/userMemory";
+import { fetchCloudUsage as fetchOllamaCloudUsage } from "../api/ollama";
 
 const ease = [0.4, 0, 0.2, 1];
 
@@ -41,10 +42,11 @@ function maskKey(key) {
 }
 
 const PROVIDER_DEFS = [
-  { id: "openrouter",  label: "OpenRouter",    placeholder: "sk-or-v1-...", color: "#7c6ff7", note: "500+ models via single key" },
-  { id: "openai",      label: "OpenAI",         placeholder: "sk-proj-...", color: "#10a37f", note: "GPT-4o, o1, o3-mini" },
-  { id: "anthropic",   label: "Anthropic",      placeholder: "sk-ant-...",  color: "#c96442", note: "Claude Opus, Sonnet, Haiku" },
-  { id: "huggingface", label: "HuggingFace",    placeholder: "hf_...",      color: "#f5a623", note: "Popular open models, free + paid router options" },
+  { id: "openrouter",  label: "OpenRouter",    placeholder: "sk-or-v1-...", color: "#7c6ff7", note: "500+ models via single key", valueLabel: "Key", inputType: "password" },
+  { id: "openai",      label: "OpenAI",         placeholder: "sk-proj-...", color: "#10a37f", note: "GPT-4o, o1, o3-mini", valueLabel: "Key", inputType: "password" },
+  { id: "anthropic",   label: "Anthropic",      placeholder: "sk-ant-...",  color: "#c96442", note: "Claude Opus, Sonnet, Haiku", valueLabel: "Key", inputType: "password" },
+  { id: "huggingface", label: "HuggingFace",    placeholder: "hf_...",      color: "#f5a623", note: "Popular open models, free + paid router options", valueLabel: "Key", inputType: "password" },
+  { id: "ollama",      label: "Ollama",         placeholder: "ollama_...", color: "#22c55e", note: "Cloud models via API key from ollama.com/settings/keys", valueLabel: "Key", inputType: "password" },
 ];
 
 function ProviderRow({ def, currentKey, onSave, onRemove }) {
@@ -57,18 +59,22 @@ function ProviderRow({ def, currentKey, onSave, onRemove }) {
 
   const handleSave = async (e) => {
     e.preventDefault();
-    const trimmed = draft.trim();
+    const trimmed = draft.trim() || def.defaultValue || "";
     if (!trimmed) return;
     setBusy(true); setErr("");
     try {
       await onSave(def.id, trimmed);
       setDraft(""); setMode("idle");
     } catch {
-      setErr("Failed to save — check your key.");
+      setErr("Failed to save — check your value.");
     } finally {
       setBusy(false);
     }
   };
+
+  const valueLabel = def.valueLabel || "Key";
+  const isSecret = (def.inputType || "password") === "password";
+  const displayedValue = isSecret ? maskKey(currentKey) : currentKey;
 
   return (
     <div className="bg-dark-800 border border-dark-700/50 rounded-xl p-4 space-y-3">
@@ -91,14 +97,14 @@ function ProviderRow({ def, currentKey, onSave, onRemove }) {
           {!isConnected && mode === "idle" && (
             <button type="button" onClick={() => setMode("adding")}
               className="text-[11px] text-saffron-400 hover:text-saffron-300 font-medium cursor-pointer px-2 py-1 rounded-lg hover:bg-saffron-500/10">
-              Add Key
+              Add {valueLabel}
             </button>
           )}
           {isConnected && mode === "idle" && (
             <>
               <button type="button" onClick={() => { setDraft(""); setMode("replacing"); }}
                 className="text-[11px] text-dark-400 hover:text-dark-200 font-medium cursor-pointer px-2 py-1 rounded-lg hover:bg-dark-700">
-                Replace
+                Replace {valueLabel}
               </button>
               <button type="button" onClick={() => onRemove(def.id)}
                 className="text-[11px] text-red-400/70 hover:text-red-400 font-medium cursor-pointer px-2 py-1 rounded-lg hover:bg-red-500/10">
@@ -112,7 +118,7 @@ function ProviderRow({ def, currentKey, onSave, onRemove }) {
       {/* Masked current key */}
       {isConnected && mode === "idle" && (
         <div className="font-mono text-xs text-dark-400 bg-dark-900/50 border border-dark-700/30 rounded-lg px-3 py-2">
-          {maskKey(currentKey)}
+          {displayedValue}
         </div>
       )}
 
@@ -128,7 +134,7 @@ function ProviderRow({ def, currentKey, onSave, onRemove }) {
             className="overflow-hidden space-y-2"
           >
             <input
-              type="password"
+              type={def.inputType || "password"}
               placeholder={def.placeholder}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
@@ -138,9 +144,9 @@ function ProviderRow({ def, currentKey, onSave, onRemove }) {
             />
             {err && <p className="text-xs text-red-400">{err}</p>}
             <div className="flex gap-2">
-              <button type="submit" disabled={!draft.trim() || busy}
+              <button type="submit" disabled={!(draft.trim() || def.defaultValue) || busy}
                 className="flex-1 bg-gradient-to-r from-saffron-600 to-saffron-500 disabled:opacity-40 text-dark-950 font-medium rounded-lg px-3 py-2 text-xs cursor-pointer">
-                {busy ? "Saving…" : (mode === "adding" ? "Save Key" : "Replace Key")}
+                {busy ? "Saving…" : (mode === "adding" ? `Save ${valueLabel}` : `Replace ${valueLabel}`)}
               </button>
               <button type="button" onClick={() => { setMode("idle"); setDraft(""); setErr(""); }}
                 className="px-3 py-2 text-xs text-dark-400 hover:text-dark-200 cursor-pointer">
@@ -1090,6 +1096,366 @@ function MemoryEditor({ memory, onSaveMemory, onResetMemory }) {
   );
 }
 
+const USAGE_PROVIDER_META = {
+  ollama: { label: "Ollama", color: "#22c55e" },
+  openrouter: { label: "OpenRouter", color: "#7c6ff7" },
+  huggingface: { label: "HuggingFace", color: "#f5a623" },
+  openai: { label: "OpenAI", color: "#10a37f" },
+  anthropic: { label: "Anthropic", color: "#c96442" },
+};
+
+function formatUsageInt(value) {
+  return (Number(value) || 0).toLocaleString();
+}
+
+function formatUsageCost(value) {
+  const amount = Number(value) || 0;
+  if (amount === 0) return "$0.00";
+  if (amount < 0.01) return `$${amount.toFixed(4)}`;
+  return `$${amount.toFixed(2)}`;
+}
+
+function formatUsagePercent(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount < 0) return "n/a";
+  if (amount >= 100 || Math.abs(amount - Math.round(amount)) < 0.01) return `${Math.round(amount)}%`;
+  if (amount >= 10) return `${amount.toFixed(1)}%`;
+  return `${amount.toFixed(2)}%`;
+}
+
+function usagePercentWidth(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount < 0) return 0;
+  return Math.max(0, Math.min(100, amount));
+}
+
+function formatUsedLimit(used, limit) {
+  const usedNumber = Number(used);
+  const limitNumber = Number(limit);
+
+  if (!Number.isFinite(usedNumber) && !Number.isFinite(limitNumber)) return "";
+  if (Number.isFinite(usedNumber) && Number.isFinite(limitNumber) && limitNumber > 0) {
+    return `${formatUsageInt(usedNumber)} / ${formatUsageInt(limitNumber)}`;
+  }
+  if (Number.isFinite(usedNumber)) return `${formatUsageInt(usedNumber)} used`;
+  if (Number.isFinite(limitNumber)) return `${formatUsageInt(limitNumber)} limit`;
+  return "";
+}
+
+function SidebarUsageSnapshotPanel({ usageSnapshot }) {
+  if (!usageSnapshot) return null;
+
+  return (
+    <section className="rounded-xl border border-dark-700/50 bg-dark-800 p-4 space-y-3">
+      <div>
+        <h3 className="text-xs font-semibold text-dark-300 uppercase tracking-wider">Usage Snapshot</h3>
+        <p className="text-[11px] text-dark-500 mt-1">Same summary as the sidebar usage panel.</p>
+      </div>
+
+      <div className="space-y-1.5">
+        <p className="text-[10px] text-dark-500 uppercase tracking-wider">Session</p>
+        <div className="flex items-center justify-between text-[11px]">
+          <span className="text-dark-400">Cost</span>
+          <span className={`font-medium ${usageSnapshot.sessionCostHasValue ? "text-emerald-400" : "text-dark-400"}`}>
+            {usageSnapshot.sessionCostLabel}
+          </span>
+        </div>
+        <div className="flex items-center justify-between text-[11px]">
+          <span className="text-dark-400">Model</span>
+          <span className="text-dark-200 font-medium truncate max-w-[180px] text-right">
+            {usageSnapshot.selectedModelLabel}
+          </span>
+        </div>
+        {usageSnapshot.monthlyLabel && (
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="text-dark-400">~Monthly</span>
+            <span className={`font-medium ${usageSnapshot.monthlyIsPaid ? "text-amber-300" : "text-dark-500"}`}>
+              {usageSnapshot.monthlyLabel}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {Array.isArray(usageSnapshot.providerRows) && usageSnapshot.providerRows.length > 0 && (
+        <div className="space-y-1.5 border-t border-white/[0.04] pt-2">
+          <p className="text-[10px] text-dark-500 uppercase tracking-wider">Providers</p>
+          {usageSnapshot.providerRows.map((row) => (
+            <div key={row.provider} className="flex items-center justify-between text-[11px] py-0.5">
+              <span className="text-dark-400">{row.label}</span>
+              <span className={`font-medium ${row.hasCost ? "text-emerald-400" : "text-dark-500"}`}>
+                {row.costLabel}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {usageSnapshot.creditsLabel && (
+        <div className="space-y-1.5 border-t border-white/[0.04] pt-2">
+          <p className="text-[10px] text-dark-500 uppercase tracking-wider">Credits</p>
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="text-dark-400">OpenRouter</span>
+            <span className="text-emerald-400 font-medium">{usageSnapshot.creditsLabel}</span>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SessionUsagePanel({ providerUsage = {}, providers = {} }) {
+  const orderedProviders = ["ollama", "openrouter", "huggingface", "openai", "anthropic"];
+
+  const rows = orderedProviders
+    .map((provider) => {
+      const usage = providerUsage?.[provider] || {};
+      const meta = USAGE_PROVIDER_META[provider] || { label: provider, color: "#64748b" };
+
+      return {
+        provider,
+        label: meta.label,
+        color: meta.color,
+        connected: !!providers?.[provider],
+        requests: Number(usage.requests) || 0,
+        promptTokens: Number(usage.promptTokens) || 0,
+        completionTokens: Number(usage.completionTokens) || 0,
+        cost: Number(usage.cost) || 0,
+      };
+    })
+    .filter(
+      (row) =>
+        row.connected ||
+        row.requests > 0 ||
+        row.promptTokens > 0 ||
+        row.completionTokens > 0 ||
+        row.cost > 0
+    );
+
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-xl border border-dark-700/50 bg-dark-800 p-6 text-center space-y-2">
+        <svg className="w-8 h-8 mx-auto text-dark-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3 3v18h18M7 14l3-3 3 2 4-5" />
+        </svg>
+        <p className="text-sm text-dark-400">No session usage yet. Start chatting to populate usage stats.</p>
+      </div>
+    );
+  }
+
+  const totals = rows.reduce(
+    (acc, row) => ({
+      requests: acc.requests + row.requests,
+      promptTokens: acc.promptTokens + row.promptTokens,
+      completionTokens: acc.completionTokens + row.completionTokens,
+      cost: acc.cost + row.cost,
+    }),
+    { requests: 0, promptTokens: 0, completionTokens: 0, cost: 0 }
+  );
+
+  return (
+    <div className="space-y-3">
+      <section className="rounded-xl border border-dark-700/50 bg-dark-800 p-4 space-y-3">
+        <div>
+          <h3 className="text-xs font-semibold text-dark-300 uppercase tracking-wider">Session Usage</h3>
+          <p className="text-[11px] text-dark-500 mt-1">Tracked locally for this app session history, including Ollama.</p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-dark-900/50 border border-dark-700/30 rounded-lg px-3 py-2">
+            <p className="text-[10px] text-dark-500 uppercase tracking-wider">Requests</p>
+            <p className="text-sm font-semibold text-dark-100 mt-0.5">{formatUsageInt(totals.requests)}</p>
+          </div>
+          <div className="bg-dark-900/50 border border-dark-700/30 rounded-lg px-3 py-2">
+            <p className="text-[10px] text-dark-500 uppercase tracking-wider">Cost</p>
+            <p className="text-sm font-semibold text-dark-100 mt-0.5">{formatUsageCost(totals.cost)}</p>
+          </div>
+          <div className="bg-dark-900/50 border border-dark-700/30 rounded-lg px-3 py-2">
+            <p className="text-[10px] text-dark-500 uppercase tracking-wider">Prompt Tokens</p>
+            <p className="text-sm font-semibold text-dark-100 mt-0.5">{formatUsageInt(totals.promptTokens)}</p>
+          </div>
+          <div className="bg-dark-900/50 border border-dark-700/30 rounded-lg px-3 py-2">
+            <p className="text-[10px] text-dark-500 uppercase tracking-wider">Completion Tokens</p>
+            <p className="text-sm font-semibold text-dark-100 mt-0.5">{formatUsageInt(totals.completionTokens)}</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="space-y-2">
+        {rows.map((row) => (
+          <div key={row.provider} className="rounded-xl border border-dark-700/50 bg-dark-800 px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: row.color }} />
+                <span className="text-sm font-semibold text-dark-100">{row.label}</span>
+                {row.connected && (
+                  <span className="text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-1.5 py-0.5 font-medium">Connected</span>
+                )}
+              </div>
+              <span className="text-[11px] text-dark-400">{formatUsageInt(row.requests)} req</span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 mt-2">
+              <div className="text-[11px] text-dark-400">In: <span className="text-dark-200">{formatUsageInt(row.promptTokens)}</span></div>
+              <div className="text-[11px] text-dark-400">Out: <span className="text-dark-200">{formatUsageInt(row.completionTokens)}</span></div>
+              <div className="text-[11px] text-dark-400">Cost: <span className="text-dark-200">{formatUsageCost(row.cost)}</span></div>
+            </div>
+          </div>
+        ))}
+      </section>
+    </div>
+  );
+}
+
+function OllamaCloudUsagePanel({ ollamaValue }) {
+  const [usage, setUsage] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const [refreshToken, setRefreshToken] = useState(0);
+
+  const rawValue = String(ollamaValue || "").trim();
+  const looksLikeUrl =
+    /^https?:\/\//i.test(rawValue) ||
+    rawValue.includes("localhost") ||
+    rawValue.includes("127.0.0.1");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!rawValue) {
+      setUsage(null);
+      setErr("");
+      setLoading(false);
+      return () => { cancelled = true; };
+    }
+
+    if (looksLikeUrl) {
+      setUsage(null);
+      setErr("Cloud usage requires an Ollama API key. Local host URLs do not expose cloud usage limits.");
+      setLoading(false);
+      return () => { cancelled = true; };
+    }
+
+    setLoading(true);
+    setErr("");
+
+    fetchOllamaCloudUsage(rawValue)
+      .then((result) => {
+        if (cancelled) return;
+        setUsage(result || null);
+        if (result && !result.available) {
+          setErr("Connected, but this account response does not include usage percentages yet.");
+        }
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setUsage(null);
+        setErr(error?.message || "Could not fetch Ollama cloud usage.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [rawValue, looksLikeUrl, refreshToken]);
+
+  const openOllamaSettings = () => {
+    if (window.electronAPI?.openExternal) {
+      window.electronAPI.openExternal("https://ollama.com/settings");
+    } else {
+      window.open("https://ollama.com/settings", "_blank", "noopener");
+    }
+  };
+
+  if (!rawValue) {
+    return (
+      <div className="rounded-xl border border-dark-700/50 bg-dark-800 p-6 text-center space-y-2">
+        <svg className="w-8 h-8 mx-auto text-dark-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+        </svg>
+        <p className="text-sm text-dark-400">Connect your Ollama cloud API key in General settings to view cloud usage percentage.</p>
+      </div>
+    );
+  }
+
+  const session = usage?.session || {};
+  const weekly = usage?.weekly || {};
+
+  const rows = [
+    { label: "Session usage", value: session.percentUsed, resetsIn: session.resetsIn, usedLimit: formatUsedLimit(session.used, session.limit) },
+    { label: "Weekly usage", value: weekly.percentUsed, resetsIn: weekly.resetsIn, usedLimit: formatUsedLimit(weekly.used, weekly.limit) },
+  ];
+
+  return (
+    <section className="rounded-xl border border-[#22c55e]/20 bg-[#22c55e]/[0.04] p-4 space-y-4">
+      <div className="flex items-center gap-2.5">
+        <span className="w-2.5 h-2.5 rounded-full bg-[#22c55e] shrink-0" />
+        <span className="text-sm font-semibold text-dark-100">Ollama Cloud Usage</span>
+        {usage?.plan && (
+          <span className="text-[10px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-2 py-0.5 font-medium">
+            {usage.plan}
+          </span>
+        )}
+        {loading && <span className="text-[11px] text-dark-500 ml-auto">Loading…</span>}
+        {!loading && (
+          <button
+            type="button"
+            onClick={() => setRefreshToken((token) => token + 1)}
+            className="ml-auto text-[11px] text-emerald-300/80 hover:text-emerald-200 font-medium cursor-pointer"
+          >
+            Refresh
+          </button>
+        )}
+      </div>
+
+      <p className="text-[11px] text-dark-500">
+        Cloud models and capabilities contribute to session and weekly limits on your Ollama account.
+      </p>
+
+      {err && (
+        <p className="text-xs text-red-400">{err}</p>
+      )}
+
+      <div className="space-y-3">
+        {rows.map((row) => (
+          <div key={row.label} className="space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm text-dark-200">{row.label}</span>
+              <span className="text-sm text-dark-100">{formatUsagePercent(row.value)} used</span>
+            </div>
+
+            <div className="w-full h-2 rounded-full bg-dark-900/70 border border-dark-700/40 overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-emerald-500/80 to-lime-400/80 rounded-full transition-all duration-500"
+                style={{ width: `${usagePercentWidth(row.value)}%` }}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] text-dark-500">{row.resetsIn ? `Resets in ${row.resetsIn}` : "Reset schedule unavailable"}</span>
+              {row.usedLimit && (
+                <span className="text-[11px] text-dark-500">{row.usedLimit}</span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <button
+        type="button"
+        onClick={openOllamaSettings}
+        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-[#22c55e]/30 text-[#22c55e]/90 hover:bg-[#22c55e]/10 text-xs font-medium cursor-pointer transition-colors"
+      >
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+        </svg>
+        Open Ollama Account Usage
+      </button>
+    </section>
+  );
+}
+
 // ── HuggingFace Usage Tab ─────────────────────────────────────────────────────
 
 function HFUsageTab({ hfKey }) {
@@ -1240,6 +1606,8 @@ export default function SettingsPanel({
   advisorPrefs, onSaveAdvisorPrefs,
   shortcuts, onSaveShortcuts, onResetShortcuts,
   memory, onSaveMemory, onResetMemory,
+  providerUsage,
+  usageSnapshot,
 }) {
   // Custom commands editor state
   const [editingCmd, setEditingCmd] = useState(null);
@@ -1283,7 +1651,7 @@ export default function SettingsPanel({
           <div className="flex bg-dark-800 border border-dark-700/50 rounded-xl p-1 gap-1">
             {[
               { id: "general", label: "General" },
-              { id: "usage", label: "HF Usage" },
+              { id: "usage", label: "Usage" },
               { id: "memory", label: "Memory" },
               { id: "shortcuts", label: "Shortcuts" },
             ].map((tab) => (
@@ -1744,7 +2112,12 @@ export default function SettingsPanel({
           )}
 
           {activeTab === "usage" && (
-            <HFUsageTab hfKey={providers?.huggingface || null} />
+            <div className="space-y-5">
+              <SidebarUsageSnapshotPanel usageSnapshot={usageSnapshot} />
+              <OllamaCloudUsagePanel ollamaValue={providers?.ollama || null} />
+              <SessionUsagePanel providerUsage={providerUsage} providers={providers} />
+              <HFUsageTab hfKey={providers?.huggingface || null} />
+            </div>
           )}
 
           {activeTab === "shortcuts" && (

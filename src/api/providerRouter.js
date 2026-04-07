@@ -5,14 +5,15 @@
  * to the correct provider API. Each model object carries a `_provider` field
  * that determines which API client handles the call.
  *
- * Provider keys shape:  { openrouter, openai, anthropic, huggingface }
- * Each value is a string API key or null/undefined if not configured.
+ * Provider keys shape:  { openrouter, openai, anthropic, huggingface, ollama }
+ * Each value is a provider credential/config string (API key or endpoint) or null/undefined.
  */
 
 import { fetchModels as fetchOpenRouterModels, streamMessage as streamOpenRouter, fetchCredits, generateImage as generateImageOR } from "./openrouter";
 import { fetchModels as fetchOpenAIModels, streamMessage as streamOpenAI } from "./openai";
 import { fetchModels as fetchAnthropicModels, streamMessage as streamAnthropic } from "./anthropic";
 import { fetchModels as fetchHFModels, streamMessage as streamHF, generateImage as generateImageHF, IMAGE_GEN_MODELS as HF_IMAGE_MODELS } from "./huggingface";
+import { fetchModels as fetchOllamaModels, streamMessage as streamOllama } from "./ollama";
 
 export { fetchCredits };
 
@@ -37,6 +38,7 @@ export const PROVIDER_META = {
   openai:      { label: "OpenAI API",       color: "#10a37f", hasSuggestions: false },
   anthropic:   { label: "Anthropic API",    color: "#c96442", hasSuggestions: false },
   huggingface: { label: "HuggingFace",      color: "#f5a623", hasSuggestions: true  },
+  ollama:      { label: "Ollama",           color: "#22c55e", hasSuggestions: true  },
 };
 
 export function providerLabel(provider) {
@@ -61,10 +63,11 @@ function inferImageOutputCapability(model) {
  * Fetch and merge models from every provider that has a key.
  * Each model gets a `_provider` tag so the router knows which API to call.
  *
- * @param {object} providerKeys - { openrouter, openai, anthropic, huggingface }
+ * @param {object} providerKeys - { openrouter, openai, anthropic, huggingface, ollama }
  * @returns {Promise<Array>} Flat array of model objects with `_provider` set
  */
 export async function fetchAllModels(providerKeys) {
+  const providerOrder = ["openrouter", "openai", "anthropic", "huggingface", "ollama"];
   const results = await Promise.allSettled([
     providerKeys?.openrouter
       ? fetchOpenRouterModels(providerKeys.openrouter).then((ms) =>
@@ -78,7 +81,15 @@ export async function fetchAllModels(providerKeys) {
     providerKeys?.openai      ? fetchOpenAIModels(providerKeys.openai)                                                                       : Promise.resolve([]),
     providerKeys?.anthropic   ? fetchAnthropicModels(providerKeys.anthropic)                                                                 : Promise.resolve([]),
     providerKeys?.huggingface ? fetchHFModels(providerKeys.huggingface)                                                                      : Promise.resolve([]),
+    providerKeys?.ollama      ? fetchOllamaModels(providerKeys.ollama)                                                                       : Promise.resolve([]),
   ]);
+
+  results.forEach((result, index) => {
+    if (result.status === "rejected") {
+      const provider = providerOrder[index] || `provider-${index}`;
+      console.warn(`[${provider}] model fetch failed`, result.reason);
+    }
+  });
 
   const chatModels = results
     .flatMap((r) => (r.status === "fulfilled" ? r.value : []))
@@ -148,6 +159,7 @@ export async function routeStream(providerKeys, model, messages, opts = {}) {
     case "openai":      return streamOpenAI(key, model.id, messages, opts);
     case "anthropic":   return streamAnthropic(key, model.id, messages, opts);
     case "huggingface": return streamHF(key, model.id, messages, opts);
+    case "ollama":      return streamOllama(key, model.id, messages, opts);
     default:            throw new Error(`Unknown provider: ${provider}`);
   }
 }

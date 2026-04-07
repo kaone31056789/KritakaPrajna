@@ -265,12 +265,19 @@ function shouldUseTextGenerationFallback(status, detail, modelId) {
   return String(modelId || "").toLowerCase().includes("deepseek-v3.2");
 }
 
-async function streamViaCompletions(apiKey, modelId, messages, { onChunk, signal } = {}) {
+async function streamViaCompletions(
+  apiKey,
+  modelId,
+  messages,
+  { onChunk, signal, maxTokens, temperature, topP } = {}
+) {
   const body = {
     model: normalizeChatModel(modelId),
     prompt: toTextGenerationPrompt(messages),
     stream: true,
-    max_tokens: 2048,
+    max_tokens: maxTokens ?? 512,
+    temperature: temperature ?? 0.65,
+    top_p: topP ?? 0.9,
   };
 
   const res = await fetch(`${API_BASE}/completions`, {
@@ -329,7 +336,12 @@ async function streamViaCompletions(apiKey, modelId, messages, { onChunk, signal
   return { text: full || "(No response)", usage };
 }
 
-async function streamViaTextGeneration(apiKey, modelId, messages, { onChunk, signal } = {}) {
+async function streamViaTextGeneration(
+  apiKey,
+  modelId,
+  messages,
+  { onChunk, signal, maxTokens, temperature, topP } = {}
+) {
   const prompt = toTextGenerationPrompt(messages);
   const resolvedModel = stripRoutingSuffix(modelId);
 
@@ -343,7 +355,9 @@ async function streamViaTextGeneration(apiKey, modelId, messages, { onChunk, sig
     body: JSON.stringify({
       inputs: prompt,
       parameters: {
-        max_new_tokens: 2048,
+        max_new_tokens: maxTokens ?? 512,
+        temperature: temperature ?? 0.65,
+        top_p: topP ?? 0.9,
         return_full_text: false,
       },
       options: {
@@ -488,12 +502,20 @@ export async function generateImage(apiKey, modelId, prompt) {
  * Stream a chat completion via HuggingFace Inference API (OpenAI-compatible).
  * Returns { text, usage } to match the other providers.
  */
-export async function streamMessage(apiKey, modelId, messages, { onChunk, signal, reasoningDepth } = {}) {
+export async function streamMessage(
+  apiKey,
+  modelId,
+  messages,
+  { onChunk, signal, reasoningDepth, maxTokens, temperature, topP } = {}
+) {
   const body = {
     model: normalizeChatModel(modelId),
     messages,
     stream: true,
-    max_tokens: 4096,
+    // TOKEN OPTIMIZATION: reduced defaults for free-tier chat models.
+    max_tokens: maxTokens ?? 512,
+    temperature: temperature ?? 0.65,
+    top_p: topP ?? 0.9,
   };
   if (supportsReasoningModel({ id: modelId, _provider: "huggingface" })) {
     body.reasoning = { effort: mapReasoningEffort(reasoningDepth || "balanced") };
@@ -514,7 +536,13 @@ export async function streamMessage(apiKey, modelId, messages, { onChunk, signal
     const detail = parseErrorDetail(text);
     if (shouldUseTextGenerationFallback(res.status, detail, modelId)) {
       try {
-        return await streamViaCompletions(apiKey, modelId, messages, { onChunk, signal });
+        return await streamViaCompletions(apiKey, modelId, messages, {
+          onChunk,
+          signal,
+          maxTokens,
+          temperature,
+          topP,
+        });
       } catch (completionErr) {
         const completionMsg = String(completionErr?.message || "").toLowerCase();
         const canFallbackToTextGen =
@@ -524,7 +552,13 @@ export async function streamMessage(apiKey, modelId, messages, { onChunk, signal
           completionMsg.includes("endpoint");
 
         if (!canFallbackToTextGen) throw completionErr;
-        return streamViaTextGeneration(apiKey, modelId, messages, { onChunk, signal });
+        return streamViaTextGeneration(apiKey, modelId, messages, {
+          onChunk,
+          signal,
+          maxTokens,
+          temperature,
+          topP,
+        });
       }
     }
     throw new Error(`HuggingFace ${res.status}: ${detail}`);

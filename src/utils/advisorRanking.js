@@ -28,8 +28,51 @@ const HF_BENCHMARK_PRIORS = [
   { pattern: "smollm2", score: 63 },
 ];
 
+const NORMALIZED_NAME_PRIORS = [
+  { pattern: "deepseek-r1", score: 92 },
+  { pattern: "deepseek-v3", score: 90 },
+  { pattern: "claude-4", score: 96 },
+  { pattern: "claude-3.5-sonnet", score: 92 },
+  { pattern: "gpt-4o", score: 90 },
+  { pattern: "gpt-4-turbo", score: 88 },
+  { pattern: "o4-mini", score: 88 },
+  { pattern: "o3", score: 91 },
+  { pattern: "o1", score: 89 },
+  { pattern: "qwen-2.5-coder", score: 87 },
+  { pattern: "qwen-2.5-72b", score: 84 },
+  { pattern: "qwen-2.5", score: 79 },
+  { pattern: "qwen-3", score: 84 },
+  { pattern: "codestral", score: 86 },
+  { pattern: "codellama", score: 74 },
+  { pattern: "starcoder", score: 73 },
+  { pattern: "llama-4", score: 90 },
+  { pattern: "llama-3.3-70b", score: 86 },
+  { pattern: "llama-3.1-405b", score: 89 },
+  { pattern: "llama-3", score: 68 },
+  { pattern: "gemma-4", score: 86 },
+  { pattern: "gemma-3", score: 76 },
+  { pattern: "mistral-large", score: 84 },
+  { pattern: "mixtral", score: 70 },
+  { pattern: "phi-4", score: 72 },
+];
+
 function clamp(value, min = 0, max = 100) {
   return Math.max(min, Math.min(max, value));
+}
+
+function normalizeModelText(value = "") {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[:_/]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/([a-z])(\d)/g, "$1-$2")
+    .replace(/(\d)([a-z])/g, "$1-$2")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function modelFingerprint(model) {
+  return normalizeModelText(`${model?.id || ""} ${(model?.name || "")}`);
 }
 
 function normalizeAdvisorContext(context = {}) {
@@ -64,6 +107,7 @@ function normalizeWeights(weights) {
       capability: 0,
       context: 0,
       reasoning: 0,
+      locality: 0,
     };
   }
 
@@ -101,8 +145,14 @@ function popularityScore(downloads = 0, likes = 0) {
 }
 
 function benchmarkPrior(model) {
-  const id = `${model?.id || ""} ${model?.name || ""}`.toLowerCase();
-  const match = HF_BENCHMARK_PRIORS.find((entry) => id.includes(entry.pattern));
+  const id = modelFingerprint(model);
+  const match = HF_BENCHMARK_PRIORS.find((entry) => id.includes(normalizeModelText(entry.pattern)));
+  return match?.score ?? null;
+}
+
+function normalizedNamePrior(model) {
+  const id = modelFingerprint(model);
+  const match = NORMALIZED_NAME_PRIORS.find((entry) => id.includes(normalizeModelText(entry.pattern)));
   return match?.score ?? null;
 }
 
@@ -137,7 +187,8 @@ function inverseCostScore(model) {
   return clamp(Math.round(normalized * 100));
 }
 
-function availabilityScore(model) {
+function availabilityScore(model, taskType = "general", context = {}) {
+  const ctx = normalizeAdvisorContext(context);
   const health = getModelHealth(model?._selectionId || model?.id || "");
   let score = 84;
 
@@ -145,6 +196,12 @@ function availabilityScore(model) {
   if (model?._provider === "openai") score = 92;
   if (model?._provider === "anthropic") score = 90;
   if (model?._provider === "huggingface") score = 78;
+  if (model?._provider === "ollama") {
+    score = 84;
+    if (taskType === "coding" || taskType === "document") score += 4;
+    if (ctx.terminalIntent) score += 4;
+    if (ctx.webSearchUsed && ctx.webSearchMode === "deep") score -= 3;
+  }
 
   if (!health.available) score -= 35;
   if (health.slow) score -= 12;
@@ -154,16 +211,47 @@ function availabilityScore(model) {
 }
 
 function qualitySignal(model, hfSignals = {}) {
-  const base = clamp(qualityScore(model));
+  const baseRaw = clamp(qualityScore(model));
+  const aliasPrior = normalizedNamePrior(model);
+  const base = aliasPrior == null
+    ? baseRaw
+    : clamp(Math.max(baseRaw, Math.round(baseRaw * 0.6 + aliasPrior * 0.4)));
   const prior = benchmarkPrior(model);
   const repoSignal = hfSignals[normalizeRepoId(model)] || null;
   const popularity = repoSignal ? popularityScore(repoSignal.downloads, repoSignal.likes) : 0;
 
-  const parts = [base * 0.6];
-  if (prior != null) parts.push(prior * 0.25);
-  if (repoSignal) parts.push(popularity * 0.15);
+  let weightedSum = base * 0.6;
+  let totalWeight = 0.6;
 
-  return clamp(Math.round(parts.reduce((sum, value) => sum + value, 0)));
+  if (prior != null) {
+    weightedSum += prior * 0.25;
+    totalWeight += 0.25;
+  }
+  if (repoSignal) {
+    weightedSum += popularity * 0.15;
+    totalWeight += 0.15;
+  }
+
+  return clamp(Math.round(totalWeight > 0 ? weightedSum / totalWeight : base));
+}
+
+function localityScore(model, taskType = "general", context = {}) {
+  const ctx = normalizeAdvisorContext(context);
+  const provider = model?._provider || "openrouter";
+
+  if (provider === "ollama") {
+    let score = 88;
+    if (taskType === "document") score += 8;
+    if (taskType === "coding") score += 6;
+    if (ctx.terminalIntent) score += 6;
+    if (ctx.webSearchUsed && ctx.webSearchMode === "deep") score -= 4;
+    return clamp(score);
+  }
+
+  if (provider === "huggingface") return 63;
+  if (provider === "openrouter") return 60;
+  if (provider === "openai" || provider === "anthropic") return 55;
+  return 58;
 }
 
 function reasoningCapabilityScore(model) {
@@ -199,13 +287,13 @@ function scoreWeightsForTask(taskType, context = {}) {
 
   let weights;
   if (taskType === "coding") {
-    weights = { quality: 0.45, cost: 0.18, speed: 0.12, availability: 0.17, capability: 0.08, context: 0, reasoning: 0 };
+    weights = { quality: 0.42, cost: 0.16, speed: 0.11, availability: 0.16, capability: 0.08, context: 0, reasoning: 0.02, locality: 0.05 };
   } else if (taskType === "vision") {
-    weights = { quality: 0.42, cost: 0.14, speed: 0.1, availability: 0.17, capability: 0.11, context: 0.06, reasoning: 0 };
+    weights = { quality: 0.42, cost: 0.14, speed: 0.1, availability: 0.17, capability: 0.11, context: 0.05, reasoning: 0, locality: 0.01 };
   } else if (taskType === "document") {
-    weights = { quality: 0.36, cost: 0.2, speed: 0.1, availability: 0.15, capability: 0.04, context: 0.15, reasoning: 0 };
+    weights = { quality: 0.32, cost: 0.18, speed: 0.09, availability: 0.14, capability: 0.04, context: 0.14, reasoning: 0, locality: 0.09 };
   } else {
-    weights = { quality: 0.4, cost: 0.28, speed: 0.1, availability: 0.2, capability: 0.02, context: 0, reasoning: 0 };
+    weights = { quality: 0.39, cost: 0.25, speed: 0.1, availability: 0.19, capability: 0.02, context: 0, reasoning: 0.02, locality: 0.03 };
   }
 
   if (webNeed) {
@@ -214,6 +302,7 @@ function scoreWeightsForTask(taskType, context = {}) {
       weights.reasoning += 0.08;
       weights.quality += 0.05;
       weights.availability += 0.04;
+      weights.locality -= 0.03;
       weights.cost -= 0.07;
       weights.speed -= 0.04;
     } else {
@@ -221,6 +310,7 @@ function scoreWeightsForTask(taskType, context = {}) {
       weights.reasoning += 0.03;
       weights.quality += 0.03;
       weights.availability += 0.03;
+      weights.locality -= 0.01;
       weights.cost -= 0.05;
       weights.speed -= 0.02;
     }
@@ -229,6 +319,7 @@ function scoreWeightsForTask(taskType, context = {}) {
   if (ctx.terminalIntent) {
     weights.capability += 0.12;
     weights.availability += 0.05;
+    weights.locality += 0.04;
     weights.quality += 0.02;
     weights.cost -= 0.05;
     weights.context += 0.01;
@@ -237,12 +328,14 @@ function scoreWeightsForTask(taskType, context = {}) {
   if (ctx.reasoningDepth === "deep") {
     weights.reasoning += 0.08;
     weights.quality += 0.04;
+    weights.locality -= 0.02;
     weights.speed -= 0.04;
     weights.cost -= 0.03;
   } else if (ctx.reasoningDepth === "fast") {
     weights.speed += 0.06;
     weights.cost += 0.05;
     weights.reasoning -= 0.04;
+    weights.locality += 0.01;
     weights.context -= 0.01;
   }
 
@@ -274,10 +367,11 @@ export function buildUnifiedModelProfile(model, taskType = "general", hfSignals 
   const quality = qualitySignal(model, hfSignals);
   const costScore = inverseCostScore(model);
   const speed = speedScore(model);
-  const availability = availabilityScore(model);
+  const availability = availabilityScore(model, taskType, ctx);
   const capability = taskCapabilityBoost(model, taskType, ctx);
   const context = contextScore(model);
   const reasoning = reasoningCapabilityScore(model);
+  const locality = localityScore(model, taskType, ctx);
 
   const finalScore = clamp(Math.round(
     quality * (weights.quality || 0) +
@@ -286,7 +380,8 @@ export function buildUnifiedModelProfile(model, taskType = "general", hfSignals 
     availability * (weights.availability || 0) +
     capability * (weights.capability || 0) +
     context * (weights.context || 0) +
-    reasoning * (weights.reasoning || 0)
+    reasoning * (weights.reasoning || 0) +
+    locality * (weights.locality || 0)
   ));
 
   return {
@@ -310,6 +405,7 @@ export function buildUnifiedModelProfile(model, taskType = "general", hfSignals 
     contextLength: Number(model?.context_length) || 0,
     contextScore: context,
     reasoningScore: reasoning,
+    localityScore: locality,
     availabilityScore: availability,
     costScore,
     capabilityScore: capability,
@@ -333,16 +429,33 @@ export function filterRankableModels(models, taskType) {
 export function rankModelsForTask(models, taskType = "general", hfSignals = {}, advisorContext = {}) {
   return filterRankableModels(models, taskType)
     .map((model) => ({ model, profile: buildUnifiedModelProfile(model, taskType, hfSignals, advisorContext) }))
-    .sort((a, b) => b.profile.finalScore - a.profile.finalScore);
+    .sort((a, b) => {
+      const scoreDelta = b.profile.finalScore - a.profile.finalScore;
+      if (scoreDelta !== 0) return scoreDelta;
+
+      const qualityDelta = b.profile.qualityScore - a.profile.qualityScore;
+      if (qualityDelta !== 0) return qualityDelta;
+
+      const availabilityDelta = b.profile.availabilityScore - a.profile.availabilityScore;
+      if (availabilityDelta !== 0) return availabilityDelta;
+
+      const costDelta = b.profile.costScore - a.profile.costScore;
+      if (costDelta !== 0) return costDelta;
+
+      return String(a.model?.id || "").localeCompare(String(b.model?.id || ""));
+    });
 }
 
 export function bestValueForTask(models, taskType = "general", hfSignals = {}, advisorContext = {}) {
   const ranked = filterRankableModels(models, taskType).map((model) => {
     const profile = buildUnifiedModelProfile(model, taskType, hfSignals, advisorContext);
     const valueScore = Math.round(
-      profile.qualityScore * 0.55 +
-      profile.costScore * 0.3 +
-      profile.availabilityScore * 0.15
+      profile.qualityScore * 0.45 +
+      profile.costScore * 0.25 +
+      profile.availabilityScore * 0.15 +
+      profile.capabilityScore * 0.08 +
+      profile.localityScore * 0.04 +
+      profile.speedScore * 0.03
     );
     return { model, profile, valueScore };
   });

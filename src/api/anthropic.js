@@ -27,7 +27,12 @@ export async function fetchModels(_apiKey) {
  * Anthropic uses a different SSE format and requires system to be a top-level param.
  * Returns { text, usage } to match the other providers.
  */
-export async function streamMessage(apiKey, modelId, messages, { onChunk, signal, reasoningDepth } = {}) {
+export async function streamMessage(
+  apiKey,
+  modelId,
+  messages,
+  { onChunk, signal, reasoningDepth, maxTokens, temperature, topP } = {}
+) {
   // Anthropic requires system as a separate param, not in messages array
   const systemMsg = messages.find((m) => m.role === "system");
   const chatMessages = messages
@@ -56,7 +61,10 @@ export async function streamMessage(apiKey, modelId, messages, { onChunk, signal
 
   const body = {
     model: modelId,
-    max_tokens: 8096,
+    // TOKEN OPTIMIZATION: reduce default completion budget.
+    max_tokens: maxTokens ?? 512,
+    temperature: temperature ?? 0.7,
+    top_p: topP ?? 0.9,
     messages: chatMessages,
     stream: true,
   };

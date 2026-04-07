@@ -34,11 +34,24 @@ export async function fetchCredits(apiKey) {
  * Returns { text, usage } where usage is { prompt_tokens, completion_tokens } or null.
  * Pass an AbortController signal to allow cancellation.
  */
-export async function streamMessage(apiKey, model, messages, { onChunk, signal, reasoningDepth } = {}) {
+export async function streamMessage(
+  apiKey,
+  model,
+  messages,
+  { onChunk, signal, reasoningDepth, maxTokens, temperature, topP } = {}
+) {
   const maxRetries = 3;
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
-    const body = { model, messages, stream: true };
+    // TOKEN OPTIMIZATION: keep generation controls bounded by default.
+    const body = {
+      model,
+      messages,
+      stream: true,
+      max_tokens: maxTokens ?? 512,
+      temperature: temperature ?? 0.7,
+      top_p: topP ?? 0.9,
+    };
     if (supportsReasoningModel({ id: model, _provider: "openrouter" })) {
       body.reasoning = { effort: mapReasoningEffort(reasoningDepth || "balanced") };
     }

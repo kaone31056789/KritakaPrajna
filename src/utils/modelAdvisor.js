@@ -2,12 +2,63 @@ import { isFreeModel, extractParamBillions, supportsVision } from "./smartModelS
 import { isModelUnavailable } from "./rateLimiter";
 import { buildUnifiedModelProfile, rankModelsForTask, bestValueForTask } from "./advisorRanking";
 
-const CODING_MODELS = [
-  "deepseek-coder", "deepseek-chat", "deepseek-r1", "codellama", "code-llama",
-  "starcoder", "wizardcoder", "phind", "codestral", "claude-3.5-sonnet",
-  "claude-3-opus", "claude-4", "gpt-4o", "gpt-4-turbo", "gemini-2",
-  "gemini-1.5-pro", "qwen-2.5-coder", "yi-coder",
+const CODING_MODEL_PATTERNS = [
+  /deepseek-(coder|chat|r1|v3)/,
+  /codellama|code-llama|codestral|starcoder|wizardcoder|phind|yi-coder|devstral/,
+  /qwen.*coder/,
+  /claude-(3\.5-sonnet|3-opus|4)/,
+  /gpt-4o|gpt-4-turbo|o1|o3|o4/,
+  /gemini-2|gemini-1\.5-pro/,
 ];
+
+function normalizeModelText(value = "") {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[:_/]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/([a-z])(\d)/g, "$1-$2")
+    .replace(/(\d)([a-z])/g, "$1-$2")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function isCodingModel(model) {
+  const id = normalizeModelText(model?.id || "");
+  return CODING_MODEL_PATTERNS.some((pattern) => pattern.test(id));
+}
+
+function normalizePreference(preference = "auto") {
+  const value = String(preference || "auto").toLowerCase();
+  if (value === "free") return "free";
+  if (value === "paid") return "paid";
+  if (value === "best") return "best";
+  return "auto";
+}
+
+function pickBestOverallByPreference(ranked = [], preference = "auto") {
+  if (!ranked.length) return null;
+
+  if (preference === "free") {
+    return ranked.find(({ profile }) => profile.isFree) || ranked[0];
+  }
+
+  if (preference === "paid") {
+    return ranked.find(({ profile }) => !profile.isFree) || ranked[0];
+  }
+
+  if (preference === "best") {
+    return [...ranked]
+      .sort((a, b) => {
+        const qualityDelta = b.profile.qualityScore - a.profile.qualityScore;
+        if (qualityDelta !== 0) return qualityDelta;
+        const scoreDelta = b.profile.finalScore - a.profile.finalScore;
+        if (scoreDelta !== 0) return scoreDelta;
+        return b.profile.availabilityScore - a.profile.availabilityScore;
+      })[0];
+  }
+
+  return ranked[0];
+}
 
 function costPer1MTokens(model) {
   const p = model?.pricing;
@@ -34,6 +85,7 @@ function providerLabel(provider) {
   switch (provider) {
     case "openrouter": return "OpenRouter";
     case "huggingface": return "Hugging Face";
+    case "ollama": return "Ollama";
     case "openai": return "OpenAI";
     case "anthropic": return "Anthropic";
     default: return provider || "Unknown";
@@ -70,7 +122,7 @@ export function buildModelProfile(model, taskType = "general", rankingSignals = 
     costLabel: formatPricePer1M(model),
     isFree: unified.isFree,
     supportsVision: supportsVision(model),
-    supportsCode: CODING_MODELS.some((p) => model.id.toLowerCase().includes(p)),
+    supportsCode: isCodingModel(model),
     params: extractParamBillions(model),
     provider: unified.provider,
     qualityScore: unified.qualityScore,
@@ -95,6 +147,7 @@ export function generateAdvisorData({
   if (!models || models.length === 0) return null;
 
   const normalizedContext = normalizeAdvisorContext(advisorContext);
+  const preferenceMode = normalizePreference(preference);
 
   const realModels = models.filter((m) => !m.id.startsWith("openrouter/") && !isModelUnavailable(selectionId(m)));
   const currentModel = realModels.find((m) => selectionId(m) === currentModelId || m.id === currentModelId);
@@ -105,33 +158,66 @@ export function generateAdvisorData({
   const currentProfile = buildModelProfile(currentModel, taskType, rankingSignals, normalizedContext);
   const currentScore = currentProfile.finalScore;
 
-  const bestOverall = ranked[0] || null;
+  const bestOverall = pickBestOverallByPreference(ranked, preferenceMode);
   const bestFreeRanked = ranked.find(({ profile }) => profile.isFree) || null;
   const bestPaidRanked = ranked.find(({ profile }) => !profile.isFree) || null;
-  const bestValueRanked = bestValueForTask(capable, taskType, rankingSignals, normalizedContext);
-  const providerPicks = [];
-  const providerSeen = new Set();
-  ranked.forEach(({ model, profile }) => {
-    if (providerSeen.has(profile.provider)) return;
-    providerSeen.add(profile.provider);
-    providerPicks.push({
+  const preferredValuePool = preferenceMode === "free"
+    ? capable.filter(isFreeModel)
+    : preferenceMode === "paid"
+      ? capable.filter((m) => !isFreeModel(m))
+      : capable;
+  const bestValueRanked = bestValueForTask(
+    preferredValuePool.length > 0 ? preferredValuePool : capable,
+    taskType,
+    rankingSignals,
+    normalizedContext
+  );
+
+  const providerBest = new Map();
+  ranked.forEach((entry) => {
+    const provider = entry.profile.provider || "openrouter";
+    const existing = providerBest.get(provider);
+    if (!existing || entry.profile.finalScore > existing.profile.finalScore) {
+      providerBest.set(provider, entry);
+    }
+  });
+
+  const providerPriority = {
+    ollama: 0,
+    openrouter: 1,
+    openai: 2,
+    anthropic: 3,
+    huggingface: 4,
+  };
+
+  const providerPicks = Array.from(providerBest.values())
+    .sort((a, b) => {
+      const pa = providerPriority[a.profile.provider] ?? 99;
+      const pb = providerPriority[b.profile.provider] ?? 99;
+      if (pa !== pb) return pa - pb;
+      return b.profile.finalScore - a.profile.finalScore;
+    })
+    .map(({ model, profile }) => ({
       id: selectionId(model),
       name: shortName(model.id),
       provider: providerLabel(profile.provider),
       isFree: profile.isFree,
       costLabel: formatPricePer1M(model),
-    });
-  });
+    }));
 
   let cheaperAlternative = null;
   if (!currentProfile.isFree) {
+    const currentCostPer1M = costPer1MTokens(currentModel);
+    const comparableScoreFloor = Math.max(42, currentScore - (currentScore >= 85 ? 11 : 9));
+
     const cheaper = capable
       .map((model) => ({ model, profile: buildUnifiedModelProfile(model, taskType, rankingSignals, normalizedContext) }))
       .filter(({ model, profile }) =>
         selectionId(model) !== currentModelId &&
         model.id !== currentModelId &&
-        profile.finalScore >= currentScore * 0.82 &&
-        costPer1MTokens(model) < costPer1MTokens(currentModel)
+        profile.finalScore >= comparableScoreFloor &&
+        profile.qualityScore >= Math.max(30, currentProfile.qualityScore - 14) &&
+        costPer1MTokens(model) < currentCostPer1M
       )
       .sort((a, b) => costPer1MTokens(a.model) - costPer1MTokens(b.model));
 
@@ -150,7 +236,8 @@ export function generateAdvisorData({
   const betterRanked = ranked.find(({ model, profile }) =>
     selectionId(model) !== currentModelId &&
     model.id !== currentModelId &&
-    profile.finalScore > currentScore + 5
+    profile.finalScore >= currentScore + 3 &&
+    profile.qualityScore >= currentProfile.qualityScore
   );
 
   const betterModel = betterRanked ? {
@@ -240,7 +327,7 @@ export function generateAdvisorData({
   let codingSuggestion = null;
   if (taskType === "coding") {
     const codingRanked = rankModelsForTask(
-      capable.filter((m) => CODING_MODELS.some((p) => m.id.toLowerCase().includes(p))),
+      capable.filter((m) => isCodingModel(m)),
       "coding",
       rankingSignals,
       normalizedContext

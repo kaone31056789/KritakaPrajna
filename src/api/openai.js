@@ -42,12 +42,21 @@ export async function fetchModels(apiKey) {
  * Stream a chat completion via OpenAI API.
  * Same return shape as openrouter.streamMessage: { text, usage }
  */
-export async function streamMessage(apiKey, modelId, messages, { onChunk, signal, reasoningDepth } = {}) {
+export async function streamMessage(
+  apiKey,
+  modelId,
+  messages,
+  { onChunk, signal, reasoningDepth, maxTokens, temperature, topP } = {}
+) {
   const requestBody = {
     model: modelId,
     messages,
     stream: true,
     stream_options: { include_usage: true },
+    // TOKEN OPTIMIZATION: bounded output and controlled sampling.
+    max_tokens: maxTokens ?? 512,
+    temperature: temperature ?? 0.7,
+    top_p: topP ?? 0.9,
   };
 
   if (supportsReasoningModel({ id: modelId, _provider: "openai" })) {

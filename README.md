@@ -4,7 +4,7 @@
 
 ### AI Desktop Workspace for Builders, Researchers, and Power Users
 
-<a href="https://github.com/kaone31056789/KritakaPrajna/releases"><img src="https://img.shields.io/badge/Release-v2.7.5-22c55e?style=for-the-badge&logo=github" alt="Release"></a>
+<a href="https://github.com/kaone31056789/KritakaPrajna/releases"><img src="https://img.shields.io/badge/Release-v2.8.0-22c55e?style=for-the-badge&logo=github" alt="Release"></a>
 <img src="https://img.shields.io/badge/Windows-Supported-2563eb?style=for-the-badge&logo=windows" alt="Windows">
 <img src="https://img.shields.io/badge/Electron-35.x-0ea5e9?style=for-the-badge&logo=electron" alt="Electron">
 <img src="https://img.shields.io/badge/React-18-0891b2?style=for-the-badge&logo=react" alt="React">
@@ -12,7 +12,7 @@
 
 <br>
 
-<img src="https://img.shields.io/badge/Providers-OpenRouter%20%7C%20HuggingFace%20%7C%20OpenAI%20%7C%20Anthropic-7c3aed?style=flat-square" alt="Providers">
+<img src="https://img.shields.io/badge/Providers-OpenRouter%20%7C%20HuggingFace%20%7C%20OpenAI%20%7C%20Anthropic%20%7C%20Ollama-7c3aed?style=flat-square" alt="Providers">
 <img src="https://img.shields.io/badge/Web%20Mode-Fast%20%2B%20Deep-0284c7?style=flat-square" alt="Web Mode">
 <img src="https://img.shields.io/badge/Model%20Advisor-Cost%20%2B%20Quality%20Scoring-f59e0b?style=flat-square" alt="Advisor">
 <img src="https://img.shields.io/badge/Installer-NSIS%20via%20electron--builder-16a34a?style=flat-square" alt="Installer">
@@ -35,7 +35,7 @@
 10. [Project Structure](#project-structure)
 11. [Security and Privacy](#security-and-privacy)
 12. [Troubleshooting](#troubleshooting)
-13. [Release Notes (v2.7.5)](#release-notes-v275)
+13. [Release Notes (v2.8.0)](#release-notes-v280)
 14. [Contributing](#contributing)
 15. [Support](#support)
 
@@ -56,7 +56,7 @@ It is designed for users who want a practical daily driver for building software
 
 | Area | KritakaPrajna approach |
 |---|---|
-| Provider switching | One interface across OpenRouter, Hugging Face, OpenAI, Anthropic |
+| Provider switching | One interface across OpenRouter, Hugging Face, OpenAI, Anthropic, Ollama |
 | Model selection | Advisor scoring based on task + runtime context + cost |
 | Web behavior | Fast and Deep retrieval modes, source injection, no-result handling |
 | Coding workflow | Markdown rendering, syntax highlighting, terminal command integration |
@@ -64,9 +64,9 @@ It is designed for users who want a practical daily driver for building software
 
 ## Visual Preview
 
-| Splash | Main Chat Workspace |
-|---|---|
-| ![Splash](Screenshots/splash.png) | ![Chat](Screenshots/chat.png) |
+| API Onboarding | Main Chat Workspace | Settings Panel |
+|---|---|---|
+| ![API Onboarding](Screenshots/v2.8-api-key-screen.png) | ![Main Chat](Screenshots/v2.8-main-chat.png) | ![Settings Panel](Screenshots/v2.8-settings-panel.png) |
 
 ## Capability Overview
 
@@ -75,6 +75,7 @@ It is designed for users who want a practical daily driver for building software
 - OpenRouter for wide model catalog and pricing flexibility
 - Hugging Face for open/free model options
 - OpenAI and Anthropic for premium model workflows
+- Ollama Cloud for hosted model access via API key
 
 ### Smart Model Advisor
 
@@ -129,6 +130,7 @@ flowchart LR
   ROUTER --> HF[Hugging Face]
   ROUTER --> OA[OpenAI]
   ROUTER --> AN[Anthropic]
+  ROUTER --> OL[Ollama]
 
   WEB --> FETCH[Search and Page Fetch]
   ADVISE --> SCORE[Task + Cost + Context Scoring]
@@ -182,7 +184,7 @@ Actual model availability depends on active provider keys and provider-side mode
 ### Option A: Installer (Recommended)
 
 1. Open Releases: https://github.com/kaone31056789/KritakaPrajna/releases
-2. Download `KritakaPrajna-Setup-2.7.5.exe`
+2. Download `KritakaPrajna-Setup-2.8.0.exe`
 3. Install and launch
 4. Add your API keys in Settings
 
@@ -228,6 +230,44 @@ Configure inside Settings:
 - OpenAI key
 - Anthropic key
 - Hugging Face key
+- Ollama Cloud API key (from `ollama.com/settings/keys`)
+
+### How to Obtain API Keys
+
+#### OpenRouter
+
+1. Go to https://openrouter.ai/
+2. Sign in and open the keys page: https://openrouter.ai/keys
+3. Create a new key and copy the `sk-or-v1-...` token
+4. Paste it into the OpenRouter provider field in app settings
+
+#### OpenAI
+
+1. Go to https://platform.openai.com/
+2. Open API keys: https://platform.openai.com/api-keys
+3. Create a new secret key and copy it immediately
+4. Paste it into the OpenAI provider field in app settings
+
+#### Anthropic
+
+1. Go to https://console.anthropic.com/
+2. Open API Keys: https://console.anthropic.com/settings/keys
+3. Create a key and copy the `sk-ant-...` value
+4. Paste it into the Anthropic provider field in app settings
+
+#### Hugging Face
+
+1. Go to https://huggingface.co/
+2. Open Access Tokens: https://huggingface.co/settings/tokens
+3. Create a token suitable for Inference API usage
+4. Paste the `hf_...` token into the Hugging Face provider field in app settings
+
+#### Ollama Cloud
+
+1. Go to https://ollama.com/
+2. Open Keys: https://ollama.com/settings/keys
+3. Create a cloud API key
+4. Paste that key into the Ollama provider field in app settings
 
 ### Local Settings
 
@@ -279,12 +319,13 @@ dist/               Installer output (generated)
 - Remove stale generated artifacts from `build/` and `dist/`.
 - Re-run `npm install` and then `npm run dist`.
 
-## Release Notes (v2.7.5)
+## Release Notes (v2.8.0)
 
-- Expanded and polished project documentation
-- Improved web context behavior and response-state continuity
-- Enhanced model advisor context-aware scoring
-- Updated installer assets and release metadata
+- Added Ollama as a first-class provider across routing, model selection, and settings
+- Upgraded Model Advisor with better provider-aware ranking and stronger value picks
+- Improved token optimization controls and response-length handling
+- Added new UI screenshots for onboarding, main chat, and settings
+- Updated release metadata and installer target to v2.8.0
 
 ## Contributing
 

@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getMemory: () => ipcRenderer.invoke("memory-get"),
   setMemory: (memory) => ipcRenderer.invoke("memory-set", memory),
   resetMemory: () => ipcRenderer.invoke("memory-reset"),
+  // Ollama API proxy (main-process request to avoid renderer CORS issues)
+  ollamaApiRequest: (payload) => ipcRenderer.invoke("ollama-api-request", payload),
   // File system
   selectFolder: () => ipcRenderer.invoke("select-folder"),
   readDir: (dirPath) => ipcRenderer.invoke("read-dir", dirPath),

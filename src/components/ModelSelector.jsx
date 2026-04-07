@@ -5,11 +5,12 @@ import { filterModelsForTask } from "../utils/smartModelSelect";
 const ease = [0.4, 0, 0.2, 1];
 const FAVORITES_KEY = "openrouter_favorites";
 const MAX_FAVORITES = 10;
-const SOURCE_PROVIDER_ORDER = ["openrouter", "huggingface", "openai", "anthropic"];
+const SOURCE_PROVIDER_ORDER = ["openrouter", "huggingface", "ollama", "openai", "anthropic"];
 
 const SOURCE_LABELS = {
   openrouter: "OpenRouter",
   huggingface: "Hugging Face",
+  ollama: "Ollama",
   openai: "OpenAI",
   anthropic: "Anthropic",
 };
@@ -17,6 +18,7 @@ const SOURCE_LABELS = {
 const SOURCE_COLORS = {
   openrouter: "#60a5fa",
   huggingface: "#c084fc",
+  ollama: "#22c55e",
   openai: "#34d399",
   anthropic: "#fb923c",
 };
@@ -88,7 +90,7 @@ function isFreeModel(model) {
 }
 
 function supportsMeaningfulPricing(provider) {
-  return provider === "openrouter" || provider === "huggingface";
+  return provider === "openrouter" || provider === "huggingface" || provider === "ollama";
 }
 
 function familyForModel(model) {

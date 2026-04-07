@@ -21,6 +21,7 @@ const store = new Store({
     openaiKeyEncrypted:      { type: "string", default: "" },
     anthropicKeyEncrypted:   { type: "string", default: "" },
     huggingfaceKeyEncrypted: { type: "string", default: "" },
+    ollamaKeyEncrypted:      { type: "string", default: "" },
     keyboardShortcuts:       { type: "object", default: {} },
     userMemory:              {
       type: "object",
@@ -62,6 +63,7 @@ const PROVIDER_KEY_MAP = {
   openai:       "openaiKeyEncrypted",
   anthropic:    "anthropicKeyEncrypted",
   huggingface:  "huggingfaceKeyEncrypted",
+  ollama:       "ollamaKeyEncrypted",
 };
 
 function getProviderKey(provider) {
@@ -97,6 +99,7 @@ function getAllProviderKeys() {
     openai:      getProviderKey("openai"),
     anthropic:   getProviderKey("anthropic"),
     huggingface: getProviderKey("huggingface"),
+    ollama:      getProviderKey("ollama"),
   };
 }
 
@@ -169,7 +172,7 @@ function createWindow() {
           "script-src 'self'; " +
           "style-src 'self' 'unsafe-inline'; " +
           "img-src 'self' data: blob: https:; " +
-          "connect-src https://openrouter.ai https://api.openai.com https://api.anthropic.com https://router.huggingface.co https://huggingface.co; " +
+          "connect-src https://openrouter.ai https://api.openai.com https://api.anthropic.com https://router.huggingface.co https://huggingface.co https://ollama.com http://127.0.0.1:11434 http://localhost:11434; " +
           "font-src 'self' data:; " +
           "media-src blob:; " +
           "object-src 'none'; " +
@@ -401,7 +404,7 @@ ipcMain.handle("store-set-key", (_event, key) => { setApiKey(key); });
 ipcMain.handle("store-remove-key", () => { removeApiKey(); });
 
 // ── IPC: multi-provider key management ──────────────────────────────────────
-const VALID_PROVIDERS = new Set(["openrouter", "openai", "anthropic", "huggingface"]);
+const VALID_PROVIDERS = new Set(["openrouter", "openai", "anthropic", "huggingface", "ollama"]);
 ipcMain.handle("provider-get-key", (_event, provider) => {
   if (!VALID_PROVIDERS.has(provider)) return null;
   return getProviderKey(provider);
@@ -422,6 +425,96 @@ ipcMain.handle("shortcuts-reset-all", () => { resetKeyboardShortcuts(); });
 ipcMain.handle("memory-get", () => getUserMemory());
 ipcMain.handle("memory-set", (_event, memory) => { setUserMemory(memory); });
 ipcMain.handle("memory-reset", () => { resetUserMemory(); });
+ipcMain.handle("ollama-api-request", async (_event, payload) => {
+  try {
+    const baseUrl = String(payload?.baseUrl || "").trim();
+    const pathPart = String(payload?.path || "").trim();
+    const method = String(payload?.method || "GET").toUpperCase();
+    const reqHeaders = payload?.headers && typeof payload.headers === "object" ? payload.headers : {};
+    const body = typeof payload?.body === "string" ? payload.body : "";
+
+    if (!baseUrl) return { ok: false, status: 0, error: "Missing baseUrl", text: "" };
+
+    let base;
+    try { base = new NodeURL(baseUrl); }
+    catch { return { ok: false, status: 0, error: "Invalid baseUrl", text: "" }; }
+
+    if (base.protocol !== "http:" && base.protocol !== "https:") {
+      return { ok: false, status: 0, error: "Unsupported protocol", text: "" };
+    }
+
+    const allowedHost =
+      base.hostname === "ollama.com" ||
+      base.hostname === "localhost" ||
+      base.hostname === "127.0.0.1";
+
+    if (!allowedHost) {
+      return { ok: false, status: 0, error: "Host is not allowed", text: "" };
+    }
+
+    let target;
+    try {
+      target = new NodeURL(pathPart || "/", base.href);
+    } catch {
+      return { ok: false, status: 0, error: "Invalid request path", text: "" };
+    }
+
+    const client = target.protocol === "https:" ? https : http;
+
+    const result = await new Promise((resolve) => {
+      let settled = false;
+      const request = client.request(
+        target,
+        {
+          method,
+          headers: {
+            "User-Agent": BROWSER_UA,
+            ...reqHeaders,
+          },
+          timeout: WEB_FETCH_TIMEOUT_MS,
+        },
+        (response) => {
+          const chunks = [];
+          response.on("data", (chunk) => chunks.push(chunk));
+          response.on("end", () => {
+            if (settled) return;
+            settled = true;
+            const text = Buffer.concat(chunks).toString("utf-8");
+            const status = Number(response.statusCode) || 0;
+            resolve({
+              ok: status >= 200 && status < 300,
+              status,
+              text,
+              error: "",
+            });
+          });
+        }
+      );
+
+      request.on("timeout", () => {
+        request.destroy(new Error("Request timed out"));
+      });
+
+      request.on("error", (err) => {
+        if (settled) return;
+        settled = true;
+        resolve({ ok: false, status: 0, text: "", error: err?.message || "Request failed" });
+      });
+
+      if (body) request.write(body);
+      request.end();
+    });
+
+    return result;
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      text: "",
+      error: err?.message || "Unknown Ollama request error",
+    };
+  }
+});
 ipcMain.handle("clipboard-write-text", (_event, text) => {
   try {
     const MAX_CLIPBOARD = 1_000_000; // 1 MB cap

@@ -78,11 +78,26 @@ const PROVIDERS = [
       </svg>
     ),
   },
+  {
+    id: "ollama",
+    label: "Ollama",
+    description: "Cloud models via Ollama API key",
+    placeholder: "ollama_...",
+    color: "#22c55e",
+    badge: "Cloud",
+    badgeColor: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20",
+    icon: (
+      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 2l8 4v6c0 5-3.4 8.8-8 10-4.6-1.2-8-5-8-10V6l8-4z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8.5 12h7M12 8.5v7" />
+      </svg>
+    ),
+  },
 ];
 
 /**
  * Multi-provider API key setup screen.
- * onSave(providers) where providers = { openrouter, openai, anthropic, huggingface }
+ * onSave(providers) where providers = { openrouter, openai, anthropic, huggingface, ollama }
  */
 export default function ApiKeyScreen({ onSave, initialProviders = {} }) {
   const [selected, setSelected] = useState(() => {
@@ -99,6 +114,7 @@ export default function ApiKeyScreen({ onSave, initialProviders = {} }) {
     openai:      initialProviders.openai      || "",
     anthropic:   initialProviders.anthropic   || "",
     huggingface: initialProviders.huggingface || "",
+    ollama:      initialProviders.ollama      || "",
   });
 
   const toggleProvider = (id) => {
@@ -117,7 +133,9 @@ export default function ApiKeyScreen({ onSave, initialProviders = {} }) {
     const result = {};
     for (const id of selected) {
       const trimmed = keys[id]?.trim();
-      if (trimmed) result[id] = trimmed;
+      if (trimmed) {
+        result[id] = trimmed;
+      }
     }
     onSave(result);
   };
