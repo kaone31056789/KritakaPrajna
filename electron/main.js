@@ -425,6 +425,34 @@ ipcMain.handle("shortcuts-reset-all", () => { resetKeyboardShortcuts(); });
 ipcMain.handle("memory-get", () => getUserMemory());
 ipcMain.handle("memory-set", (_event, memory) => { setUserMemory(memory); });
 ipcMain.handle("memory-reset", () => { resetUserMemory(); });
+ipcMain.handle("memory-export", async (_event, payload) => {
+  try {
+    const suggestedRaw = typeof payload?.suggestedName === "string" ? payload.suggestedName.trim() : "openrouter-memory.json";
+    const safeFileName = (suggestedRaw || "openrouter-memory.json")
+      .replace(/[<>:"/\\|?*\x00-\x1F]/g, "-")
+      .slice(0, 120);
+    const fileName = safeFileName.toLowerCase().endsWith(".json") ? safeFileName : `${safeFileName}.json`;
+    const content = typeof payload?.content === "string" ? payload.content : "{}";
+
+    const result = await dialog.showSaveDialog({
+      title: "Export Memory",
+      defaultPath: path.join(app.getPath("documents"), fileName),
+      filters: [
+        { name: "JSON Files", extensions: ["json"] },
+        { name: "All Files", extensions: ["*"] },
+      ],
+    });
+
+    if (result.canceled || !result.filePath) {
+      return { ok: false, canceled: true };
+    }
+
+    await fs.promises.writeFile(result.filePath, content, "utf-8");
+    return { ok: true, canceled: false, path: result.filePath };
+  } catch (err) {
+    return { ok: false, canceled: false, error: err?.message || "Failed to export memory." };
+  }
+});
 ipcMain.handle("ollama-api-request", async (_event, payload) => {
   try {
     const baseUrl = String(payload?.baseUrl || "").trim();
@@ -432,6 +460,7 @@ ipcMain.handle("ollama-api-request", async (_event, payload) => {
     const method = String(payload?.method || "GET").toUpperCase();
     const reqHeaders = payload?.headers && typeof payload.headers === "object" ? payload.headers : {};
     const body = typeof payload?.body === "string" ? payload.body : "";
+    const customTimeoutMs = Number(payload?.timeoutMs);
 
     if (!baseUrl) return { ok: false, status: 0, error: "Missing baseUrl", text: "" };
 
@@ -460,6 +489,12 @@ ipcMain.handle("ollama-api-request", async (_event, payload) => {
     }
 
     const client = target.protocol === "https:" ? https : http;
+    const isChatRequest = /^\/api\/chat(?:$|[/?#])/i.test(target.pathname || "");
+    const timeoutMs = Number.isFinite(customTimeoutMs) && customTimeoutMs >= 1000
+      ? Math.min(customTimeoutMs, 15 * 60 * 1000)
+      : isChatRequest
+        ? 5 * 60 * 1000
+        : WEB_FETCH_TIMEOUT_MS;
 
     const result = await new Promise((resolve) => {
       let settled = false;
@@ -471,7 +506,7 @@ ipcMain.handle("ollama-api-request", async (_event, payload) => {
             "User-Agent": BROWSER_UA,
             ...reqHeaders,
           },
-          timeout: WEB_FETCH_TIMEOUT_MS,
+          timeout: timeoutMs,
         },
         (response) => {
           const chunks = [];

@@ -302,6 +302,7 @@ export default function MessageList({ messages, loading, onRefine, onRetry, onRe
           if (msg._hidden) return null;
           const isUser = msg.role === "user";
           const isStreaming = loading && !isUser && i === messages.length - 1;
+          const isDeepAnalysis = !isUser && !!msg._deepAnalysis;
           const sourceUrlMap = isUser ? null : findNearestSourceUrlMap(messages, i);
           return (
             <motion.div
@@ -361,8 +362,19 @@ export default function MessageList({ messages, loading, onRefine, onRetry, onRe
                   <div className="flex items-start gap-2.5">
                     <AiIcon />
                     <div
-                      className="bg-dark-800/70 text-dark-100 border border-dark-700/30 rounded-2xl rounded-tl-sm px-4 py-2.5 min-w-[56px] text-sm leading-relaxed break-words markdown-body"
+                      className={`text-dark-100 rounded-2xl rounded-tl-sm px-4 py-2.5 min-w-[56px] text-sm leading-relaxed break-words markdown-body border ${
+                        isDeepAnalysis
+                          ? "bg-dark-800/80 border-sky-300/20 shadow-[0_8px_24px_rgba(2,12,32,0.35)]"
+                          : "bg-dark-800/70 border-dark-700/30"
+                      }`}
                     >
+                      {isDeepAnalysis && (
+                        <div className="mb-2 flex items-center gap-2 text-[10px]">
+                          <span className="w-1.5 h-1.5 rounded-full bg-sky-300/90" />
+                          <span className="font-medium tracking-wide uppercase text-sky-200/90">Deep Analysis</span>
+                          <span className="h-px flex-1 bg-sky-300/20" />
+                        </div>
+                      )}
                       {msg._imageUrl ? (
                         <img
                           src={msg._imageUrl}

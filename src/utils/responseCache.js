@@ -1,4 +1,4 @@
-// TOKEN OPTIMIZATION: Session response cache keyed by model + normalized prompt.
+// TOKEN OPTIMIZATION: Session response cache keyed by chat + model + normalized prompt.
 
 const RESPONSE_CACHE_KEY = "kp_response_cache_v1";
 const DEFAULT_MAX_ENTRIES = 100;
@@ -43,8 +43,8 @@ export function loadSessionResponseCache() {
   return loadRawCache();
 }
 
-export function makeResponseCacheKey({ provider, modelId, userText }) {
-  const normalized = `${provider || "unknown"}:${modelId || ""}:${safeLowerText(userText)}`;
+export function makeResponseCacheKey({ chatId, provider, modelId, userText }) {
+  const normalized = `${chatId || "global"}:${provider || "unknown"}:${modelId || ""}:${safeLowerText(userText)}`;
   return `resp_${hashString(normalized)}`;
 }
 

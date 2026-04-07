@@ -20,6 +20,8 @@ export default function MessageInput({
   responseLength = "medium",
   onResponseLengthChange,
   estimatedTokens = 0,
+  contextWindowLimitTokens = 0,
+  showDeepAnalysisVisualizer = false,
   lastSentTokens = 0,
   lastReceivedTokens = 0,
   sendShortcut = "Ctrl+Enter",
@@ -93,117 +95,191 @@ export default function MessageInput({
   const showWebModeControl = webSearchEnabled && onWebSearchModeChange;
   const showResponseLengthControl = !!onResponseLengthChange;
   const showControlBar = showReasoningControl || showWebModeControl || showResponseLengthControl;
+  const showSecondaryControls = showWebModeControl || showResponseLengthControl;
+
+  const estimatedInputTokens = Math.max(0, Math.round(Number(estimatedTokens) || 0));
+  const contextLimit = Number(contextWindowLimitTokens);
+  const hasContextLimit = Number.isFinite(contextLimit) && contextLimit > 0;
+  const contextPercent = hasContextLimit
+    ? Math.max(0, Math.min(100, (estimatedInputTokens / contextLimit) * 100))
+    : 0;
+  const contextPercentRounded = Math.round(contextPercent);
+
+  const contextToneClass = contextPercent >= 92
+    ? "text-red-300"
+    : contextPercent >= 80
+      ? "text-amber-300"
+      : "text-emerald-300";
+
+  const estInputClass = hasContextLimit
+    ? contextPercent >= 85
+      ? "text-amber-300"
+      : "text-dark-500"
+    : estimatedInputTokens > 3000
+      ? "text-amber-300"
+      : "text-dark-500";
+
+  const showDeepPanel = !!showDeepAnalysisVisualizer;
 
   return (
     <div data-message-composer className="shrink-0 pb-5 pt-2 px-4">
       <div className="max-w-[1400px] mx-auto relative w-full">
-        {showControlBar && (
-          <div className="mb-2 px-1 flex flex-wrap items-center gap-2 justify-between">
-            {showReasoningControl && (
-              <div className="flex flex-wrap items-center gap-2">
-              <span
-                className="text-[11px] text-dark-400"
-                title="Controls how deeply the AI thinks before answering"
-              >
-                Reasoning:
-              </span>
-              {[
-                { id: "fast", label: "Fast" },
-                { id: "balanced", label: "Balanced" },
-                { id: "deep", label: "Deep" },
-              ].map((option) => (
-                <button
-                  key={option.id}
-                  type="button"
-                  title="Controls how deeply the AI thinks before answering"
-                  onClick={() => onReasoningDepthChange?.(option.id)}
-                  className={`px-3 py-1.5 rounded-full text-[11px] font-medium border transition-all cursor-pointer ${
-                    reasoningDepth === option.id
-                      ? "text-saffron-200 border-saffron-400/35 bg-saffron-500/14 shadow-[0_0_18px_rgba(245,158,11,0.12)]"
-                      : "text-dark-400 border-white/[0.08] bg-white/[0.02] hover:text-dark-200 hover:bg-white/[0.04]"
+        {(showControlBar || showDeepPanel) && (
+          <div className="mb-1 px-1">
+            <div className={`flex flex-wrap items-center gap-1.5 ${
+              showControlBar && showDeepPanel
+                ? "justify-between"
+                : showControlBar
+                  ? "justify-start"
+                  : "justify-end"
+            }`}>
+              {showControlBar && (
+                <div className="flex flex-wrap items-center gap-1 min-w-0 flex-1">
+                  {showReasoningControl && (
+                    <div className="inline-flex items-center gap-1 rounded-xl border border-white/[0.09] bg-white/[0.015] px-1 py-0.5">
+                      <span
+                        className="hidden xl:inline text-[9px] font-semibold uppercase tracking-[0.08em] text-dark-400 px-1"
+                        title="Controls how deeply the AI thinks before answering"
+                      >
+                        Reason
+                      </span>
+                      <div className="inline-flex items-center gap-0.5 h-6 rounded-full border border-white/[0.07] bg-white/[0.03] p-0.5">
+                        {[
+                          { id: "fast", label: "Fast" },
+                          { id: "balanced", label: "Balanced" },
+                          { id: "deep", label: "Deep" },
+                        ].map((option) => (
+                          <button
+                            key={option.id}
+                            type="button"
+                            title="Controls how deeply the AI thinks before answering"
+                            onClick={() => onReasoningDepthChange?.(option.id)}
+                            className={`h-5 min-w-[40px] xl:min-w-[46px] px-2 rounded-full text-[9px] xl:text-[10px] font-medium transition-colors cursor-pointer ${
+                              reasoningDepth === option.id
+                                ? "text-saffron-200 bg-saffron-500/18 border border-saffron-400/35"
+                                : "text-dark-400 hover:text-dark-200 hover:bg-white/[0.05] border border-transparent"
+                            }`}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {showWebModeControl && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.18, ease }}
+                      className="inline-flex items-center gap-1 rounded-xl border border-sky-500/22 bg-dark-900/65 px-1 py-0.5"
+                      title="Web search mode"
+                    >
+                      <span className="hidden xl:inline text-[9px] font-semibold uppercase tracking-[0.08em] text-sky-300/80 px-1">
+                        Web
+                      </span>
+                      <div className="inline-flex items-center gap-0.5 h-6 rounded-full border border-white/[0.07] bg-white/[0.03] p-0.5">
+                        {[
+                          { id: "fast", label: "Fast" },
+                          { id: "deep", label: "Deep" },
+                        ].map((mode) => (
+                          <button
+                            key={mode.id}
+                            type="button"
+                            onClick={() => onWebSearchModeChange(mode.id)}
+                            className={`h-5 min-w-[38px] xl:min-w-[42px] px-2 rounded-full text-[9px] xl:text-[10px] font-medium transition-colors cursor-pointer ${
+                              webSearchMode === mode.id
+                                ? "text-sky-200 bg-sky-500/20 border border-sky-400/30"
+                                : "text-dark-400 hover:text-dark-200 hover:bg-white/[0.05] border border-transparent"
+                            }`}
+                          >
+                            {mode.label}
+                          </button>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {showResponseLengthControl && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.18, ease }}
+                      className="inline-flex items-center gap-1 rounded-xl border border-white/[0.09] bg-dark-900/70 px-1 py-0.5"
+                      title="Reply length"
+                    >
+                      <span className="hidden xl:inline text-[9px] font-semibold uppercase tracking-[0.08em] text-dark-300 px-1">
+                        Reply
+                      </span>
+                      <div className="inline-flex items-center gap-0.5 h-6 rounded-full border border-white/[0.08] bg-white/[0.02] p-0.5">
+                        {[
+                          { id: "short", label: "Short", hint: "~128" },
+                          { id: "medium", label: "Medium", hint: "~512" },
+                          { id: "long", label: "Long", hint: "~1024" },
+                        ].map((option) => (
+                          <button
+                            key={option.id}
+                            type="button"
+                            onClick={() => onResponseLengthChange(option.id)}
+                            className={`h-5 min-w-[38px] xl:min-w-[46px] px-1.5 xl:px-2 rounded-full text-[9px] xl:text-[10px] font-medium transition-colors cursor-pointer ${
+                              responseLength === option.id
+                                ? "text-saffron-200 bg-saffron-500/18 border border-saffron-400/35"
+                                : "text-dark-400 hover:text-dark-200 hover:bg-white/[0.05] border border-transparent"
+                            }`}
+                            title={`${option.label} response (${option.hint} tokens)`}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+                </div>
+              )}
+
+              {showDeepPanel && (
+                <motion.div
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.2, ease }}
+                  className={`rounded-xl border border-white/[0.09] bg-black/25 px-2.5 py-2 ${
+                    showControlBar ? "shrink-0 w-[186px] sm:w-[198px] xl:w-[220px]" : "w-[186px] sm:w-[198px] max-w-[78vw]"
                   }`}
                 >
-                  {option.label}
-                </button>
-              ))}
-              </div>
-            )}
+                  <div className="flex items-center justify-between gap-2 text-[10px]">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="w-1.5 h-1.5 rounded-full bg-sky-300/90 shrink-0" />
+                      <span className="text-dark-200 font-medium tracking-wide uppercase">Context window</span>
+                    </div>
+                    <span className={`font-semibold shrink-0 ${hasContextLimit ? contextToneClass : "text-dark-500"}`}>
+                      {hasContextLimit ? `${contextPercentRounded}%` : "n/a"}
+                    </span>
+                  </div>
 
-            {showWebModeControl && (
-              <motion.div
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.18, ease }}
-                className="inline-flex items-center gap-1.5 rounded-2xl border border-sky-500/25 bg-dark-900/70 backdrop-blur-md px-2 py-1 shadow-[0_8px_24px_rgba(2,6,23,0.45)]"
-                title="Web search mode"
-              >
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-sky-300/80 px-1">
-                  Web
-                </span>
-                <div className="inline-flex items-center gap-0.5 h-7 rounded-full border border-white/[0.07] bg-white/[0.03] p-0.5">
-                  {[
-                    { id: "fast", label: "Fast" },
-                    { id: "deep", label: "Deep" },
-                  ].map((mode) => (
-                    <button
-                      key={mode.id}
-                      type="button"
-                      onClick={() => onWebSearchModeChange(mode.id)}
-                      className={`h-6 px-2.5 rounded-full text-[10px] font-medium transition-colors cursor-pointer ${
-                        webSearchMode === mode.id
-                          ? "text-sky-200 bg-sky-500/20 border border-sky-400/30"
-                          : "text-dark-400 hover:text-dark-200 hover:bg-white/[0.05] border border-transparent"
-                      }`}
-                    >
-                      {mode.label}
-                    </button>
-                  ))}
-                </div>
-              </motion.div>
-            )}
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <div className="h-1.5 flex-1 rounded-full bg-white/[0.08] overflow-hidden">
+                      <div
+                        className={`h-full transition-all duration-500 ${
+                          contextPercent >= 92
+                            ? "bg-red-400/90"
+                            : contextPercent >= 80
+                              ? "bg-amber-400/90"
+                              : "bg-sky-400/90"
+                        }`}
+                        style={{ width: `${hasContextLimit ? contextPercent : 0}%` }}
+                      />
+                    </div>
+                    <span className="text-[9px] text-dark-400 shrink-0 tabular-nums">
+                      {estimatedInputTokens}/{hasContextLimit ? Math.round(contextLimit) : "?"}
+                    </span>
+                  </div>
 
-            {showResponseLengthControl && (
-              <motion.div
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.18, ease }}
-                className="inline-flex items-center gap-1.5 rounded-2xl border border-amber-500/25 bg-dark-900/70 backdrop-blur-md px-2 py-1 shadow-[0_8px_24px_rgba(2,6,23,0.45)]"
-                title="Response length"
-              >
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-300/85 px-1">
-                  Reply
-                </span>
-                <div className="inline-flex items-center gap-0.5 h-7 rounded-full border border-white/[0.07] bg-white/[0.03] p-0.5">
-                  {[
-                    { id: "short", label: "Short", hint: "~128" },
-                    { id: "medium", label: "Medium", hint: "~512" },
-                    { id: "long", label: "Long", hint: "~1024" },
-                  ].map((option) => (
-                    <button
-                      key={option.id}
-                      type="button"
-                      onClick={() => onResponseLengthChange(option.id)}
-                      className={`h-6 px-2.5 rounded-full text-[10px] font-medium transition-colors cursor-pointer ${
-                        responseLength === option.id
-                          ? "text-amber-200 bg-amber-500/20 border border-amber-400/30"
-                          : "text-dark-400 hover:text-dark-200 hover:bg-white/[0.05] border border-transparent"
-                      }`}
-                      title={`${option.label} response (${option.hint} tokens)`}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </div>
-        )}
-
-        {showReasoningControl && reasoningDepth === "deep" && (
-          <div className="mb-2 px-1">
-            <p className="text-[10px] text-saffron-300/80">
-              Deep reasoning may increase cost and response time.
-            </p>
+                  <div className="hidden xl:block mt-1 text-[9px] text-dark-500">
+                    Deep mode active
+                  </div>
+                </motion.div>
+              )}
+            </div>
           </div>
         )}
 
@@ -339,8 +415,8 @@ export default function MessageInput({
         </motion.form>
 
         <div className="mt-1.5 px-1 flex items-center justify-between text-[10px]">
-          <span className={estimatedTokens > 3000 ? "text-amber-300" : "text-dark-500"}>
-            Est. input: ~{Math.max(0, Math.round(Number(estimatedTokens) || 0))} tokens
+          <span className={estInputClass}>
+            Est. input: ~{estimatedInputTokens} tokens
           </span>
           <span className="text-dark-500">
             Last: {Math.max(0, Math.round(Number(lastSentTokens) || 0))} in / {Math.max(0, Math.round(Number(lastReceivedTokens) || 0))} out

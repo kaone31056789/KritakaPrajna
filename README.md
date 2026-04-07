@@ -4,7 +4,7 @@
 
 ### AI Desktop Workspace for Builders, Researchers, and Power Users
 
-<a href="https://github.com/kaone31056789/KritakaPrajna/releases"><img src="https://img.shields.io/badge/Release-v2.8.0-22c55e?style=for-the-badge&logo=github" alt="Release"></a>
+<a href="https://github.com/kaone31056789/KritakaPrajna/releases"><img src="https://img.shields.io/badge/Release-v2.8.5-22c55e?style=for-the-badge&logo=github" alt="Release"></a>
 <img src="https://img.shields.io/badge/Windows-Supported-2563eb?style=for-the-badge&logo=windows" alt="Windows">
 <img src="https://img.shields.io/badge/Electron-35.x-0ea5e9?style=for-the-badge&logo=electron" alt="Electron">
 <img src="https://img.shields.io/badge/React-18-0891b2?style=for-the-badge&logo=react" alt="React">
@@ -35,7 +35,7 @@
 10. [Project Structure](#project-structure)
 11. [Security and Privacy](#security-and-privacy)
 12. [Troubleshooting](#troubleshooting)
-13. [Release Notes (v2.8.0)](#release-notes-v280)
+13. [Release Notes (v2.8.5)](#release-notes-v285)
 14. [Contributing](#contributing)
 15. [Support](#support)
 
@@ -184,7 +184,7 @@ Actual model availability depends on active provider keys and provider-side mode
 ### Option A: Installer (Recommended)
 
 1. Open Releases: https://github.com/kaone31056789/KritakaPrajna/releases
-2. Download `KritakaPrajna-Setup-2.8.0.exe`
+2. Download `KritakaPrajna-Setup-2.8.5.exe`
 3. Install and launch
 4. Add your API keys in Settings
 
@@ -319,13 +319,28 @@ dist/               Installer output (generated)
 - Remove stale generated artifacts from `build/` and `dist/`.
 - Re-run `npm install` and then `npm run dist`.
 
-## Release Notes (v2.8.0)
+## Release Notes (v2.8.5)
 
-- Added Ollama as a first-class provider across routing, model selection, and settings
-- Upgraded Model Advisor with better provider-aware ranking and stronger value picks
-- Improved token optimization controls and response-length handling
-- Added new UI screenshots for onboarding, main chat, and settings
-- Updated release metadata and installer target to v2.8.0
+- Version update and new Windows installer target: `KritakaPrajna-Setup-2.8.5.exe`
+- Fixed response cache scope issues:
+  - cache keys are now chat-specific to prevent cross-chat response leakage
+  - regenerate/retry paths now bypass cache for fresh responses
+- Upgraded token optimization pipeline:
+  - moved from hard trim behavior to adaptive, model-aware token budgeting
+  - improved semantic condensation and overflow summarization for long prompts/history
+- Added deep-analysis context visibility improvements:
+  - context window visualizer now tracks composer token usage more clearly
+  - deep-analysis visibility logic improved so relevant UI appears when expected
+- Improved professional UX for windowed mode:
+  - compact responsive control layout for Reasoning/Web/Reply controls
+  - cleaner alignment and reduced vertical spacing in the composer
+  - compact context panel styling for non-fullscreen workflows
+- Fixed Ollama Cloud usage display behavior:
+  - stricter parsing for cloud usage values
+  - prevents misleading zero/empty usage states in UI
+- Added Memory export workflow in Settings:
+  - new Export action for user memory as JSON
+  - native Electron save dialog support for export destination
 
 ## Contributing
 

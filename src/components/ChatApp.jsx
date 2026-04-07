@@ -43,7 +43,9 @@ import {
   estimateTokensFromText,
   normalizeUserInputForSend,
   pickCheapestSummaryModel,
+  resolveAdaptiveTokenBudgets,
   resolveGenerationSettings,
+  shouldRelaxTokenMode,
 } from "../utils/tokenOptimizer";
 import {
   getCachedResponseEntry,
@@ -136,7 +138,7 @@ function saveSecondaryId(id) {
   localStorage.setItem(SECONDARY_CHAT_KEY, id || "");
 }
 
-function loadNumericSetting(key, fallback, min = 1, max = 20000) {
+function loadNumericSetting(key, fallback, min = 1, max = 200000) {
   try {
     const parsed = Number(localStorage.getItem(key));
     if (!Number.isFinite(parsed)) return fallback;
@@ -223,6 +225,11 @@ function isOllamaCloudKeyConfig(value) {
   return !/^https?:\/\//i.test(raw) && !raw.includes("localhost") && !raw.includes("127.0.0.1");
 }
 
+const DEEP_ANALYSIS_UI_RE = /\b(deep analysis|analyze deeply|in-depth analysis|detailed analysis|thorough analysis|deep dive|strategic analysis|comprehensive analysis)\b/i;
+function isDeepAnalysisPrompt(value) {
+  return DEEP_ANALYSIS_UI_RE.test(String(value || ""));
+}
+
 function formatCloudUsagePercent(value) {
   const amount = Number(value);
   if (!Number.isFinite(amount) || amount < 0) return "n/a";
@@ -230,6 +237,12 @@ function formatCloudUsagePercent(value) {
   if (amount >= 10) return `${Math.round(amount)}%`;
   if (amount >= 1) return `${amount.toFixed(1)}%`;
   return `${amount.toFixed(2)}%`;
+}
+
+function isFreePricedModel(model) {
+  const prompt = Number(model?.pricing?.prompt);
+  const completion = Number(model?.pricing?.completion);
+  return Number.isFinite(prompt) && Number.isFinite(completion) && prompt === 0 && completion === 0;
 }
 
 export default function ChatApp({ providers, onSaveProviderKey, onRemoveProviderKey, onResetAll }) {
@@ -247,6 +260,8 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
   const [error, setError] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [retryModelSearch, setRetryModelSearch] = useState("");
+  const [retryModelFilter, setRetryModelFilter] = useState("all");
   const [attachedFiles, setAttachedFiles] = useState([]);
   const [uploads, setUploads] = useState([]); // { id, name, type, dataUrl?, content?, size, ext }
   const [smartSuggestion, setSmartSuggestion] = useState(null);
@@ -304,19 +319,19 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
     HISTORY_WINDOW_KEY,
     DEFAULT_TOKEN_OPTIMIZATION_CONFIG.historyWindowSize,
     4,
-    30
+    60
   );
   const maxInputTokens = loadNumericSetting(
     MAX_INPUT_TOKENS_KEY,
     DEFAULT_TOKEN_OPTIMIZATION_CONFIG.maxInputTokens,
-    500,
-    20000
+    1000,
+    200000
   );
   const maxUserChars = loadNumericSetting(
     MAX_USER_CHARS_KEY,
     DEFAULT_TOKEN_OPTIMIZATION_CONFIG.maxUserChars,
-    500,
-    20000
+    2000,
+    250000
   );
 
   // Current chat's messages
@@ -324,6 +339,19 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
   const messages = activeChat?.messages || [];
   const secondaryChat = chats.find((c) => c.id === secondaryChatId && c.id !== activeChatId) || null;
   const splitViewActive = !!secondaryChat;
+
+  const retryPickerModels = React.useMemo(() => {
+    const term = String(retryModelSearch || "").trim().toLowerCase();
+    return models.filter((model) => {
+      const isFree = isFreePricedModel(model);
+      if (retryModelFilter === "free" && !isFree) return false;
+      if (retryModelFilter === "paid" && isFree) return false;
+
+      if (!term) return true;
+      const haystack = `${model?.name || ""} ${model?.id || ""} ${providerLabel(model?._provider || "")}`.toLowerCase();
+      return haystack.includes(term);
+    });
+  }, [models, retryModelSearch, retryModelFilter]);
 
   // Latest advisor data from the most recent AI message
   const latestAdvisor = React.useMemo(() => {
@@ -685,7 +713,18 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
     if (!models.length || !selectedModel) return;
 
     const current = findModelBySelection(models, selectedModel);
-    if (!current) return;
+    if (!current) {
+      const taskModels = filterModelsForTask(models, selectedTask);
+      const pool = taskModels.length > 0 ? taskModels : models;
+      const cheapest = findCheapestModel(pool, "general");
+      const fallback = cheapest?.model || pool[0];
+
+      if (fallback) {
+        setSelectedModel(toSelectionId(fallback));
+        setTokenNotice(`Selected model was unavailable. Switched to ${fallback.name || fallback.id}.`);
+      }
+      return;
+    }
 
     const taskModels = filterModelsForTask(models, selectedTask);
     if (taskModels.length === 0) return;
@@ -860,9 +899,30 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
     [models, providers]
   );
 
-  const estimatedComposerTokens = React.useMemo(() => {
-    const normalized = normalizeUserInputForSend(draftInputText, { maxChars: maxUserChars });
-    if (!normalized.text) return 0;
+  const composerTokenStats = React.useMemo(() => {
+    const selectedModelObj = findModelBySelection(models, selectedModel);
+    const modelContextRaw = Number(selectedModelObj?.context_length);
+    const modelContextTokens = Number.isFinite(modelContextRaw) && modelContextRaw > 0
+      ? modelContextRaw
+      : null;
+
+    const tokenBudgets = resolveAdaptiveTokenBudgets(draftInputText, {
+      maxInputTokens,
+      maxUserChars,
+      modelContextTokens,
+    });
+    const contextWindowLimitTokens = Number.isFinite(tokenBudgets.maxInputTokens)
+      ? tokenBudgets.maxInputTokens
+      : (modelContextTokens || 0);
+
+    const normalized = normalizeUserInputForSend(draftInputText, { maxChars: tokenBudgets.maxUserChars });
+    if (!normalized.text) {
+      return {
+        estimatedTokens: 0,
+        contextWindowLimitTokens,
+        relaxed: tokenBudgets.relaxed,
+      };
+    }
 
     const chatHistory = messages.filter((m) => m.role === "user" || m.role === "assistant");
     const windowed = buildSlidingWindowHistory(chatHistory, historyWindowSize);
@@ -876,19 +936,61 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
       { role: "user", content: normalized.text },
     ];
 
-    return estimateTokensFromMessages(estimateMessages);
-  }, [draftInputText, maxUserChars, messages, historyWindowSize, getOptimizedSystemPrompt, systemPrompt, userMemory]);
+    return {
+      estimatedTokens: estimateTokensFromMessages(estimateMessages),
+      contextWindowLimitTokens,
+      relaxed: tokenBudgets.relaxed,
+    };
+  }, [
+    draftInputText,
+    maxInputTokens,
+    maxUserChars,
+    selectedModel,
+    messages,
+    historyWindowSize,
+    getOptimizedSystemPrompt,
+    systemPrompt,
+    userMemory,
+    models,
+  ]);
+
+  const latestUserDisplayText = React.useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const msg = messages[i];
+      if (msg?.role !== "user") continue;
+      const text = String(msg?._displayText || msg?.content || "").trim();
+      if (text) return text;
+    }
+    return "";
+  }, [messages]);
+
+  const showDeepAnalysisVisualizer =
+    reasoningDepth === "deep" ||
+    composerTokenStats.relaxed ||
+    shouldRelaxTokenMode(latestUserDisplayText) ||
+    (loading && shouldRelaxTokenMode(lastRequestRef.current?.text || ""));
 
   const handleSend = useCallback(
     async (text, opts = {}) => {
-      if (!selectedModel) return;
+      const requestedModelSelection = opts.modelOverride || selectedModel;
+      if (!requestedModelSelection) return;
+      const bypassCache = !!opts.bypassCache;
+      const selectedModelObj = findModelBySelection(models, requestedModelSelection);
 
-      // TOKEN OPTIMIZATION: normalize noisy input and enforce max character limit.
-      const normalizedInput = normalizeUserInputForSend(text, { maxChars: maxUserChars });
+      const tokenBudgets = resolveAdaptiveTokenBudgets(text, {
+        maxInputTokens,
+        maxUserChars,
+        modelContextTokens: selectedModelObj?.context_length,
+      });
+
+      // TOKEN OPTIMIZATION: normalize noisy input without hard trimming.
+      const normalizedInput = normalizeUserInputForSend(text, { maxChars: tokenBudgets.maxUserChars });
       if (!normalizedInput.text.trim()) return;
 
-      if (normalizedInput.truncated) {
-        setTokenNotice(`Input truncated to ${maxUserChars} characters to reduce token usage.`);
+      if (normalizedInput.condensed) {
+        setTokenNotice(`Applied semantic input condensation to reduce ${normalizedInput.condensedChars} chars without hard trimming.`);
+      } else if (tokenBudgets.relaxed) {
+        setTokenNotice("Deep/code mode enabled: unlimited input context and aggressive compression disabled.");
       } else {
         setTokenNotice("");
       }
@@ -933,7 +1035,6 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
       }
 
       // Run smart detection at send time (considers text for coding keywords)
-      const selectedModelObj = findModelBySelection(models, selectedModel);
       const lockTaskToSelectedModel = selectedTask === "text-to-image" || isImageGenModel(selectedModelObj);
       const autoTask = detectUiTask(processedText, uploads, attachedFiles);
       const effectiveTask = lockTaskToSelectedModel ? selectedTask : autoTask;
@@ -942,7 +1043,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
 
       // ── Show task suggestion banner (coding/vision/document) ──
       if (taskType !== "general") {
-        const suggestion = selectSmartModel(models, taskType, selectedModel, modelPref);
+        const suggestion = selectSmartModel(models, taskType, requestedModelSelection, modelPref);
         if (!suggestion.currentOk && suggestion.recommended) {
           setTaskBanner({
             visible: true,
@@ -963,12 +1064,12 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
 
       // ── Show cheapest model banner ──
       const cheapest = findCheapestModel(models, taskType, (m) => supportsTask(m, effectiveTask));
-      if (cheapest && toSelectionId(cheapest.model) !== selectedModel) {
+      if (cheapest && toSelectionId(cheapest.model) !== requestedModelSelection) {
         setCheapestBanner({
           visible: true,
           cheapestLabel: cheapest.costLabel,
           cheapestModelId: cheapest.model.id,
-          currentModelId: selectedModel,
+          currentModelId: requestedModelSelection,
           onUseCheapest: () => {
             setSelectedModel(toSelectionId(cheapest.model));
             setCheapestBanner(null);
@@ -978,11 +1079,11 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
       }
 
       // ── Check rate limit before sending ──
-      if (isModelUnavailable(selectedModel)) {
-        const fallback = findFallbackModel(models, selectedModel, taskType, qualityScore);
+      if (isModelUnavailable(requestedModelSelection)) {
+        const fallback = findFallbackModel(models, requestedModelSelection, taskType, qualityScore);
         setRateLimitBanner({
           visible: true,
-          modelId: selectedModel,
+          modelId: requestedModelSelection,
           fallbackModelId: fallback?.id || null,
           onSwitch: () => {
             if (fallback) setSelectedModel(toSelectionId(fallback));
@@ -1234,6 +1335,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
         ...attachedFiles.map((f) => ({ name: f.name, type: "file" })),
         ...uploads.map((u) => ({ name: u.name, type: u.type })),
       ];
+      const deepAnalysisMode = reasoningDepth === "deep" || isDeepAnalysisPrompt(processedText || sendText);
       const userMsg = {
         role: "user",
         content,
@@ -1241,9 +1343,10 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
         _attachments: allAttachments.length > 0 ? allAttachments : undefined,
         _webResults: webResults.length > 0 ? webResults : undefined,
         _webSearchAttempted: didAttemptWebSearch,
+        _deepAnalysis: deepAnalysisMode,
         _hidden: opts.silent || false,
       };
-      const aiMsg = { role: "assistant", content: "" };
+      const aiMsg = { role: "assistant", content: "", _deepAnalysis: deepAnalysisMode };
 
       // If a /fix command was used, attach original file data for diff viewer
       if (parsed && fileData) {
@@ -1273,7 +1376,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
         text: sendText,
         uploads: [...uploads],
         attachedFiles: [...attachedFiles],
-        modelUsed: selectedModel,
+        modelUsed: requestedModelSelection,
         chatId,
       };
 
@@ -1286,17 +1389,27 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
         ? userMsg
         : { ...userMsg, content: contentForSend };
 
-      const currentModelObj = findModelBySelection(models, selectedModel);
+      const currentModelObj = findModelBySelection(models, requestedModelSelection);
       const providerForRequest = currentModelObj?._provider || "openrouter";
-      const generationSettings = resolveGenerationSettings(providerForRequest, responseLength);
+      const baseGenerationSettings = resolveGenerationSettings(providerForRequest, responseLength);
+      const generationSettings = tokenBudgets.relaxed
+        ? {
+            ...baseGenerationSettings,
+            maxTokens: Math.min(
+              8192,
+              Math.max(baseGenerationSettings.maxTokens, tokenBudgets.minResponseTokens || 1536)
+            ),
+          }
+        : baseGenerationSettings;
 
       // TOKEN OPTIMIZATION: session cache shortcut for repeated prompts.
       const cacheKey = makeResponseCacheKey({
+        chatId,
         provider: providerForRequest,
-        modelId: currentModelObj?.id || selectedModel,
+        modelId: currentModelObj?.id || requestedModelSelection,
         userText: processedText,
       });
-      const cachedEntry = getCachedResponseEntry(responseCacheRef.current, cacheKey);
+      const cachedEntry = bypassCache ? null : getCachedResponseEntry(responseCacheRef.current, cacheKey);
       if (cachedEntry) {
         const cachedText = String(cachedEntry.response || "").trim() || "(No response)";
         const cachedUsage = cachedEntry.usage || null;
@@ -1313,7 +1426,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
               content: cachedText,
               usage: cachedUsage,
               _cached: true,
-              _modelUsed: currentModelObj?._selectionId || selectedModel,
+              _modelUsed: currentModelObj?._selectionId || requestedModelSelection,
             };
             return { ...c, messages: next };
           })
@@ -1323,7 +1436,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
         console.info("[TOKEN OPTIMIZATION] cache hit: response served from session cache.");
         abortRef.current = null;
         setLoading(false);
-        recordSuccess(selectedModel, Date.now() - startTime);
+        recordSuccess(requestedModelSelection, Date.now() - startTime);
         return;
       }
 
@@ -1332,13 +1445,15 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
       const apiHistory = [...(chatSnapshot?.messages || []), outboundUserMsg]
         .filter((m) => m.role === "user" || m.role === "assistant");
 
-      const firstWindow = buildSlidingWindowHistory(apiHistory, historyWindowSize);
+      const firstWindow = tokenBudgets.relaxed
+        ? { recentMessages: apiHistory, overflowMessages: [], overflowCount: 0 }
+        : buildSlidingWindowHistory(apiHistory, historyWindowSize);
       let summaryText = String(chatSnapshot?._historySummary || "");
       let summaryCursor = Number(chatSnapshot?._historyCursor || 0);
       if (!Number.isFinite(summaryCursor) || summaryCursor < 0) summaryCursor = 0;
       if (summaryCursor > firstWindow.overflowCount) summaryCursor = firstWindow.overflowCount;
 
-      if (firstWindow.overflowCount > summaryCursor) {
+      if (!tokenBudgets.relaxed && firstWindow.overflowCount > summaryCursor) {
         const newlyOverflowed = apiHistory.slice(summaryCursor, firstWindow.overflowCount);
         summaryText = await summarizeOverflowHistory({
           overflowMessages: newlyOverflowed,
@@ -1356,14 +1471,16 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
         );
       }
 
-      const secondWindow = buildSlidingWindowHistory(apiHistory, historyWindowSize);
+      const secondWindow = tokenBudgets.relaxed
+        ? { recentMessages: apiHistory, overflowMessages: [], overflowCount: 0 }
+        : buildSlidingWindowHistory(apiHistory, historyWindowSize);
       const optimizedSystemPrompt = getOptimizedSystemPrompt(systemPrompt, effectiveMemory);
       const promptHash = `${optimizedSystemPrompt.length}:${optimizedSystemPrompt.slice(0, 64)}`;
       const canUsePromptReference = chatSnapshot?._systemPromptHash === promptHash;
       const systemSeed = canUsePromptReference
         ? "Continue following the established system directives for this chat: concise answers, fenced code blocks, and strict shell/web formatting rules."
         : optimizedSystemPrompt;
-      const systemWithSummary = summaryText
+      const systemWithSummary = !tokenBudgets.relaxed && summaryText
         ? `${systemSeed}\n\n[Condensed conversation context]\n${summaryText}`
         : systemSeed;
 
@@ -1382,11 +1499,13 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
         ...secondWindow.recentMessages,
       ];
 
-      const budgetApplied = enforceInputTokenBudget(toSend, maxInputTokens);
+      const budgetApplied = enforceInputTokenBudget(toSend, tokenBudgets.maxInputTokens);
       toSend = budgetApplied.messages;
 
-      if (budgetApplied.droppedCount > 0) {
-        setTokenNotice(`Trimmed ${budgetApplied.droppedCount} old message(s) to stay under ~${maxInputTokens} tokens.`);
+      if (!tokenBudgets.relaxed && budgetApplied.compressedCount > 0) {
+        setTokenNotice(`Compressed ${budgetApplied.compressedCount} older message(s) to fit context budget without removing turns.`);
+      } else if (!tokenBudgets.relaxed && budgetApplied.overBudget) {
+        setTokenNotice("Context is still large. Some providers may be slower for this request.");
       }
 
       setLastTokenStats((prev) => ({ ...prev, sent: budgetApplied.estimatedTokens }));
@@ -1436,13 +1555,13 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
                 cost,
                 isFree: free,
                 usage: resolvedUsage,
-                _modelUsed: currentModelObj?._selectionId || selectedModel,
+                _modelUsed: currentModelObj?._selectionId || requestedModelSelection,
               };
               return { ...c, messages: next };
             })
           );
           setLoading(false);
-          recordSuccess(selectedModel, Date.now() - startTime);
+          recordSuccess(requestedModelSelection, Date.now() - startTime);
           return;
         }
 
@@ -1455,7 +1574,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
 
         const result = await routeStream(
           providers,
-          currentModelObj || { id: selectedModel.includes("::") ? selectedModel.split("::").slice(1).join("::") : selectedModel, _provider: "openrouter" },
+          currentModelObj || { id: requestedModelSelection.includes("::") ? requestedModelSelection.split("::").slice(1).join("::") : requestedModelSelection, _provider: "openrouter" },
           toSend,
           {
             signal: controller.signal,
@@ -1501,18 +1620,18 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
         responseCacheRef.current = setCachedResponseEntry(responseCacheRef.current, cacheKey, {
           response: result.text || "",
           usage: resolvedUsage,
-          modelUsed: currentModelObj?._selectionId || selectedModel,
+          modelUsed: currentModelObj?._selectionId || requestedModelSelection,
         });
 
         // Record success for rate limiter
         const responseTime = Date.now() - startTime;
-        recordSuccess(selectedModel, responseTime);
+        recordSuccess(requestedModelSelection, responseTime);
 
         // Generate advisor data
         const taskTypeForAdvisor = uiTaskToAdvisorTask(effectiveTask, processedText || sendText, uploads, attachedFiles);
         const advisor = generateAdvisorData({
           models,
-          currentModelId: currentModelObj?._selectionId || selectedModel,
+          currentModelId: currentModelObj?._selectionId || requestedModelSelection,
           taskType: taskTypeForAdvisor,
           cost,
           usage: resolvedUsage,
@@ -1533,7 +1652,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
               cost: cost,
               isFree: free,
               usage: resolvedUsage,
-              _modelUsed: currentModelObj?._selectionId || selectedModel,
+              _modelUsed: currentModelObj?._selectionId || requestedModelSelection,
               _advisorData: advisor,
             };
             return { ...c, messages: next };
@@ -1563,20 +1682,20 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
           setLastError(errMsg);
 
           // Record failure for rate limiter
-          recordFailure(selectedModel, errMsg);
+          recordFailure(requestedModelSelection, errMsg);
 
           // Show rate limit banner — prefer same-provider fallback, then cross-provider
           const taskType = uiTaskToAdvisorTask(selectedTask, sendText, uploads, attachedFiles);
-          const sameProviderFallback = findFallbackModel(models.filter((m) => supportsTask(m, selectedTask)), selectedModel, taskType, qualityScore);
+          const sameProviderFallback = findFallbackModel(models.filter((m) => supportsTask(m, selectedTask)), requestedModelSelection, taskType, qualityScore);
           const crossProviderFallback = !sameProviderFallback
-            ? suggestFallbackAcrossProviders(models, selectedModel, providers)
+            ? suggestFallbackAcrossProviders(models, requestedModelSelection, providers)
             : null;
           const fallback = sameProviderFallback || crossProviderFallback?.model;
           const fallbackMsg = crossProviderFallback?.message;
           if (fallback) {
             setRateLimitBanner({
               visible: true,
-              modelId: selectedModel,
+              modelId: requestedModelSelection,
               fallbackModelId: fallback.id,
               crossProviderMessage: fallbackMsg || null,
               onSwitch: () => {
@@ -1654,6 +1773,8 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
 
       if (mode === "better") {
         // Open model picker — user chooses the model, then we regenerate
+        setRetryModelSearch("");
+        setRetryModelFilter("all");
         setModelPickerOpen(true);
         return;
       }
@@ -1671,7 +1792,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
 
       setError("");
       setLastError(null);
-      setTimeout(() => handleSend(last.text), 50);
+      setTimeout(() => handleSend(last.text, { bypassCache: true }), 50);
     },
     [activeChatId, handleSend]
   );
@@ -1712,7 +1833,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
 
       setError("");
       setLastError(null);
-      setTimeout(() => handleSend(last.text), 80);
+      setTimeout(() => handleSend(last.text, { modelOverride: modelSelId, bypassCache: true }), 80);
     },
     [activeChatId, handleSend, selectModelAndSyncTask]
   );
@@ -2228,7 +2349,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
           </div>
 
           {/* ── Providers ── */}
-          {isOllamaCloudKeyConfig(providers?.ollama) && (
+          {isOllamaCloudKeyConfig(providers?.ollama) && (Number.isFinite(Number(ollamaCloudUsage?.sessionPercent)) || Number.isFinite(Number(ollamaCloudUsage?.weeklyPercent))) && (
             <div className="space-y-1.5 border-t border-white/[0.04] pt-2">
               <p className="text-[10px] text-dark-500 uppercase tracking-wider">Ollama Cloud</p>
               <div className="flex items-center justify-between text-[11px]">
@@ -2633,7 +2754,9 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
           onReasoningDepthChange={setReasoningDepth}
           responseLength={responseLength}
           onResponseLengthChange={setResponseLength}
-          estimatedTokens={estimatedComposerTokens}
+          estimatedTokens={composerTokenStats.estimatedTokens}
+          contextWindowLimitTokens={composerTokenStats.contextWindowLimitTokens}
+          showDeepAnalysisVisualizer={showDeepAnalysisVisualizer}
           lastSentTokens={lastTokenStats.sent}
           lastReceivedTokens={lastTokenStats.received}
           sendShortcut={shortcuts.sendMessage}
@@ -2700,10 +2823,47 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>
               </div>
+              <div className="px-4 py-3 border-b border-white/[0.06] space-y-2.5">
+                <input
+                  type="text"
+                  value={retryModelSearch}
+                  onChange={(e) => setRetryModelSearch(e.target.value)}
+                  placeholder="Search by model, id, or provider"
+                  className="w-full h-9 rounded-lg border border-white/[0.08] bg-dark-800/70 px-3 text-sm text-dark-100 placeholder:text-dark-500 outline-none focus:border-saffron-500/40"
+                />
+                <div className="flex items-center gap-2">
+                  {[
+                    { id: "all", label: "All" },
+                    { id: "free", label: "Free" },
+                    { id: "paid", label: "Paid" },
+                  ].map((opt) => {
+                    const active = retryModelFilter === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => setRetryModelFilter(opt.id)}
+                        className={`px-2.5 h-7 rounded-md text-[11px] border transition-colors cursor-pointer ${
+                          active
+                            ? "border-saffron-500/35 bg-saffron-500/15 text-saffron-300"
+                            : "border-white/[0.08] bg-dark-800/60 text-dark-300 hover:bg-dark-700/70"
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                  <span className="ml-auto text-[10px] text-dark-500">{retryPickerModels.length} models</span>
+                </div>
+              </div>
               <div className="overflow-y-auto flex-1 p-2">
-                {models.map((m) => {
+                {retryPickerModels.length === 0 && (
+                  <div className="px-3 py-8 text-center text-xs text-dark-500">No models match your filters.</div>
+                )}
+                {retryPickerModels.map((m) => {
                   const sid = toSelectionId(m);
                   const isCurrent = sid === selectedModel;
+                  const free = isFreePricedModel(m);
                   return (
                     <button
                       key={sid}
@@ -2719,6 +2879,13 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
                         <p className="text-sm text-white truncate">{m.name || m.id}</p>
                         <p className="text-[10px] text-dark-500 truncate">{providerLabel(m._provider)} · {m.id}</p>
                       </div>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-md border shrink-0 ${
+                        free
+                          ? "text-emerald-300 border-emerald-400/25 bg-emerald-500/10"
+                          : "text-amber-300 border-amber-400/25 bg-amber-500/10"
+                      }`}>
+                        {free ? "Free" : "Paid"}
+                      </span>
                       {isCurrent && <span className="text-[10px] text-dark-500 shrink-0">current</span>}
                     </button>
                   );

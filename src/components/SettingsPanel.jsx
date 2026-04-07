@@ -320,6 +320,7 @@ function MemoryEditor({ memory, onSaveMemory, onResetMemory }) {
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
   const [copied, setCopied] = useState(false);
+  const [notice, setNotice] = useState("");
   const MAX_VISIBLE_MEMORY_CHIPS = 8;
   const [importState, setImportState] = useState({
     open: false,
@@ -392,7 +393,56 @@ function MemoryEditor({ memory, onSaveMemory, onResetMemory }) {
 
   const saveMemory = async (nextMemory) => {
     setError("");
+    setNotice("");
     await onSaveMemory?.(normalizeUserMemory(nextMemory));
+  };
+
+  const handleExportMemory = async () => {
+    setError("");
+    setNotice("");
+
+    const stamp = new Date();
+    const fileDate = stamp.toISOString().slice(0, 10);
+    const suggestedName = `openrouter-memory-${fileDate}.json`;
+    const exportPayload = {
+      exportedAt: stamp.toISOString(),
+      memory: normalized,
+    };
+    const content = JSON.stringify(exportPayload, null, 2);
+
+    try {
+      if (window.electronAPI?.exportMemory) {
+        const result = await window.electronAPI.exportMemory({
+          suggestedName,
+          content,
+        });
+
+        if (result?.canceled) {
+          setNotice("Export canceled.");
+          return;
+        }
+
+        if (!result?.ok) {
+          throw new Error(result?.error || "Could not export memory.");
+        }
+
+        setNotice(result?.path ? `Memory exported: ${result.path}` : "Memory exported.");
+        return;
+      }
+
+      const blob = new Blob([content], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = suggestedName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      setNotice("Memory exported.");
+    } catch (exportErr) {
+      setError(exportErr?.message || "Could not export memory.");
+    }
   };
 
   const handleAdd = async () => {
@@ -650,6 +700,13 @@ function MemoryEditor({ memory, onSaveMemory, onResetMemory }) {
           </button>
           <button
             type="button"
+            onClick={handleExportMemory}
+            className="text-xs font-medium text-sky-200 px-3 py-1.5 rounded-full border border-sky-500/35 bg-sky-500/10 hover:bg-sky-500/18 hover:border-sky-400/55 transition-all cursor-pointer"
+          >
+            Export
+          </button>
+          <button
+            type="button"
             onClick={handleClearAll}
             className="text-xs text-dark-500 hover:text-red-400 px-3 py-1.5 rounded-full transition-colors cursor-pointer"
           >
@@ -657,6 +714,8 @@ function MemoryEditor({ memory, onSaveMemory, onResetMemory }) {
           </button>
         </div>
       </div>
+
+      {notice && <p className="text-xs text-emerald-300">{notice}</p>}
 
       {/* ── Add Memory ── */}
       <div className="space-y-3">
@@ -1342,9 +1401,7 @@ function OllamaCloudUsagePanel({ ollamaValue }) {
       .then((result) => {
         if (cancelled) return;
         setUsage(result || null);
-        if (result && !result.available) {
-          setErr("Connected, but this account response does not include usage percentages yet.");
-        }
+        setErr("");
       })
       .catch((error) => {
         if (cancelled) return;
@@ -1381,6 +1438,7 @@ function OllamaCloudUsagePanel({ ollamaValue }) {
 
   const session = usage?.session || {};
   const weekly = usage?.weekly || {};
+  const hasMetrics = !!usage?.available;
 
   const rows = [
     { label: "Session usage", value: session.percentUsed, resetsIn: session.resetsIn, usedLimit: formatUsedLimit(session.used, session.limit) },
@@ -1417,6 +1475,13 @@ function OllamaCloudUsagePanel({ ollamaValue }) {
         <p className="text-xs text-red-400">{err}</p>
       )}
 
+      {!loading && usage && !hasMetrics && !err && (
+        <p className="text-xs text-dark-400">
+          Usage percentages are not exposed by this Ollama account API response. Open your account page for live quota details.
+        </p>
+      )}
+
+      {hasMetrics && (
       <div className="space-y-3">
         {rows.map((row) => (
           <div key={row.label} className="space-y-1.5">
@@ -1441,6 +1506,7 @@ function OllamaCloudUsagePanel({ ollamaValue }) {
           </div>
         ))}
       </div>
+      )}
 
       <button
         type="button"

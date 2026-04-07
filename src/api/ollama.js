@@ -42,7 +42,7 @@ function getElectronApi() {
   return null;
 }
 
-async function requestText(baseUrl, path, { method = "GET", headers = {}, body = "" } = {}) {
+async function requestText(baseUrl, path, { method = "GET", headers = {}, body = "", timeoutMs } = {}) {
   const electronApi = getElectronApi();
 
   if (electronApi?.ollamaApiRequest) {
@@ -52,6 +52,7 @@ async function requestText(baseUrl, path, { method = "GET", headers = {}, body =
       method,
       headers,
       body,
+      timeoutMs,
     });
 
     if (!result?.ok) {
@@ -323,7 +324,9 @@ function pickFirstReset(values = []) {
 
 function extractUsageWindow(payload, windowName) {
   const normalizedWindow = normalizeUsageKey(windowName);
-  const section = findSectionObject(payload, normalizedWindow) || payload;
+  const sectionCandidate = findSectionObject(payload, normalizedWindow);
+  const section = sectionCandidate || payload;
+  const hasWindowSection = !!sectionCandidate;
 
   const percent = pickFirstPercent([
     ...collectValuesByKeyHints(section, [
@@ -331,18 +334,18 @@ function extractUsageWindow(payload, windowName) {
       `${normalizedWindow}percentused`,
       `${normalizedWindow}percentageused`,
       `${normalizedWindow}percent`,
-      "usagepercent",
-      "usedpercent",
-      "percentageused",
-      "percent",
-      "percentage",
-      "ratio",
+      ...(hasWindowSection
+        ? ["usagepercent", "usedpercent", "percentageused", "percent", "percentage", "ratio"]
+        : []),
     ]),
     ...collectValuesByKeyHints(payload, [
       `${normalizedWindow}usagepercent`,
       `${normalizedWindow}percentused`,
+      `${normalizedWindow}percentageused`,
       `${normalizedWindow}percent`,
-      `${normalizedWindow}ratio`,
+      `${normalizedWindow}percentage`,
+      `${normalizedWindow}usedratio`,
+      `${normalizedWindow}usageratio`,
     ]),
   ]);
 
@@ -351,17 +354,13 @@ function extractUsageWindow(payload, windowName) {
       `${normalizedWindow}used`,
       `${normalizedWindow}usage`,
       `${normalizedWindow}consumed`,
-      "used",
-      "usage",
-      "consumed",
-      "current",
-      "count",
-      "value",
+      ...(hasWindowSection ? ["used", "usage", "consumed"] : []),
     ]),
     ...collectValuesByKeyHints(payload, [
       `${normalizedWindow}used`,
       `${normalizedWindow}usage`,
-      `${normalizedWindow}count`,
+      `${normalizedWindow}consumed`,
+      `${normalizedWindow}current`,
     ]),
   ]);
 
@@ -371,17 +370,14 @@ function extractUsageWindow(payload, windowName) {
       `${normalizedWindow}quota`,
       `${normalizedWindow}max`,
       `${normalizedWindow}total`,
-      "limit",
-      "quota",
-      "max",
-      "total",
-      "capacity",
+      ...(hasWindowSection ? ["limit", "quota", "max", "total", "capacity"] : []),
     ]),
     ...collectValuesByKeyHints(payload, [
       `${normalizedWindow}limit`,
       `${normalizedWindow}quota`,
       `${normalizedWindow}max`,
       `${normalizedWindow}total`,
+      `${normalizedWindow}capacity`,
     ]),
   ]);
 
@@ -391,12 +387,7 @@ function extractUsageWindow(payload, windowName) {
       `${normalizedWindow}resetin`,
       `${normalizedWindow}resetat`,
       `${normalizedWindow}nextreset`,
-      "resetsin",
-      "resetin",
-      "resetat",
-      "nextreset",
-      "resetsat",
-      "reset",
+      ...(hasWindowSection ? ["resetsin", "resetin", "resetat", "nextreset", "resetsat", "reset"] : []),
     ]),
     ...collectValuesByKeyHints(payload, [
       `${normalizedWindow}resetsin`,
@@ -406,15 +397,22 @@ function extractUsageWindow(payload, windowName) {
     ]),
   ]);
 
+  const normalizedUsed = Number.isFinite(used) ? used : null;
+  const normalizedLimit = Number.isFinite(limit) ? limit : null;
+
   let percentUsed = percent;
-  if (percentUsed == null && used != null && limit != null && limit > 0) {
-    percentUsed = (used / limit) * 100;
+  if (percentUsed == null && normalizedUsed != null && normalizedLimit != null && normalizedLimit > 0) {
+    percentUsed = (normalizedUsed / normalizedLimit) * 100;
+  }
+
+  if (percentUsed != null) {
+    percentUsed = Math.max(0, Math.min(100, percentUsed));
   }
 
   return {
     percentUsed,
-    used,
-    limit,
+    used: normalizedUsed,
+    limit: normalizedLimit,
     resetsIn,
   };
 }
@@ -569,6 +567,167 @@ function toOllamaMessage(message) {
   return converted;
 }
 
+function hasMessagePayload(message) {
+  if (!message) return false;
+  const content = String(message?.content || "").trim();
+  const images = Array.isArray(message?.images) ? message.images : [];
+  return content.length > 0 || images.length > 0;
+}
+
+function mergeConversationMessage(left, right) {
+  const mergedText = [String(left?.content || "").trim(), String(right?.content || "").trim()]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const images = [
+    ...(Array.isArray(left?.images) ? left.images : []),
+    ...(Array.isArray(right?.images) ? right.images : []),
+  ];
+
+  const merged = {
+    role: left?.role === "assistant" ? "assistant" : "user",
+    content: mergedText,
+  };
+
+  if (images.length > 0) merged.images = images;
+  return merged;
+}
+
+function buildOllamaConversation(messages = []) {
+  const converted = (Array.isArray(messages) ? messages : []).map(toOllamaMessage);
+  const systemBlocks = [];
+  const conversational = [];
+
+  for (const msg of converted) {
+    if (msg?.role === "system") {
+      const sysText = String(msg?.content || "").trim();
+      if (sysText) systemBlocks.push(sysText);
+      continue;
+    }
+
+    const normalized = {
+      role: msg?.role === "assistant" ? "assistant" : "user",
+      content: String(msg?.content || "").trim(),
+    };
+
+    if (Array.isArray(msg?.images) && msg.images.length > 0) {
+      normalized.images = msg.images;
+    }
+
+    if (hasMessagePayload(normalized)) conversational.push(normalized);
+  }
+
+  if (systemBlocks.length > 0) {
+    const systemPrefix = { role: "user", content: systemBlocks.join("\n\n") };
+    if (conversational.length > 0 && conversational[0].role === "user") {
+      conversational[0] = mergeConversationMessage(systemPrefix, conversational[0]);
+    } else {
+      conversational.unshift(systemPrefix);
+    }
+  }
+
+  const alternated = [];
+  for (const msg of conversational) {
+    if (!hasMessagePayload(msg)) continue;
+
+    if (alternated.length === 0) {
+      if (msg.role !== "user") continue;
+      alternated.push(msg);
+      continue;
+    }
+
+    const prev = alternated[alternated.length - 1];
+    if (prev.role === msg.role) {
+      alternated[alternated.length - 1] = mergeConversationMessage(prev, msg);
+    } else {
+      alternated.push(msg);
+    }
+  }
+
+  if (alternated.length === 0) {
+    return [{ role: "user", content: "Continue." }];
+  }
+
+  return alternated;
+}
+
+function isModelNotFoundMessage(message) {
+  const text = String(message || "").toLowerCase();
+  return text.includes("model") && text.includes("not found");
+}
+
+function normalizeModelMatchKey(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function deriveModelRetryCandidates(modelName, availableNames = []) {
+  const baseInput = String(modelName || "").trim();
+  const candidates = [];
+  const pushCandidate = (value) => {
+    const normalized = String(value || "").trim();
+    if (!normalized || candidates.includes(normalized)) return;
+    candidates.push(normalized);
+  };
+
+  pushCandidate(baseInput);
+
+  if (baseInput && !baseInput.includes(":")) {
+    pushCandidate(`${baseInput}:latest`);
+  }
+
+  if (baseInput.endsWith(":latest")) {
+    pushCandidate(baseInput.slice(0, -":latest".length));
+  }
+
+  const targetCanonical = canonicalModelKey(baseInput);
+  if (targetCanonical) {
+    for (const name of availableNames) {
+      if (canonicalModelKey(name) === targetCanonical) {
+        pushCandidate(name);
+      }
+    }
+  }
+
+  const targetKey = normalizeModelMatchKey(baseInput.split(":")[0] || baseInput);
+  if (targetKey) {
+    const scored = [];
+    for (const name of availableNames) {
+      const key = normalizeModelMatchKey(name);
+      if (!key) continue;
+
+      let score = 0;
+      if (key === targetKey) score = 100;
+      else if (key.startsWith(targetKey) || targetKey.startsWith(key)) score = 80;
+      else if (key.includes(targetKey) || targetKey.includes(key)) score = 60;
+
+      if (score > 0) scored.push({ name, score });
+    }
+
+    scored
+      .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+      .slice(0, 3)
+      .forEach((item) => pushCandidate(item.name));
+  }
+
+  return candidates;
+}
+
+async function fetchKnownModelNames(baseUrl, apiKey) {
+  let tagModels = [];
+  let v1Models = [];
+
+  try { tagModels = await fetchTags(baseUrl, apiKey); } catch {}
+  try { v1Models = await fetchOpenAICompatModels(baseUrl, apiKey); } catch {}
+
+  return Array.from(
+    new Set(
+      [...tagModels, ...v1Models]
+        .map((model) => pickModelName(model))
+        .filter(Boolean)
+    )
+  );
+}
+
 async function fetchTags(baseUrl, apiKey) {
   const raw = await requestText(baseUrl, "/api/tags", {
     method: "GET",
@@ -626,11 +785,19 @@ export async function fetchModels(baseUrlConfig) {
   try { v1Models = await fetchOpenAICompatModels(baseUrl, apiKey); } catch {}
   try { catalogModels = await fetchCloudCatalogModels(baseUrl, apiKey); } catch {}
 
-  const rawModels = [
+  const primaryModels = [
     ...(Array.isArray(tagModels) ? tagModels : []),
     ...(Array.isArray(v1Models) ? v1Models : []),
-    ...(Array.isArray(catalogModels) ? catalogModels : []),
   ];
+
+  // Cloud catalog pages can include discoverability entries that are not directly chat-callable
+  // for the current account; use those only when no API model list is available.
+  const rawModels = primaryModels.length > 0
+    ? primaryModels
+    : [
+        ...primaryModels,
+        ...(Array.isArray(catalogModels) ? catalogModels : []),
+      ];
 
   const unique = new Map();
   for (const model of rawModels) {
@@ -678,124 +845,186 @@ export async function streamMessage(
   { onChunk, signal, maxTokens, temperature, topP } = {}
 ) {
   const { baseUrl, apiKey } = resolveConnection(baseUrlConfig);
-
-  const requestPayload = {
-    model: modelId,
-    messages: (messages || []).map(toOllamaMessage),
-    stream: true,
+  const conversation = buildOllamaConversation(messages);
+  const buildPayload = (candidateModel, stream) => ({
+    model: candidateModel,
+    messages: conversation,
+    stream,
     // TOKEN OPTIMIZATION: keep local/cloud generation bounded.
     options: {
       num_predict: maxTokens ?? 512,
       temperature: temperature ?? 0.7,
       top_p: topP ?? 0.9,
     },
+  });
+
+  const chatTimeoutMs = Math.min(
+    15 * 60 * 1000,
+    Math.max(120000, (Number(maxTokens) || 512) * 180 + 45000)
+  );
+
+  const runWithModelRetries = async (runner) => {
+    const queue = deriveModelRetryCandidates(modelId);
+    const seen = new Set();
+    let knownNames = null;
+    let lastError = null;
+
+    while (queue.length > 0) {
+      const candidate = queue.shift();
+      if (!candidate || seen.has(candidate)) continue;
+      seen.add(candidate);
+
+      try {
+        return await runner(candidate);
+      } catch (err) {
+        lastError = err;
+
+        if (!isModelNotFoundMessage(err?.message)) {
+          throw err;
+        }
+
+        if (!knownNames) {
+          knownNames = await fetchKnownModelNames(baseUrl, apiKey);
+          const extras = deriveModelRetryCandidates(modelId, knownNames);
+          for (const extra of extras) {
+            if (!seen.has(extra) && !queue.includes(extra)) {
+              queue.push(extra);
+            }
+          }
+        }
+      }
+    }
+
+    if (lastError && knownNames?.length) {
+      const preview = knownNames.slice(0, 8).join(", ");
+      throw new Error(
+        `${lastError.message} Available Ollama models: ${preview}${knownNames.length > 8 ? ", ..." : ""}`
+      );
+    }
+
+    throw lastError || new Error(`Ollama model \"${modelId}\" not found.`);
   };
 
   const electronApi = getElectronApi();
   if (electronApi?.ollamaApiRequest) {
-    // Main-process proxy currently returns buffered payload; use non-stream mode and emit once.
-    const raw = await requestText(baseUrl, "/api/chat", {
+    return runWithModelRetries(async (candidateModel) => {
+      // Main-process proxy currently returns buffered payload; use non-stream mode and emit once.
+      const raw = await requestText(baseUrl, "/api/chat", {
+        method: "POST",
+        headers: withAuthHeaders({ "Content-Type": "application/json" }, apiKey),
+        body: JSON.stringify(buildPayload(candidateModel, false)),
+        timeoutMs: chatTimeoutMs,
+      });
+
+      let json;
+      try {
+        json = JSON.parse(raw || "{}");
+      } catch {
+        throw new Error("Ollama: invalid chat response");
+      }
+
+      const modelError = String(json?.error || "").trim();
+      if (modelError) {
+        throw new Error(`Ollama: ${modelError}`);
+      }
+
+      const text = String(json?.message?.content || json?.response || "").trim() || "(No response)";
+      onChunk?.(text);
+      return {
+        text,
+        usage: {
+          prompt_tokens: Number(json?.prompt_eval_count) || 0,
+          completion_tokens: Number(json?.eval_count) || 0,
+          cost: 0,
+        },
+      };
+    });
+  }
+
+  return runWithModelRetries(async (candidateModel) => {
+    const res = await fetch(`${baseUrl}/api/chat`, {
       method: "POST",
-      headers: withAuthHeaders({ "Content-Type": "application/json" }, apiKey),
-      body: JSON.stringify({ ...requestPayload, stream: false }),
+      headers: withAuthHeaders({
+        "Content-Type": "application/json",
+      }, apiKey),
+      body: JSON.stringify(buildPayload(candidateModel, true)),
+      signal,
     });
 
-    let json;
-    try {
-      json = JSON.parse(raw || "{}");
-    } catch {
-      throw new Error("Ollama: invalid chat response");
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Ollama ${res.status}: ${body || "Request failed"}`);
     }
 
-    const text = String(json?.message?.content || json?.response || "").trim() || "(No response)";
-    onChunk?.(text);
-    return {
-      text,
-      usage: {
-        prompt_tokens: Number(json?.prompt_eval_count) || 0,
-        completion_tokens: Number(json?.eval_count) || 0,
-        cost: 0,
-      },
-    };
-  }
+    if (!res.body) {
+      const json = await res.json();
+      const modelError = String(json?.error || "").trim();
+      if (modelError) {
+        throw new Error(`Ollama: ${modelError}`);
+      }
 
-  const res = await fetch(`${baseUrl}/api/chat`, {
-    method: "POST",
-    headers: withAuthHeaders({
-      "Content-Type": "application/json",
-    }, apiKey),
-    body: JSON.stringify(requestPayload),
-    signal,
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Ollama ${res.status}: ${body || "Request failed"}`);
-  }
-
-  if (!res.body) {
-    const json = await res.json();
-    const text = String(json?.message?.content || json?.response || "").trim();
-    return {
-      text: text || "(No response)",
-      usage: {
-        prompt_tokens: Number(json?.prompt_eval_count) || 0,
-        completion_tokens: Number(json?.eval_count) || 0,
-        cost: 0,
-      },
-    };
-  }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let full = "";
-  let buffer = "";
-  let usage = null;
-
-  const processJsonLine = (line) => {
-    const trimmed = line.trim();
-    if (!trimmed) return;
-
-    let json;
-    try {
-      json = JSON.parse(trimmed);
-    } catch {
-      return;
-    }
-
-    if (json?.error) {
-      throw new Error(String(json.error));
-    }
-
-    const token = json?.message?.content;
-    if (token) {
-      full += token;
-      onChunk?.(full);
-    }
-
-    if (json?.done) {
-      usage = {
-        prompt_tokens: Number(json?.prompt_eval_count) || 0,
-        completion_tokens: Number(json?.eval_count) || 0,
-        cost: 0,
+      const text = String(json?.message?.content || json?.response || "").trim();
+      return {
+        text: text || "(No response)",
+        usage: {
+          prompt_tokens: Number(json?.prompt_eval_count) || 0,
+          completion_tokens: Number(json?.eval_count) || 0,
+          cost: 0,
+        },
       };
     }
-  };
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let full = "";
+    let buffer = "";
+    let usage = null;
 
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
+    const processJsonLine = (line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
 
-    for (const line of lines) {
-      processJsonLine(line);
+      let json;
+      try {
+        json = JSON.parse(trimmed);
+      } catch {
+        return;
+      }
+
+      if (json?.error) {
+        throw new Error(String(json.error));
+      }
+
+      const token = json?.message?.content;
+      if (token) {
+        full += token;
+        onChunk?.(full);
+      }
+
+      if (json?.done) {
+        usage = {
+          prompt_tokens: Number(json?.prompt_eval_count) || 0,
+          completion_tokens: Number(json?.eval_count) || 0,
+          cost: 0,
+        };
+      }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        processJsonLine(line);
+      }
     }
-  }
 
-  if (buffer.trim()) processJsonLine(buffer);
+    if (buffer.trim()) processJsonLine(buffer);
 
-  return { text: full || "(No response)", usage };
+    return { text: full || "(No response)", usage };
+  });
 }
