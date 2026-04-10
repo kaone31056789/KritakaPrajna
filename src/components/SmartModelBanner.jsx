@@ -60,15 +60,15 @@ export default function SmartModelBanner({ suggestion, onAccept, onDismiss }) {
         transition={{ duration: 0.25, ease }}
         className="shrink-0 overflow-hidden"
       >
-        <div className={`flex items-center gap-3 px-5 py-2.5 text-sm border-b ${
+        <div className={`flex items-center gap-3 px-5 py-2.5 text-sm border-b shadow-elevation-2 inner-highlight ${
           isFreeRec
             ? "bg-emerald-500/[0.07] border-emerald-500/20 text-emerald-300"
-            : "bg-saffron-500/[0.07] border-saffron-500/20 text-saffron-300"
+            : "bg-[#00ff41]/[0.07] border-[#00ff41]/20 text-[#00ff41]"
         }`}>
           {/* Task badge */}
           {icon && (
-            <span className={`flex items-center gap-1.5 text-xs font-medium rounded-full px-2 py-0.5 ${
-              isFreeRec ? "bg-emerald-500/15" : "bg-saffron-500/15"
+            <span className={`flex items-center gap-1.5 text-xs font-medium rounded-sm px-2 py-0.5 ${
+              isFreeRec ? "bg-emerald-500/15" : "bg-[#00ff41]/15"
             }`}>
               {icon}
               {label}
@@ -76,7 +76,7 @@ export default function SmartModelBanner({ suggestion, onAccept, onDismiss }) {
           )}
 
           {/* Message */}
-          <span className="flex-1 text-xs">{reason}</span>
+          <span className="flex-1 text-xs font-mono">{reason}</span>
 
           {/* Accept button */}
           {recommended && (
@@ -85,10 +85,10 @@ export default function SmartModelBanner({ suggestion, onAccept, onDismiss }) {
               onClick={() => onAccept(recommended.id)}
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              className={`text-xs font-medium rounded-lg px-3 py-1.5 cursor-pointer transition-colors ${
+              className={`text-xs font-medium rounded-sm px-3 py-1.5 cursor-pointer transition-colors font-mono ${
                 isFreeRec
                   ? "bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300"
-                  : "bg-saffron-500/20 hover:bg-saffron-500/30 text-saffron-300"
+                  : "bg-[#00ff41]/20 hover:bg-[#00ff41]/30 text-[#00ff41]"
               }`}
             >
               Use {shortName(recommended.id)}
@@ -100,7 +100,7 @@ export default function SmartModelBanner({ suggestion, onAccept, onDismiss }) {
           <button
             type="button"
             onClick={onDismiss}
-            className="text-dark-500 hover:text-dark-300 transition-colors cursor-pointer p-0.5"
+            className="text-[#b0b0b0]/50 hover:text-[#e0e0e0] transition-colors cursor-pointer p-0.5"
             aria-label="Dismiss suggestion"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">

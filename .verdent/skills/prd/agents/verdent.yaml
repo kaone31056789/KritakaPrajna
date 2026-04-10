@@ -1,0 +1,11 @@
+category: Documentation
+interface:
+  display_name: PRD Generator
+  short_description: Generate production-grade Product Requirements Documents.
+  icon_dark: './assets/icon-dark.png'
+  icon_light: './assets/icon-light.png'
+  default_prompt: Help me write a PRD for my product.
+  label:
+    - product
+    - requirements
+    - planning

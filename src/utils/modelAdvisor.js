@@ -129,6 +129,17 @@ export function buildModelProfile(model, taskType = "general", rankingSignals = 
     availabilityScore: unified.availabilityScore,
     contextLength: unified.contextLength,
     finalScore: unified.finalScore,
+    confidence: unified.confidence,
+    benchmarkDetail: unified.benchmarkDetail,
+    // Score breakdown for radar chart
+    scores: {
+      quality: unified.qualityScore,
+      speed: unified.speedScore,
+      cost: unified.costScore,
+      context: unified.contextScore,
+      reasoning: unified.reasoningScore,
+      coding: buildUnifiedModelProfile(model, "coding", rankingSignals, advisorContext).capabilityScore,
+    },
   };
 }
 
@@ -341,6 +352,10 @@ export function generateAdvisorData({
     };
   }
 
+  // Determine which ranking sources contributed to the analysis
+  const signals = rankingSignals || {};
+  const sources = signals.sources || {};
+
   return {
     cost,
     isFree: currentProfile.isFree,
@@ -370,8 +385,10 @@ export function generateAdvisorData({
     } : null,
     codingSuggestion,
     rankingSources: {
-      huggingFace: Object.keys(rankingSignals || {}).length > 0,
-      openRouter: models.some((m) => m._provider === "openrouter"),
+      huggingFace: !!sources.hf,
+      openRouter: !!sources.or,
+      leaderboard: !!sources.leaderboard,
+      freshness: signals.freshness || "fallback",
     },
     featureSignals: normalizedContext,
     providerPicks,

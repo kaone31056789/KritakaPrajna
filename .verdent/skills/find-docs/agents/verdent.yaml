@@ -1,0 +1,11 @@
+category: Productivity
+interface:
+  display_name: Documentation Lookup
+  short_description: Look up latest docs and code examples for any library.
+  icon_dark: './assets/icon-dark.png'
+  icon_light: './assets/icon-light.png'
+  default_prompt: Look up the documentation for this library.
+  label:
+    - documentation
+    - reference
+    - productivity

@@ -1,0 +1,11 @@
+category: Development
+interface:
+  display_name: Code Simplifier
+  short_description: Simplify and clean up code while preserving functionality.
+  icon_dark: './assets/icon-dark.png'
+  icon_light: './assets/icon-light.png'
+  default_prompt: Simplify my code for better readability.
+  label:
+    - code-quality
+    - refactor
+    - readability

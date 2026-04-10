@@ -69,13 +69,15 @@ const PROVIDER_KEY_MAP = {
 function getProviderKey(provider) {
   const field = PROVIDER_KEY_MAP[provider];
   if (!field) return null;
-  const encrypted = store.get(field);
-  if (!encrypted) return null;
-  if (!safeStorage.isEncryptionAvailable()) return encrypted;
+  const stored = store.get(field);
+  if (!stored) return null;
+  if (!safeStorage.isEncryptionAvailable()) {
+    return stored; // Fallback to plaintext
+  }
   try {
-    return safeStorage.decryptString(Buffer.from(encrypted, "base64"));
+    return safeStorage.decryptString(Buffer.from(stored, "base64"));
   } catch {
-    return null;
+    return stored; // If decrypt fails, maybe it was stored as plaintext
   }
 }
 
@@ -83,7 +85,9 @@ function setProviderKey(provider, key) {
   const field = PROVIDER_KEY_MAP[provider];
   if (!field) return;
   if (!safeStorage.isEncryptionAvailable()) {
-    throw new Error("Secure storage is not available on this system. API keys cannot be saved.");
+    // Fallback: store plaintext if secure storage missing
+    store.set(field, key);
+    return;
   }
   store.set(field, safeStorage.encryptString(key).toString("base64"));
 }
@@ -159,6 +163,1052 @@ let allowedBasePath = null;
 
 let mainWindow = null;
 
+// ── OpenCode persistent agent process manager ───────────────────────────────
+const OPENCODE_MAX_STDIO_BUFFER = 1024 * 1024; // keep 1 MB rolling buffer per stream
+const OPENCODE_READY_TIMEOUT_MS = 12000;
+const OPENCODE_MAX_RUN_OUTPUT_CHARS = 250000;
+const opencodeState = {
+  proc: null,
+  restartTimer: null,
+  shuttingDown: false,
+  ready: false,
+  startedAt: 0,
+  stdoutBuffer: "",
+  stderrBuffer: "",
+  requestSessionMap: new Map(), // requestId -> sessionId
+  chatSessionMap: new Map(), // chatSessionId -> opencode session id
+  activeRuns: new Map(), // requestId -> run state
+  serverUrl: "",
+  lastError: "",
+  missingBinary: false,
+  spawnSpec: null,
+  runtimeDownloadPromise: null,
+};
+
+function safeString(value) {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function resolveBundledOpenCodeSpec() {
+  try {
+    const cliPath = require.resolve("opencode-ai/bin/opencode");
+    return {
+      command: process.execPath,
+      args: [cliPath],
+      env: { ELECTRON_RUN_AS_NODE: "1" },
+      source: "bundled",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function getOpenCodeBinaryName() {
+  return process.platform === "win32" ? "opencode.exe" : "opencode";
+}
+
+function getOpenCodePackageCandidates() {
+  const platformMap = {
+    win32: "windows",
+    darwin: "darwin",
+    linux: "linux",
+  };
+  const archMap = {
+    x64: "x64",
+    arm64: "arm64",
+    arm: "arm",
+  };
+
+  const platform = platformMap[process.platform];
+  const arch = archMap[process.arch];
+  if (!platform || !arch) return [];
+
+  const base = `opencode-${platform}-${arch}`;
+  const candidates = [base];
+  if (arch === "x64") candidates.push(`${base}-baseline`);
+  if (platform === "linux") {
+    candidates.push(`${base}-musl`);
+    if (arch === "x64") candidates.push(`${base}-baseline-musl`);
+  }
+
+  return [...new Set(candidates)];
+}
+
+function getBundledOpenCodeVersion() {
+  try {
+    const pkg = require("opencode-ai/package.json");
+    const version = String(pkg?.version || "").trim();
+    if (version) return version;
+  } catch {}
+  return "1.3.17";
+}
+
+function resolveBundledOpenCodeBinarySpec() {
+  const binaryName = getOpenCodeBinaryName();
+  for (const pkgName of getOpenCodePackageCandidates()) {
+    try {
+      const binaryPath = require.resolve(`${pkgName}/bin/${binaryName}`);
+      return {
+        command: binaryPath,
+        args: [],
+        env: {},
+        source: "bundled-binary",
+        packageName: pkgName,
+      };
+    } catch {}
+  }
+  return null;
+}
+
+function getDownloadedOpenCodeBinaryPaths() {
+  if (!app?.isReady?.()) return [];
+
+  const runtimeRoot = path.join(app.getPath("userData"), "opencode-runtime");
+  const binaryName = getOpenCodeBinaryName();
+  const version = getBundledOpenCodeVersion();
+
+  return getOpenCodePackageCandidates().map((pkgName) => ({
+    pkgName,
+    version,
+    filePath: path.join(runtimeRoot, `${pkgName}@${version}`, binaryName),
+  }));
+}
+
+function resolveDownloadedOpenCodeSpec() {
+  for (const entry of getDownloadedOpenCodeBinaryPaths()) {
+    try {
+      fs.accessSync(entry.filePath, fs.constants.F_OK);
+      return {
+        command: entry.filePath,
+        args: [],
+        env: {},
+        source: "downloaded",
+        packageName: entry.pkgName,
+      };
+    } catch {}
+  }
+  return null;
+}
+
+function downloadFileToPath(url, destination, redirectDepth = 0) {
+  return new Promise((resolve, reject) => {
+    const parsed = new NodeURL(url);
+    const client = parsed.protocol === "http:" ? http : https;
+    const request = client.get(
+      parsed,
+      {
+        headers: {
+          "User-Agent": "KritakaPrajna/2",
+        },
+      },
+      (response) => {
+        const statusCode = Number(response.statusCode || 0);
+        if ([301, 302, 303, 307, 308].includes(statusCode) && response.headers.location) {
+          if (redirectDepth >= 5) {
+            response.resume();
+            reject(new Error("Too many redirects while downloading OpenCode runtime."));
+            return;
+          }
+          const nextUrl = new NodeURL(response.headers.location, parsed).toString();
+          response.resume();
+          resolve(downloadFileToPath(nextUrl, destination, redirectDepth + 1));
+          return;
+        }
+
+        if (statusCode < 200 || statusCode >= 300) {
+          response.resume();
+          reject(new Error(`OpenCode runtime download failed (${statusCode}).`));
+          return;
+        }
+
+        const tmpFile = `${destination}.tmp-${Date.now()}`;
+        const out = fs.createWriteStream(tmpFile);
+
+        out.on("error", (err) => {
+          try { fs.unlinkSync(tmpFile); } catch {}
+          reject(err);
+        });
+
+        response.on("error", (err) => {
+          try { fs.unlinkSync(tmpFile); } catch {}
+          reject(err);
+        });
+
+        out.on("finish", () => {
+          out.close(() => {
+            try {
+              fs.renameSync(tmpFile, destination);
+              resolve(destination);
+            } catch (err) {
+              try { fs.unlinkSync(tmpFile); } catch {}
+              reject(err);
+            }
+          });
+        });
+
+        response.pipe(out);
+      }
+    );
+
+    request.on("error", reject);
+    request.setTimeout(30000, () => {
+      request.destroy(new Error("OpenCode runtime download timed out."));
+    });
+  });
+}
+
+async function ensureDownloadedOpenCodeSpec() {
+  const cached = resolveDownloadedOpenCodeSpec();
+  if (cached) return cached;
+
+  if (!app?.isReady?.()) return null;
+  if (opencodeState.runtimeDownloadPromise) return opencodeState.runtimeDownloadPromise;
+
+  const downloadTask = (async () => {
+    const version = getBundledOpenCodeVersion();
+    const targets = getDownloadedOpenCodeBinaryPaths();
+    if (targets.length === 0) return null;
+
+    let lastError = "";
+    sendOpenCodeStatus("runtime_download_start", { version });
+
+    for (const target of targets) {
+      const url = `https://cdn.jsdelivr.net/npm/${target.pkgName}@${version}/bin/${getOpenCodeBinaryName()}`;
+
+      try {
+        await fs.promises.mkdir(path.dirname(target.filePath), { recursive: true });
+        await downloadFileToPath(url, target.filePath);
+        if (process.platform !== "win32") {
+          try {
+            await fs.promises.chmod(target.filePath, 0o755);
+          } catch {}
+        }
+
+        const spec = {
+          command: target.filePath,
+          args: [],
+          env: {},
+          source: "downloaded",
+          packageName: target.pkgName,
+        };
+
+        sendOpenCodeStatus("runtime_downloaded", {
+          packageName: target.pkgName,
+          version,
+        });
+
+        return spec;
+      } catch (err) {
+        lastError = String(err?.message || err || "");
+      }
+    }
+
+    if (lastError) {
+      sendOpenCodeStatus("runtime_download_failed", { message: lastError });
+    }
+
+    return null;
+  })();
+
+  opencodeState.runtimeDownloadPromise = downloadTask;
+  try {
+    return await downloadTask;
+  } finally {
+    opencodeState.runtimeDownloadPromise = null;
+  }
+}
+
+function sanitizeOpenCodePayload(payload = {}) {
+  const provider = String(payload?.provider || "").trim();
+  const model = String(payload?.model || "").trim();
+  const providerConfig = payload?.providerConfig && typeof payload.providerConfig === "object"
+    ? payload.providerConfig
+    : {};
+  return {
+    requestId: String(payload?.requestId || "").trim(),
+    sessionId: String(payload?.sessionId || "").trim(),
+    prompt: safeString(payload?.prompt),
+    workspacePath: String(payload?.workspacePath || "").trim(),
+    context: Array.isArray(payload?.context) ? payload.context : [],
+    memory: payload?.memory && typeof payload.memory === "object" ? payload.memory : {},
+    model,
+    provider,
+    providerConfig,
+    policy: {
+      noAutoRun: true,
+      avoidReplanning: true,
+      maxPlanDepth: 4,
+      optimizeLatency: true,
+      optimizeCost: true,
+    },
+  };
+}
+
+function buildOpenCodeSpawnSpec() {
+  const envRaw = process.env.OPENCODE_CMD;
+  if (typeof envRaw === "string") {
+    const raw = envRaw.trim();
+    if (raw) {
+      if (raw.startsWith("[") || raw.startsWith("{")) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return {
+              command: String(parsed[0] || "opencode"),
+              args: parsed.slice(1).map((a) => String(a || "")),
+              env: {},
+              source: "env",
+            };
+          }
+        } catch {}
+      }
+      const parts = raw.split(/\s+/).filter(Boolean);
+      return { command: parts[0] || "opencode", args: parts.slice(1), env: {}, source: "env" };
+    }
+  }
+
+  const bundledBinary = resolveBundledOpenCodeBinarySpec();
+  if (bundledBinary) return bundledBinary;
+
+  const downloaded = resolveDownloadedOpenCodeSpec();
+  if (downloaded) return downloaded;
+
+  const bundled = resolveBundledOpenCodeSpec();
+  if (bundled) return bundled;
+
+  return { command: "opencode", args: [], env: {}, source: "global" };
+}
+
+function buildOpenCodeServeSpec() {
+  const base = buildOpenCodeSpawnSpec();
+  return {
+    ...base,
+    args: [...(Array.isArray(base.args) ? base.args : []), "serve", "--port", "0", "--hostname", "127.0.0.1", "--print-logs"],
+  };
+}
+
+function buildOpenCodeRunSpec({ serverUrl, provider, model, opencodeSessionId, prompt }) {
+  const base = buildOpenCodeSpawnSpec();
+  const args = [
+    ...(Array.isArray(base.args) ? base.args : []),
+    "run",
+    "--format",
+    "json",
+    "--agent",
+    "plan",
+    "--attach",
+    String(serverUrl || ""),
+  ];
+
+  if (opencodeSessionId) {
+    args.push("--session", String(opencodeSessionId));
+  }
+
+  const providerName = String(provider || "").trim();
+  const modelName = String(model || "").trim();
+  if (providerName && modelName) {
+    const normalizedModel = modelName.includes("::")
+      ? modelName.split("::").slice(1).join("::")
+      : modelName;
+    const providerPrefix = `${providerName}/`;
+    const modelRef = normalizedModel.startsWith(providerPrefix)
+      ? normalizedModel
+      : `${providerPrefix}${normalizedModel}`;
+    args.push("--model", modelRef);
+  }
+
+  args.push(String(prompt || ""));
+
+  return {
+    ...base,
+    args,
+  };
+}
+
+function buildProviderEnv(provider, providerConfig = {}) {
+  const key = String(providerConfig?.key || "").trim();
+  if (!key) return {};
+
+  switch (String(provider || "")) {
+    case "openrouter":
+      return { OPENROUTER_API_KEY: key };
+    case "openai":
+      return { OPENAI_API_KEY: key };
+    case "anthropic":
+      return { ANTHROPIC_API_KEY: key };
+    case "huggingface":
+      return {
+        HF_TOKEN: key,
+        HUGGING_FACE_HUB_TOKEN: key,
+        HUGGINGFACE_API_KEY: key,
+      };
+    case "ollama":
+      return /^https?:\/\//i.test(key)
+        ? { OLLAMA_HOST: key }
+        : { OLLAMA_API_KEY: key };
+    default:
+      return {};
+  }
+}
+
+function extractSuggestedCommand(text = "") {
+  const sample = String(text || "");
+  const fenceMatch = sample.match(/```(?:powershell|bash|sh|cmd|shell|zsh)?\s*\n([\s\S]*?)```/i);
+  if (!fenceMatch) return "";
+  const block = String(fenceMatch[1] || "").trim();
+  return block;
+}
+
+function isMissingBinaryError(message = "") {
+  const msg = String(message || "").toLowerCase();
+  return (
+    msg.includes("enoent") ||
+    msg.includes("not recognized") ||
+    msg.includes("not found") ||
+    msg.includes("cannot find")
+  );
+}
+
+function isMissingOpenCodeRuntimeMessage(message = "") {
+  const msg = String(message || "").toLowerCase();
+  return (
+    msg.includes("failed to install the right version of the opencode cli") ||
+    msg.includes("manually installing")
+  );
+}
+
+function buildOpenCodeMissingBinaryMessage() {
+  const source = String(opencodeState.spawnSpec?.source || "");
+  const command = String(opencodeState.spawnSpec?.command || "opencode");
+  if (source === "downloaded") {
+    return "Downloaded OpenCode runtime is unavailable. The app will retry downloading it automatically.";
+  }
+  if (source === "bundled-binary") {
+    return "Bundled OpenCode platform runtime is missing. The app will download a runtime automatically.";
+  }
+  if (source === "bundled") {
+    return "Bundled OpenCode runtime wrapper is present but platform binary is missing. The app will download it automatically.";
+  }
+  if (source === "env") {
+    return `OpenCode command from OPENCODE_CMD failed to start. Tried: ${command}`;
+  }
+  return `OpenCode binary not found on PATH. Tried: ${command}. The app will auto-download a runtime.`;
+}
+
+function sendOpenCodeStatus(type, details = {}) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("opencode-status", {
+      type,
+      timestamp: Date.now(),
+      ...details,
+    });
+  }
+}
+
+function sendOpenCodeEvent(event = {}) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("opencode-event", {
+      timestamp: Date.now(),
+      ...event,
+    });
+  }
+}
+
+function resolveOpenCodeSessionId(eventObj = {}) {
+  const candidate =
+    eventObj?.sessionID ||
+    eventObj?.sessionId ||
+    eventObj?.session ||
+    eventObj?.data?.sessionID ||
+    eventObj?.data?.sessionId ||
+    eventObj?.data?.session;
+  return String(candidate || "").trim();
+}
+
+function extractRunText(payload = {}) {
+  const seen = new WeakSet();
+
+  const pick = (value) => {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+
+    if (Array.isArray(value)) {
+      const parts = value
+        .map((item) => pick(item))
+        .map((part) => String(part || ""))
+        .filter((part) => part.trim().length > 0);
+      return parts.join("");
+    }
+
+    if (typeof value !== "object") return "";
+    if (seen.has(value)) return "";
+    seen.add(value);
+
+    const candidates = [
+      value.text,
+      value.message,
+      value.delta,
+      value.output,
+      value.chunk,
+      value.content,
+      value.response,
+      value.result,
+      value.answer,
+      value.value,
+      value.part,
+      value.parts,
+      value.items,
+      value.data,
+    ];
+
+    for (const candidate of candidates) {
+      const text = pick(candidate);
+      if (String(text || "").trim().length > 0) return text;
+    }
+
+    return "";
+  };
+
+  return String(pick(payload) || "");
+}
+
+function humanizeEventTypeLabel(value = "") {
+  const cleaned = String(value || "").trim();
+  if (!cleaned) return "";
+  return cleaned
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\b\w/g, (ch) => ch.toUpperCase())
+    .trim();
+}
+
+function appendRunOutput(runState, text) {
+  const chunk = String(text || "");
+  if (!chunk) return;
+
+  runState.outputText += chunk;
+  if (runState.outputText.length > OPENCODE_MAX_RUN_OUTPUT_CHARS) {
+    runState.outputText = runState.outputText.slice(-OPENCODE_MAX_RUN_OUTPUT_CHARS);
+  }
+}
+
+function normalizeFinalRunText(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  if (raw.startsWith("{") || raw.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(raw);
+      const extracted = String(extractRunText(parsed) || "").trim();
+      if (extracted) return extracted;
+    } catch {}
+  }
+
+  return raw;
+}
+
+function emitOpenCodeRunTerminalEvent(requestId, chatSessionId, stream, text) {
+  const terminalText = String(text || "").trim();
+  if (!terminalText) return;
+
+  const suggestedCommand = extractSuggestedCommand(terminalText);
+  sendOpenCodeEvent({
+    type: "terminal",
+    requestId,
+    sessionId: chatSessionId,
+    data: {
+      stream,
+      text: terminalText,
+      ...(suggestedCommand ? { suggestedCommand } : {}),
+    },
+  });
+}
+
+function processOpenCodeRunJsonEvent({ requestId, chatSessionId, runState, eventObj }) {
+  const rawType = String(eventObj?.type || eventObj?.event || "").toLowerCase().trim();
+  const type = (rawType || "").replace(/-/g, "_") || "step_update";
+  const data = eventObj?.data && typeof eventObj.data === "object" ? eventObj.data : eventObj;
+
+  const openCodeSessionId = resolveOpenCodeSessionId(eventObj) || resolveOpenCodeSessionId(data);
+  if (openCodeSessionId) {
+    runState.opencodeSessionId = openCodeSessionId;
+    opencodeState.chatSessionMap.set(chatSessionId, openCodeSessionId);
+  }
+
+  if (type === "plan") {
+    sendOpenCodeEvent({ type: "plan", requestId, sessionId: chatSessionId, data });
+    return;
+  }
+
+  if (!rawType) {
+    const text = extractRunText(data);
+    if (text) {
+      appendRunOutput(runState, text);
+      emitOpenCodeRunTerminalEvent(requestId, chatSessionId, "stdout", text);
+      return;
+    }
+  }
+
+  if (type === "result" || type === "done" || type === "final") {
+    const text = extractRunText(data) || extractRunText(eventObj);
+    if (text) {
+      appendRunOutput(runState, text);
+      emitOpenCodeRunTerminalEvent(requestId, chatSessionId, "stdout", text);
+    }
+    return;
+  }
+
+  if (type === "step_start") {
+    const step = safeString(
+      data?.title ||
+      data?.step ||
+      data?.name ||
+      data?.part?.title ||
+      data?.part?.name ||
+      humanizeEventTypeLabel(data?.part?.type || eventObj?.part?.type) ||
+      "Working"
+    );
+    sendOpenCodeEvent({
+      type: "step_start",
+      requestId,
+      sessionId: chatSessionId,
+      data: { step, title: step },
+    });
+    return;
+  }
+
+  if (type === "step_finish") {
+    const details = safeString(
+      data?.message ||
+      data?.details ||
+      data?.part?.reason ||
+      ""
+    ).trim();
+    if (details) {
+      sendOpenCodeEvent({
+        type: "step_update",
+        requestId,
+        sessionId: chatSessionId,
+        data: {
+          step: safeString(data?.title || data?.step || data?.name || ""),
+          details,
+        },
+      });
+    }
+    const text = extractRunText(data) || extractRunText(eventObj);
+    if (text) {
+      appendRunOutput(runState, text);
+      emitOpenCodeRunTerminalEvent(requestId, chatSessionId, "stdout", text);
+    }
+    return;
+  }
+
+  if (type === "text" || type === "delta" || type === "assistant" || type === "output" || type === "message") {
+    const text = extractRunText(data) || extractRunText(eventObj);
+    if (text) {
+      appendRunOutput(runState, text);
+      emitOpenCodeRunTerminalEvent(requestId, chatSessionId, "stdout", text);
+    }
+    return;
+  }
+
+  if (type === "terminal" || type === "stdout" || type === "stderr") {
+    const text = extractRunText(data) || extractRunText(eventObj);
+    if (text) {
+      const stream = type === "stderr" ? "stderr" : "stdout";
+      emitOpenCodeRunTerminalEvent(requestId, chatSessionId, stream, text);
+      if (stream === "stdout") appendRunOutput(runState, text);
+    }
+    return;
+  }
+
+  if (type === "error" || type === "fatal") {
+    const message = safeString(data?.message || data?.error || eventObj?.message || eventObj?.error || eventObj).trim() || "Agent failed.";
+    runState.hadError = true;
+    runState.errorMessage = message;
+    sendOpenCodeEvent({
+      type: "error",
+      requestId,
+      sessionId: chatSessionId,
+      data: { message },
+    });
+    return;
+  }
+
+  const details = safeString(data?.message || data?.details || extractRunText(data) || "").trim();
+  if (details) {
+    sendOpenCodeEvent({
+      type: "step_update",
+      requestId,
+      sessionId: chatSessionId,
+      data: {
+        step: safeString(data?.title || data?.step || data?.name || ""),
+        details,
+      },
+    });
+  }
+}
+
+function processOpenCodeRunLine({ requestId, chatSessionId, runState, stream, line }) {
+  const textLine = String(line || "").trim();
+  if (!textLine) return;
+
+  let parsed = null;
+  if (textLine.startsWith("{")) {
+    try {
+      parsed = JSON.parse(textLine);
+    } catch {}
+  }
+
+  if (parsed && typeof parsed === "object") {
+    processOpenCodeRunJsonEvent({ requestId, chatSessionId, runState, eventObj: parsed });
+    return;
+  }
+
+  emitOpenCodeRunTerminalEvent(requestId, chatSessionId, stream, textLine);
+  if (stream === "stdout") appendRunOutput(runState, `${textLine}\n`);
+}
+
+function consumeOpenCodeRunChunk({ requestId, chatSessionId, runState, stream, chunk }) {
+  const key = stream === "stderr" ? "stderrBuffer" : "stdoutBuffer";
+  runState[key] += chunk.toString("utf-8");
+
+  if (runState[key].length > OPENCODE_MAX_STDIO_BUFFER) {
+    runState[key] = runState[key].slice(-OPENCODE_MAX_STDIO_BUFFER);
+  }
+
+  const lines = runState[key].split(/\r?\n/);
+  runState[key] = lines.pop() || "";
+
+  for (const line of lines) {
+    processOpenCodeRunLine({ requestId, chatSessionId, runState, stream, line });
+  }
+}
+
+function flushOpenCodeRunRemainder(requestId, runState) {
+  const chatSessionId = runState.chatSessionId;
+  if (runState.stdoutBuffer) {
+    processOpenCodeRunLine({
+      requestId,
+      chatSessionId,
+      runState,
+      stream: "stdout",
+      line: runState.stdoutBuffer,
+    });
+    runState.stdoutBuffer = "";
+  }
+
+  if (runState.stderrBuffer) {
+    processOpenCodeRunLine({
+      requestId,
+      chatSessionId,
+      runState,
+      stream: "stderr",
+      line: runState.stderrBuffer,
+    });
+    runState.stderrBuffer = "";
+  }
+}
+
+function finalizeOpenCodeRun(requestId, runState, code, signal) {
+  if (!runState) return;
+
+  flushOpenCodeRunRemainder(requestId, runState);
+  opencodeState.activeRuns.delete(requestId);
+
+  const chatSessionId = runState.chatSessionId;
+  const exitCode = Number.isInteger(code) ? code : -1;
+  const stderrTail = String(runState.stderrTail || "").trim();
+
+  if (runState.hadError || exitCode !== 0) {
+    const message = runState.errorMessage || stderrTail || `OpenCode run stopped (exit ${exitCode}).`;
+    if (!runState.hadError) {
+      sendOpenCodeEvent({
+        type: "error",
+        requestId,
+        sessionId: chatSessionId,
+        data: { message },
+      });
+    }
+    sendOpenCodeStatus("run_stopped", {
+      requestId,
+      sessionId: chatSessionId,
+      code: exitCode,
+      signal: signal || null,
+      message,
+    });
+    return;
+  }
+
+  const finalText = normalizeFinalRunText(runState.outputText);
+  if (!finalText) {
+    const message = "Agent returned an empty response. Try another model or provider.";
+    sendOpenCodeEvent({
+      type: "error",
+      requestId,
+      sessionId: chatSessionId,
+      data: { message },
+    });
+    sendOpenCodeStatus("run_stopped", {
+      requestId,
+      sessionId: chatSessionId,
+      code: 0,
+      signal: signal || null,
+      message,
+    });
+    return;
+  }
+
+  sendOpenCodeEvent({
+    type: "result",
+    requestId,
+    sessionId: chatSessionId,
+    data: { text: finalText },
+  });
+
+  sendOpenCodeStatus("run_stopped", {
+    requestId,
+    sessionId: chatSessionId,
+    code: 0,
+    signal: signal || null,
+  });
+}
+
+function handleOpenCodeStdoutChunk(chunk) {
+  const rawText = chunk.toString("utf-8");
+  opencodeState.stdoutBuffer += rawText;
+  if (opencodeState.stdoutBuffer.length > OPENCODE_MAX_STDIO_BUFFER) {
+    opencodeState.stdoutBuffer = opencodeState.stdoutBuffer.slice(-OPENCODE_MAX_STDIO_BUFFER);
+  }
+
+  const lines = opencodeState.stdoutBuffer.split(/\r?\n/);
+  opencodeState.stdoutBuffer = lines.pop() || "";
+
+  for (const line of lines) {
+    const text = String(line || "").trim();
+    if (!text) continue;
+
+    const urlMatch = text.match(/opencode server listening on\s+(https?:\/\/\S+)/i);
+    if (urlMatch?.[1]) {
+      const url = String(urlMatch[1]).trim();
+      opencodeState.serverUrl = url;
+      opencodeState.ready = true;
+      sendOpenCodeStatus("ready", { url });
+    }
+
+    sendOpenCodeEvent({
+      type: "terminal",
+      requestId: "__server",
+      sessionId: "",
+      data: { stream: "stdout", text },
+    });
+  }
+}
+
+function handleOpenCodeStderrChunk(chunk) {
+  const rawText = chunk.toString("utf-8");
+  opencodeState.stderrBuffer += rawText;
+  if (opencodeState.stderrBuffer.length > OPENCODE_MAX_STDIO_BUFFER) {
+    opencodeState.stderrBuffer = opencodeState.stderrBuffer.slice(-OPENCODE_MAX_STDIO_BUFFER);
+  }
+
+  const lines = opencodeState.stderrBuffer.split(/\r?\n/);
+  opencodeState.stderrBuffer = lines.pop() || "";
+
+  for (const line of lines) {
+    const text = String(line || "").trim();
+    if (!text) continue;
+
+    const urlMatch = text.match(/opencode server listening on\s+(https?:\/\/\S+)/i);
+    if (urlMatch?.[1]) {
+      const url = String(urlMatch[1]).trim();
+      opencodeState.serverUrl = url;
+      opencodeState.ready = true;
+      sendOpenCodeStatus("ready", { url });
+    }
+
+    sendOpenCodeEvent({
+      type: "terminal",
+      requestId: "__server",
+      sessionId: "",
+      data: { stream: "stderr", text },
+    });
+  }
+}
+
+function ensureOpenCodeProcess() {
+  if (opencodeState.proc && !opencodeState.proc.killed) return true;
+
+  const spec = buildOpenCodeServeSpec();
+  opencodeState.missingBinary = false;
+  opencodeState.spawnSpec = spec;
+  opencodeState.serverUrl = "";
+
+  let proc;
+  try {
+    proc = spawn(spec.command, spec.args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: false,
+      windowsHide: true,
+      env: {
+        ...process.env,
+        ...(spec.env || {}),
+      },
+    });
+  } catch (err) {
+    opencodeState.lastError = err?.message || "Failed to start OpenCode process";
+    opencodeState.missingBinary = isMissingBinaryError(opencodeState.lastError);
+    sendOpenCodeStatus("spawn_error", { message: opencodeState.lastError });
+    return false;
+  }
+
+  opencodeState.proc = proc;
+  opencodeState.ready = false;
+  opencodeState.startedAt = Date.now();
+  opencodeState.stdoutBuffer = "";
+  opencodeState.stderrBuffer = "";
+  opencodeState.lastError = "";
+
+  proc.once("spawn", () => {
+    sendOpenCodeStatus("started", {
+      command: spec.command,
+      args: spec.args,
+      pid: proc.pid,
+      source: spec.source || "unknown",
+    });
+  });
+
+  proc.stdout.on("data", handleOpenCodeStdoutChunk);
+  proc.stderr.on("data", handleOpenCodeStderrChunk);
+
+  proc.on("error", (err) => {
+    opencodeState.lastError = err?.message || "OpenCode process error";
+    if (isMissingBinaryError(opencodeState.lastError)) {
+      opencodeState.missingBinary = true;
+    }
+    sendOpenCodeStatus("spawn_error", { message: opencodeState.lastError });
+  });
+
+  proc.on("close", (code, signal) => {
+    const stderrTail = String(opencodeState.stderrBuffer || "")
+      .trim()
+      .split(/\r?\n/)
+      .slice(-1)[0] || "";
+    const detailMessage = opencodeState.lastError || stderrTail || "OpenCode process stopped.";
+    if (isMissingOpenCodeRuntimeMessage(detailMessage)) {
+      opencodeState.missingBinary = true;
+    }
+    const shouldRestart =
+      !opencodeState.shuttingDown &&
+      !opencodeState.missingBinary &&
+      !isMissingBinaryError(detailMessage);
+
+    for (const [requestId, runState] of opencodeState.activeRuns.entries()) {
+      if (runState.proc && !runState.proc.killed) {
+        try {
+          runState.proc.kill("SIGTERM");
+        } catch {}
+      }
+      sendOpenCodeEvent({
+        type: "error",
+        requestId,
+        sessionId: runState.chatSessionId,
+        data: { message: "OpenCode process stopped." },
+      });
+    }
+    opencodeState.activeRuns.clear();
+
+    opencodeState.proc = null;
+    opencodeState.ready = false;
+    opencodeState.serverUrl = "";
+    sendOpenCodeStatus("stopped", {
+      code: code ?? -1,
+      signal: signal || null,
+      message: detailMessage,
+      command: opencodeState.spawnSpec?.command || "opencode",
+    });
+
+    if (shouldRestart) {
+      clearTimeout(opencodeState.restartTimer);
+      opencodeState.restartTimer = setTimeout(() => {
+        ensureOpenCodeProcess();
+      }, 1200);
+    }
+  });
+
+  return true;
+}
+
+async function ensureOpenCodeReady(timeoutMs = OPENCODE_READY_TIMEOUT_MS) {
+  let started = ensureOpenCodeProcess();
+
+  if (!started && opencodeState.missingBinary) {
+    const downloaded = await ensureDownloadedOpenCodeSpec();
+    if (downloaded) {
+      started = ensureOpenCodeProcess();
+    }
+  }
+
+  if (!started) return false;
+  if (opencodeState.ready && opencodeState.serverUrl) return true;
+
+  const startTs = Date.now();
+  while (Date.now() - startTs < timeoutMs) {
+    if (!opencodeState.proc || opencodeState.proc.killed) {
+      if (opencodeState.missingBinary) {
+        const downloaded = await ensureDownloadedOpenCodeSpec();
+        if (downloaded) {
+          const restarted = ensureOpenCodeProcess();
+          if (restarted) continue;
+        }
+      }
+      return false;
+    }
+    if (opencodeState.ready && opencodeState.serverUrl) return true;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  return !!(opencodeState.ready && opencodeState.serverUrl);
+}
+
+function stopOpenCodeProcess() {
+  opencodeState.shuttingDown = true;
+  clearTimeout(opencodeState.restartTimer);
+
+  for (const [, runState] of opencodeState.activeRuns.entries()) {
+    if (runState.abortController && typeof runState.abortController.abort === "function") {
+      try {
+        runState.abortController.abort();
+      } catch {}
+    }
+    if (runState.proc && !runState.proc.killed) {
+      try {
+        runState.proc.kill("SIGTERM");
+        if (process.platform === "win32") runState.proc.kill("SIGKILL");
+      } catch {}
+    }
+  }
+  opencodeState.activeRuns.clear();
+
+  if (opencodeState.proc && !opencodeState.proc.killed) {
+    try {
+      opencodeState.proc.kill("SIGTERM");
+      if (process.platform === "win32") opencodeState.proc.kill("SIGKILL");
+    } catch {}
+  }
+
+  opencodeState.proc = null;
+  opencodeState.ready = false;
+  opencodeState.serverUrl = "";
+}
+
 function createWindow() {
   Menu.setApplicationMenu(null);
 
@@ -199,6 +1249,7 @@ function createWindow() {
       contextIsolation: true,
       sandbox: true,
       preload: path.join(__dirname, "preload.js"),
+      backgroundThrottling: false,
     },
   });
 
@@ -235,12 +1286,43 @@ ipcMain.handle("select-folder", async () => {
   return allowedBasePath;
 });
 
+ipcMain.handle("set-workspace-base", async (_event, folderPath) => {
+  const raw = typeof folderPath === "string" ? folderPath.trim() : "";
+  if (!raw) {
+    return { ok: false, error: "Workspace path is required." };
+  }
+
+  try {
+    const resolved = path.resolve(raw);
+    const stat = await fs.promises.stat(resolved);
+    if (!stat.isDirectory()) {
+      return { ok: false, error: "Workspace path must be a directory." };
+    }
+    allowedBasePath = resolved;
+    return { ok: true, path: allowedBasePath };
+  } catch (err) {
+    return { ok: false, error: err?.message || "Unable to set workspace base path." };
+  }
+});
+
 // ── Path validation helper ───────────────────────────────────────────────────
+function isSameOrSubPath(basePath, targetPath) {
+  const baseResolved = path.resolve(String(basePath || ""));
+  const targetResolved = path.resolve(String(targetPath || ""));
+  if (!baseResolved || !targetResolved) return false;
+
+  if (process.platform === "win32") {
+    const baseLower = baseResolved.toLowerCase();
+    const targetLower = targetResolved.toLowerCase();
+    return targetLower === baseLower || targetLower.startsWith(baseLower + path.sep.toLowerCase());
+  }
+
+  return targetResolved === baseResolved || targetResolved.startsWith(baseResolved + path.sep);
+}
+
 function isPathAllowed(targetPath) {
   if (!allowedBasePath) return false;
-  const resolved = path.resolve(targetPath);
-  const base = path.resolve(allowedBasePath);
-  return resolved === base || resolved.startsWith(base + path.sep);
+  return isSameOrSubPath(allowedBasePath, targetPath);
 }
 
 // ── IPC: read directory tree (1 level deep for lazy loading) ────────────────
@@ -387,8 +1469,7 @@ ipcMain.handle("write-file", async (_event, filePath, content) => {
     if (!allowedBasePath) {
       return { success: false, error: "No folder open — open a project folder before accepting diffs." };
     }
-    const base = path.resolve(allowedBasePath);
-    if (!resolved.startsWith(base + path.sep) && resolved !== base) {
+    if (!isSameOrSubPath(allowedBasePath, resolved)) {
       return { success: false, error: "Write denied: path is outside your opened folder." };
     }
     await fs.promises.writeFile(resolved, content, "utf-8");
@@ -586,6 +1667,742 @@ ipcMain.handle("get-platform-info", () => {
     isMac: platform === "darwin",
     isLinux: platform === "linux",
   };
+});
+
+const NATIVE_AGENT_MAX_CONTEXT_MESSAGES = 16;
+const NATIVE_AGENT_TIMEOUT_MS = 120000;
+
+function normalizeAgentContentPart(part) {
+  if (!part) return "";
+  if (typeof part === "string") return part;
+  if (part.type === "text" && typeof part.text === "string") return part.text;
+  if (part.type === "image_url") return "[Image omitted]";
+  if (typeof part.text === "string") return part.text;
+  return "";
+}
+
+function normalizeAgentMessageContent(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.map(normalizeAgentContentPart).filter(Boolean).join("\n");
+}
+
+function normalizeAgentContextMessages(context) {
+  if (!Array.isArray(context)) return [];
+  return context
+    .map((msg) => {
+      const role = msg?.role === "assistant" ? "assistant" : msg?.role === "system" ? "system" : "user";
+      const content = normalizeAgentMessageContent(msg?.content).trim();
+      if (!content) return null;
+      return { role, content };
+    })
+    .filter(Boolean);
+}
+
+function summarizeAgentMemory(memory = {}) {
+  const lines = [];
+  const prefs = Array.isArray(memory.preferences) ? memory.preferences.slice(0, 5) : [];
+  const coding = Array.isArray(memory.coding) ? memory.coding.slice(0, 5) : [];
+  const context = Array.isArray(memory.context) ? memory.context.slice(0, 5) : [];
+
+  if (prefs.length > 0) lines.push(`Preferences: ${prefs.join("; ")}`);
+  if (coding.length > 0) lines.push(`Coding notes: ${coding.join("; ")}`);
+  if (context.length > 0) lines.push(`Context notes: ${context.join("; ")}`);
+
+  return lines.join("\n");
+}
+
+function normalizeProviderModelId(provider, modelId) {
+  const raw = String(modelId || "").trim();
+  if (!raw) return "";
+  const cleaned = raw.includes("::") ? raw.split("::").slice(1).join("::") : raw;
+  if (provider === "huggingface" && !cleaned.includes(":")) {
+    return `${cleaned}:fastest`;
+  }
+  return cleaned;
+}
+
+function createAgentTimeoutSignal(parentSignal, timeoutMs = NATIVE_AGENT_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const onParentAbort = () => controller.abort();
+
+  if (parentSignal) {
+    if (parentSignal.aborted) {
+      controller.abort();
+    } else {
+      parentSignal.addEventListener("abort", onParentAbort, { once: true });
+    }
+  }
+
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timer);
+      if (parentSignal) {
+        parentSignal.removeEventListener("abort", onParentAbort);
+      }
+    },
+  };
+}
+
+function parseProviderError(rawText, fallback = "Request failed") {
+  const text = String(rawText || "").trim();
+  if (!text) return fallback;
+  try {
+    const json = JSON.parse(text);
+    return String(
+      json?.error?.message ||
+      json?.error ||
+      json?.message ||
+      json?.detail ||
+      text ||
+      fallback
+    );
+  } catch {
+    return text;
+  }
+}
+
+function extractOpenAICompatText(json = {}) {
+  const message = json?.choices?.[0]?.message;
+  if (typeof message?.content === "string") return message.content.trim();
+  if (Array.isArray(message?.content)) {
+    return message.content
+      .map((part) => {
+        if (typeof part?.text === "string") return part.text;
+        if (part?.type === "text" && typeof part?.text === "string") return part.text;
+        return "";
+      })
+      .join("")
+      .trim();
+  }
+
+  const fallback = json?.choices?.[0]?.text;
+  if (typeof fallback === "string") return fallback.trim();
+  return "";
+}
+
+async function requestOpenAICompatibleCompletion({ endpoint, headers, body, signal, providerLabel }) {
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  const raw = await res.text();
+  if (!res.ok) {
+    throw new Error(`${providerLabel} ${res.status}: ${parseProviderError(raw)}`);
+  }
+
+  let json;
+  try {
+    json = JSON.parse(raw || "{}");
+  } catch {
+    throw new Error(`${providerLabel}: invalid JSON response.`);
+  }
+
+  const text = extractOpenAICompatText(json);
+  if (!text) {
+    throw new Error(`${providerLabel} returned an empty response.`);
+  }
+
+  return text;
+}
+
+function toAnthropicMessages(messages = []) {
+  return messages
+    .filter((m) => m.role !== "system")
+    .map((m) => ({
+      role: m.role === "assistant" ? "assistant" : "user",
+      content: m.content,
+    }));
+}
+
+function extractAnthropicText(json = {}) {
+  if (!Array.isArray(json?.content)) return "";
+  return json.content
+    .map((part) => (part?.type === "text" && typeof part?.text === "string" ? part.text : ""))
+    .join("")
+    .trim();
+}
+
+function resolveOllamaConnection(configValue) {
+  const raw = String(configValue || "").trim();
+  if (!raw) return { baseUrl: "http://127.0.0.1:11434", apiKey: "" };
+
+  const looksLikeUrl =
+    /^https?:\/\//i.test(raw) ||
+    raw.includes("localhost") ||
+    raw.includes("127.0.0.1");
+
+  if (looksLikeUrl) {
+    const baseUrl = (/^https?:\/\//i.test(raw) ? raw : `http://${raw}`).replace(/\/+$/, "");
+    return { baseUrl, apiKey: "" };
+  }
+
+  return { baseUrl: "https://ollama.com", apiKey: raw };
+}
+
+async function requestAgentCompletion({ provider, model, key, messages, signal }) {
+  const normalizedProvider = String(provider || "openrouter").trim() || "openrouter";
+  const normalizedModel = normalizeProviderModelId(normalizedProvider, model);
+  if (!normalizedModel) throw new Error("Model is required for Agent mode.");
+
+  const timed = createAgentTimeoutSignal(signal, NATIVE_AGENT_TIMEOUT_MS);
+  try {
+    if (normalizedProvider === "openrouter") {
+      if (!key) throw new Error("OpenRouter API key is missing.");
+      return await requestOpenAICompatibleCompletion({
+        endpoint: "https://openrouter.ai/api/v1/chat/completions",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://KritakaPrajna.app",
+          "X-Title": "KritakaPrajna",
+        },
+        body: {
+          model: normalizedModel,
+          messages,
+          stream: false,
+          max_tokens: 1400,
+          temperature: 0.2,
+          top_p: 0.9,
+        },
+        signal: timed.signal,
+        providerLabel: "OpenRouter",
+      });
+    }
+
+    if (normalizedProvider === "openai") {
+      if (!key) throw new Error("OpenAI API key is missing.");
+      return await requestOpenAICompatibleCompletion({
+        endpoint: "https://api.openai.com/v1/chat/completions",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "Content-Type": "application/json",
+        },
+        body: {
+          model: normalizedModel,
+          messages,
+          stream: false,
+          max_tokens: 1400,
+          temperature: 0.2,
+          top_p: 0.9,
+        },
+        signal: timed.signal,
+        providerLabel: "OpenAI",
+      });
+    }
+
+    if (normalizedProvider === "huggingface") {
+      if (!key) throw new Error("Hugging Face API key is missing.");
+      return await requestOpenAICompatibleCompletion({
+        endpoint: "https://router.huggingface.co/v1/chat/completions",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "Content-Type": "application/json",
+        },
+        body: {
+          model: normalizedModel,
+          messages,
+          stream: false,
+          max_tokens: 1400,
+          temperature: 0.2,
+          top_p: 0.9,
+        },
+        signal: timed.signal,
+        providerLabel: "HuggingFace",
+      });
+    }
+
+    if (normalizedProvider === "anthropic") {
+      if (!key) throw new Error("Anthropic API key is missing.");
+
+      const system = messages.find((m) => m.role === "system")?.content || "";
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": key,
+          "anthropic-version": "2023-06-01",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: normalizedModel,
+          max_tokens: 1400,
+          temperature: 0.2,
+          messages: toAnthropicMessages(messages),
+          ...(system ? { system } : {}),
+        }),
+        signal: timed.signal,
+      });
+
+      const raw = await res.text();
+      if (!res.ok) {
+        throw new Error(`Anthropic ${res.status}: ${parseProviderError(raw)}`);
+      }
+
+      let json;
+      try {
+        json = JSON.parse(raw || "{}");
+      } catch {
+        throw new Error("Anthropic: invalid JSON response.");
+      }
+
+      const text = extractAnthropicText(json);
+      if (!text) {
+        throw new Error("Anthropic returned an empty response.");
+      }
+
+      return text;
+    }
+
+    if (normalizedProvider === "ollama") {
+      const { baseUrl, apiKey } = resolveOllamaConnection(key);
+      const res = await fetch(`${baseUrl}/api/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+        },
+        body: JSON.stringify({
+          model: normalizedModel,
+          messages: messages.filter((m) => m.role === "system" || m.role === "assistant" || m.role === "user"),
+          stream: false,
+          options: {
+            num_predict: 1400,
+            temperature: 0.2,
+            top_p: 0.9,
+          },
+        }),
+        signal: timed.signal,
+      });
+
+      const raw = await res.text();
+      if (!res.ok) {
+        throw new Error(`Ollama ${res.status}: ${parseProviderError(raw)}`);
+      }
+
+      let json;
+      try {
+        json = JSON.parse(raw || "{}");
+      } catch {
+        throw new Error("Ollama: invalid JSON response.");
+      }
+
+      const text = String(json?.message?.content || json?.response || "").trim();
+      if (!text) {
+        throw new Error("Ollama returned an empty response.");
+      }
+
+      return text;
+    }
+
+    throw new Error(`Unsupported provider for Agent mode: ${normalizedProvider}`);
+  } finally {
+    timed.cleanup();
+  }
+}
+
+function normalizePlanItems(value) {
+  const source = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(/\r?\n|;/)
+      : [];
+
+  return source
+    .map((item) => String(item == null ? "" : item).replace(/^[\-\s\d\.\)]+/, "").trim())
+    .filter(Boolean)
+    .slice(0, 6);
+}
+
+function buildFallbackPlan(prompt = "") {
+  const codingLike = /\b(code|bug|fix|refactor|build|test|error|file|workspace|compile)\b/i.test(String(prompt));
+  if (codingLike) {
+    return [
+      "Understand the coding task and constraints",
+      "Identify relevant files or components",
+      "Propose concrete implementation steps",
+      "Deliver the final solution and checks",
+    ];
+  }
+
+  return [
+    "Understand the request",
+    "Plan the response",
+    "Provide the best actionable answer",
+  ];
+}
+
+function extractJsonCandidate(rawText = "") {
+  const text = String(rawText || "").trim();
+  if (!text) return "";
+
+  const fenced = text.match(/```json\s*([\s\S]*?)```/i) || text.match(/```\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) return fenced[1].trim();
+
+  if (text.startsWith("{") && text.endsWith("}")) return text;
+
+  const first = text.indexOf("{");
+  const last = text.lastIndexOf("}");
+  if (first !== -1 && last > first) {
+    return text.slice(first, last + 1).trim();
+  }
+
+  return "";
+}
+
+function parseAgentModelResponse(rawText, prompt) {
+  const raw = String(rawText || "").trim();
+  const jsonCandidate = extractJsonCandidate(raw);
+
+  let parsed = null;
+  if (jsonCandidate) {
+    try {
+      parsed = JSON.parse(jsonCandidate);
+    } catch {}
+  }
+
+  const plan = normalizePlanItems(parsed?.plan || parsed?.steps || parsed?.todo);
+  const answerCandidate =
+    parsed?.answer ||
+    parsed?.response ||
+    parsed?.result ||
+    parsed?.final ||
+    parsed?.text ||
+    "";
+  let answer = String(answerCandidate || "").trim();
+  if (!answer) answer = raw;
+
+  const step = String(parsed?.step || parsed?.currentStep || parsed?.current_step || "").trim();
+  let command = String(parsed?.command || parsed?.suggestedCommand || "").trim();
+  if (!command) command = extractSuggestedCommand(answer);
+
+  return {
+    plan: plan.length > 0 ? plan : buildFallbackPlan(prompt),
+    step,
+    answer,
+    command,
+  };
+}
+
+function buildNativeAgentMessages(data) {
+  const memorySummary = summarizeAgentMemory(data.memory);
+  const contextMessages = normalizeAgentContextMessages(data.context).slice(-NATIVE_AGENT_MAX_CONTEXT_MESSAGES);
+
+  const systemPrompt = [
+    "You are KritakaPrajna Agent, an in-app coding assistant.",
+    "Return ONLY valid JSON without markdown fences.",
+    "JSON schema:",
+    '{"plan":["step 1","step 2"],"step":"current step","answer":"final answer","command":"optional shell command"}',
+    "Rules:",
+    "- plan must contain 2-6 concise actionable steps.",
+    "- answer must be practical and directly useful.",
+    "- command must be empty unless a shell command is clearly needed.",
+  ].join("\n");
+
+  const requestSections = [];
+  if (data.workspacePath) {
+    requestSections.push(`Workspace folder: ${data.workspacePath}`);
+  }
+  if (memorySummary) {
+    requestSections.push(`User memory:\n${memorySummary}`);
+  }
+  requestSections.push(`User request:\n${String(data.prompt || "").trim()}`);
+  requestSections.push("Output JSON only.");
+
+  return [
+    { role: "system", content: systemPrompt },
+    ...contextMessages,
+    { role: "user", content: requestSections.join("\n\n") },
+  ];
+}
+
+async function runNativeAgentRequest(data, runState) {
+  const requestId = data.requestId;
+  const sessionId = data.sessionId;
+
+  try {
+    sendOpenCodeStatus("run_started", {
+      requestId,
+      sessionId,
+      pid: process.pid,
+      provider: data.provider,
+      model: data.model,
+      cwd: data.workspacePath || null,
+      source: "native-agent",
+    });
+
+    sendOpenCodeEvent({
+      type: "step_start",
+      requestId,
+      sessionId,
+      data: { step: "Planning response" },
+    });
+
+    const messages = buildNativeAgentMessages(data);
+    const rawResponse = await requestAgentCompletion({
+      provider: data.provider,
+      model: data.model,
+      key: data.providerConfig?.key,
+      messages,
+      signal: runState.abortController?.signal,
+    });
+
+    if (runState.cancelled || runState.abortController?.signal?.aborted) {
+      sendOpenCodeStatus("run_stopped", {
+        requestId,
+        sessionId,
+        code: 130,
+        signal: "SIGTERM",
+        message: "Agent run cancelled.",
+      });
+      return;
+    }
+
+    const parsed = parseAgentModelResponse(rawResponse, data.prompt);
+    sendOpenCodeEvent({
+      type: "plan",
+      requestId,
+      sessionId,
+      data: { steps: parsed.plan },
+    });
+
+    sendOpenCodeEvent({
+      type: "step_start",
+      requestId,
+      sessionId,
+      data: { step: parsed.step || "Drafting final answer" },
+    });
+
+    if (parsed.command) {
+      sendOpenCodeEvent({
+        type: "terminal",
+        requestId,
+        sessionId,
+        data: {
+          text: `Suggested command:\n${parsed.command}`,
+          suggestedCommand: parsed.command,
+        },
+      });
+    }
+
+    const finalText = normalizeFinalRunText(parsed.answer);
+    if (!finalText) {
+      throw new Error("Agent returned an empty response.");
+    }
+
+    sendOpenCodeEvent({
+      type: "result",
+      requestId,
+      sessionId,
+      data: { text: finalText },
+    });
+
+    sendOpenCodeStatus("run_stopped", {
+      requestId,
+      sessionId,
+      code: 0,
+      signal: null,
+      source: "native-agent",
+    });
+  } catch (err) {
+    const aborted = runState.cancelled || runState.abortController?.signal?.aborted;
+    const message = String(err?.message || "Agent run failed.");
+    if (!aborted) {
+      sendOpenCodeEvent({
+        type: "error",
+        requestId,
+        sessionId,
+        data: { message },
+      });
+    }
+    sendOpenCodeStatus("run_stopped", {
+      requestId,
+      sessionId,
+      code: aborted ? 130 : 1,
+      signal: aborted ? "SIGTERM" : null,
+      message: aborted ? "Agent run cancelled." : message,
+      source: "native-agent",
+    });
+  } finally {
+    opencodeState.activeRuns.delete(requestId);
+    opencodeState.requestSessionMap.delete(requestId);
+  }
+}
+
+ipcMain.handle("opencode-start", async () => {
+  const ok = await ensureOpenCodeReady(6000);
+  const baseError = opencodeState.lastError || "";
+  const installHint = opencodeState.missingBinary
+    ? buildOpenCodeMissingBinaryMessage()
+    : "";
+  return {
+    ok,
+    running: !!opencodeState.proc,
+    pid: opencodeState.proc?.pid || null,
+    ready: !!opencodeState.ready,
+    url: opencodeState.serverUrl || "",
+    error: installHint || baseError || "",
+    missingBinary: opencodeState.missingBinary,
+  };
+});
+
+ipcMain.handle("opencode-run", async (_event, payload) => {
+  const ready = await ensureOpenCodeReady();
+  if (!ready) {
+    const installHint = opencodeState.missingBinary
+      ? buildOpenCodeMissingBinaryMessage()
+      : "OpenCode process unavailable.";
+    return { ok: false, error: installHint || opencodeState.lastError || "OpenCode process unavailable." };
+  }
+
+  const data = sanitizeOpenCodePayload(payload);
+  if (!data.requestId) return { ok: false, error: "Missing requestId." };
+  if (!data.sessionId) return { ok: false, error: "Missing sessionId." };
+  if (!data.prompt.trim()) return { ok: false, error: "Prompt is empty." };
+
+  let runCwd = "";
+  if (data.workspacePath) {
+    const candidate = path.resolve(data.workspacePath);
+    try {
+      const stat = await fs.promises.stat(candidate);
+      if (!stat.isDirectory()) {
+        return { ok: false, error: "Workspace path must be a folder." };
+      }
+      runCwd = candidate;
+      allowedBasePath = candidate;
+    } catch {
+      return { ok: false, error: "Selected workspace folder does not exist." };
+    }
+  } else if (allowedBasePath) {
+    runCwd = path.resolve(allowedBasePath);
+  }
+
+  opencodeState.requestSessionMap.set(data.requestId, data.sessionId);
+  const chatSessionId = data.sessionId;
+  const mappedOpenCodeSessionId = String(opencodeState.chatSessionMap.get(chatSessionId) || "").trim();
+  const runSpec = buildOpenCodeRunSpec({
+    serverUrl: opencodeState.serverUrl,
+    provider: data.provider,
+    model: data.model,
+    opencodeSessionId: mappedOpenCodeSessionId,
+    prompt: data.prompt,
+  });
+
+  let runProc;
+  try {
+    runProc = spawn(runSpec.command, runSpec.args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: false,
+      windowsHide: true,
+      ...(runCwd ? { cwd: runCwd } : {}),
+      env: {
+        ...process.env,
+        ...(runSpec.env || {}),
+        ...buildProviderEnv(data.provider, data.providerConfig),
+      },
+    });
+  } catch (err) {
+    const message = err?.message || "Failed to start OpenCode run.";
+    if (isMissingBinaryError(message)) {
+      opencodeState.missingBinary = true;
+    }
+    return { ok: false, error: message };
+  }
+
+  const runState = {
+    proc: runProc,
+    chatSessionId: data.sessionId,
+    opencodeSessionId: mappedOpenCodeSessionId,
+    stdoutBuffer: "",
+    stderrBuffer: "",
+    stderrTail: "",
+    outputText: "",
+    hadError: false,
+    errorMessage: "",
+  };
+  opencodeState.activeRuns.set(data.requestId, runState);
+
+  runProc.once("spawn", () => {
+    sendOpenCodeStatus("run_started", {
+      requestId: data.requestId,
+      sessionId: chatSessionId,
+      pid: runProc.pid,
+      provider: data.provider,
+      model: data.model,
+      cwd: runCwd || null,
+    });
+  });
+
+  runProc.stdout.on("data", (chunk) => {
+    consumeOpenCodeRunChunk({
+      requestId: data.requestId,
+      chatSessionId,
+      runState,
+      stream: "stdout",
+      chunk,
+    });
+  });
+
+  runProc.stderr.on("data", (chunk) => {
+    const text = chunk.toString("utf-8");
+    runState.stderrTail = (runState.stderrTail + text).slice(-OPENCODE_MAX_STDIO_BUFFER);
+
+    consumeOpenCodeRunChunk({
+      requestId: data.requestId,
+      chatSessionId,
+      runState,
+      stream: "stderr",
+      chunk,
+    });
+  });
+
+  runProc.on("error", (err) => {
+    const message = err?.message || "OpenCode run process error.";
+    runState.hadError = true;
+    runState.errorMessage = message;
+    sendOpenCodeEvent({
+      type: "error",
+      requestId: data.requestId,
+      sessionId: chatSessionId,
+      data: { message },
+    });
+  });
+
+  runProc.on("close", (code, signal) => {
+    finalizeOpenCodeRun(data.requestId, runState, code, signal);
+  });
+
+  return { ok: true };
+});
+
+ipcMain.handle("opencode-reset-session", (_event, sessionId) => {
+  const sid = String(sessionId || "").trim();
+  if (!sid) return { ok: false, error: "Missing sessionId." };
+
+  for (const [requestId, mappedSessionId] of opencodeState.requestSessionMap.entries()) {
+    if (mappedSessionId === sid) {
+      opencodeState.requestSessionMap.delete(requestId);
+    }
+  }
+
+  for (const [requestId, runState] of opencodeState.activeRuns.entries()) {
+    if (runState.chatSessionId !== sid) continue;
+    if (runState.proc && !runState.proc.killed) {
+      try {
+        runState.proc.kill("SIGTERM");
+      } catch {}
+    }
+    opencodeState.activeRuns.delete(requestId);
+  }
+
+  opencodeState.chatSessionMap.delete(sid);
+
+  return { ok: true };
 });
 
 // ── IPC: manual update check ────────────────────────────────────────────────
@@ -1843,7 +3660,6 @@ ipcMain.handle("terminal-execute", async (_event, { command, cwd }) => {
 
   const id = nextTerminalId++;
   const opts = {
-    shell: true,
     windowsHide: true,
     env: process.env,
   };
@@ -1851,7 +3667,16 @@ ipcMain.handle("terminal-execute", async (_event, { command, cwd }) => {
 
   let proc;
   try {
-    proc = spawn(command, [], opts);
+    if (process.platform === "win32") {
+      // Run through PowerShell explicitly so the in-app terminal matches user expectations on Windows.
+      proc = spawn(
+        "powershell.exe",
+        ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
+        opts
+      );
+    } else {
+      proc = spawn(command, [], { ...opts, shell: true });
+    }
   } catch (err) {
     return { ok: false, error: err.message };
   }
@@ -1972,8 +3797,10 @@ function isStoreBuild() {
 }
 
 app.whenReady().then(() => {
+  opencodeState.shuttingDown = false;
   registerIpcHandlers();
   createWindow();
+  ensureOpenCodeProcess();
   if (app.isPackaged && !isStoreBuild()) {
     setupAutoUpdater();
   }
@@ -1981,6 +3808,7 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
+    stopOpenCodeProcess();
     app.quit();
   }
 });
@@ -1989,4 +3817,8 @@ app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
   }
+});
+
+app.on("before-quit", () => {
+  stopOpenCodeProcess();
 });

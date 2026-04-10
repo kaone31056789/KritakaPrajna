@@ -1,0 +1,7 @@
+category: Design
+interface:
+  display_name: 'Figma'
+  short_description: 'Use Figma MCP for design-to-code work'
+  icon_dark: './assets/icon-dark.png'
+  icon_light: './assets/icon-light.png'
+  default_prompt: 'Use Figma MCP to help with design-to-code workflow.'

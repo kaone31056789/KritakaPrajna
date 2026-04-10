@@ -2,59 +2,161 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
+
+/* ── Theme Variables ── */
+:root {
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #111111;
+  --bg-tertiary: #1a1a1a;
+  --accent: #00ff41;
+  --accent-glow: rgba(0, 255, 65, 0.25);
+}
 
 body {
   margin: 0;
-  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue",
-    sans-serif;
+  font-family: "JetBrains Mono", "Fira Code", "IBM Plex Mono", monospace;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #0a0f1a;
-  color: #cbd5e1;
+  background-color: var(--bg-primary);
+  color: #b0b0b0;
 }
 
-/* Custom scrollbar for dark theme */
+/* Terminal scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: var(--bg-primary);
 }
 ::-webkit-scrollbar-thumb {
-  background: #1e293b;
-  border-radius: 3px;
+  background: var(--bg-tertiary);
+  border-radius: 1px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #334155;
+  background: #2a2a2a;
 }
 
-/* Glassmorphism */
+/* ── Range slider styling ── */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  outline: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #e0e0e0;
+  border: 2px solid var(--accent);
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #e0e0e0;
+  border: 2px solid var(--accent);
+  cursor: pointer;
+}
+
+/* ── Terminal Glass (flat, no blur) ── */
 .glass {
-  background: rgba(10, 15, 26, 0.7);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: rgba(10, 10, 10, 0.95);
+  border: 1px solid #1a1a1a;
 }
 .glass-sidebar {
-  background: rgba(15, 23, 42, 0.75);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: rgba(10, 10, 10, 0.95);
+  border: 1px solid #1a1a1a;
 }
 
-/* Saffron glow on hover */
-.glow-saffron:hover {
-  box-shadow: 0 0 16px rgba(245, 158, 11, 0.15);
+/* ── Terminal Card & Surface Utilities ── */
+.card-3d {
+  background: #111111;
+  border: 1px solid #1a1a1a;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+}
+.card-3d-hover:hover {
+  border-color: #2a2a2a;
 }
 
-/* macOS-style smooth transitions for all interactive elements */
+.surface-0 { background: #0a0a0a; }
+.surface-1 { background: #0d0d0d; }
+.surface-2 { background: #111111; }
+.surface-3 { background: #1a1a1a; }
+
+.inner-highlight {
+  box-shadow: inset 0 1px 0 rgba(0, 255, 65, 0.04);
+}
+
+/* ── CRT Scanline overlay ── */
+.noise-overlay {
+  position: relative;
+}
+.noise-overlay::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 1;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 255, 65, 0.015) 2px,
+    rgba(0, 255, 65, 0.015) 4px
+  );
+  border-radius: inherit;
+}
+
+/* ── Terminal separator ── */
+.separator-fade {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(0, 255, 65, 0.08) 30%, rgba(0, 255, 65, 0.08) 70%, transparent);
+}
+
+/* ── Terminal text glow ── */
+.text-glow-green {
+  text-shadow: 0 0 8px rgba(0, 255, 65, 0.3);
+}
+.text-glow-cyan {
+  text-shadow: 0 0 8px rgba(0, 212, 255, 0.3);
+}
+
+/* ── Terminal cursor ── */
+.terminal-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: #00ff41;
+  animation: cursor-blink 1s step-end infinite;
+  vertical-align: text-bottom;
+  margin-left: 2px;
+}
+
+/* Terminal green glow on hover */
+.glow-green:hover {
+  box-shadow: 0 0 12px rgba(0, 255, 65, 0.12);
+}
+
+/* macOS-style smooth transitions */
 * {
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Smooth focus glow for inputs */
+/* Terminal focus glow */
 input:focus, textarea:focus {
-  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
+  box-shadow: 0 0 0 2px rgba(0, 255, 65, 0.2), 0 0 0 4px rgba(0, 255, 65, 0.08);
 }
 
 /* Reduced motion support */
@@ -70,6 +172,7 @@ input:focus, textarea:focus {
 .markdown-body {
   word-wrap: break-word;
   overflow-wrap: break-word;
+  font-family: "JetBrains Mono", monospace;
 }
 
 .markdown-body pre {
@@ -84,16 +187,14 @@ input:focus, textarea:focus {
   margin-bottom: 0 !important;
 }
 
-/* Ensure code blocks don't inherit the parent's white-space pre-wrap */
 .markdown-body .react-syntax-highlighter-line-number {
   user-select: none;
   -webkit-user-select: none;
 }
 
-/* Smooth scrolling in code blocks */
 .markdown-body pre > div {
   scrollbar-width: thin;
-  scrollbar-color: #1e293b transparent;
+  scrollbar-color: #1a1a1a transparent;
 }
 
 .markdown-body pre > div::-webkit-scrollbar {
@@ -101,11 +202,11 @@ input:focus, textarea:focus {
 }
 
 .markdown-body pre > div::-webkit-scrollbar-thumb {
-  background: #1e293b;
-  border-radius: 2px;
+  background: #1a1a1a;
+  border-radius: 1px;
 }
 
-/* ── Styled numbered list (keypoints) ── */
+/* ── Terminal-styled numbered list ── */
 .markdown-body ol.kp-ol {
   counter-reset: kp-item;
   list-style: none;
@@ -118,10 +219,11 @@ input:focus, textarea:focus {
   gap: 10px;
   align-items: flex-start;
   padding: 9px 12px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.055);
-  transition: background 0.13s;
+  border-radius: 2px;
+  background: rgba(0, 255, 65, 0.03);
+  border: 1px solid rgba(0, 255, 65, 0.08);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: background 0.13s, box-shadow 0.13s;
   margin-bottom: 6px;
 }
 
@@ -130,7 +232,7 @@ input:focus, textarea:focus {
 }
 
 .markdown-body ol.kp-ol > li.kp-li:hover {
-  background: rgba(255, 255, 255, 0.042);
+  background: rgba(0, 255, 65, 0.05);
 }
 
 .markdown-body ol.kp-ol > li.kp-li.kp-point-clickable,
@@ -140,12 +242,12 @@ input:focus, textarea:focus {
 
 .markdown-body ol.kp-ol > li.kp-li.kp-point-clickable:hover,
 .markdown-body ul > li.kp-li.kp-point-clickable:hover {
-  background: rgba(14, 116, 144, 0.16);
-  border-color: rgba(56, 189, 248, 0.28);
+  background: rgba(0, 212, 255, 0.08);
+  border-color: rgba(0, 212, 255, 0.2);
 }
 
 .markdown-body li.kp-li.kp-point-clickable:focus-visible {
-  outline: 2px solid rgba(56, 189, 248, 0.55);
+  outline: 2px solid rgba(0, 212, 255, 0.55);
   outline-offset: 2px;
 }
 
@@ -154,9 +256,9 @@ input:focus, textarea:focus {
   content: counter(kp-item);
   min-width: 20px;
   height: 20px;
-  border-radius: 50%;
-  background: rgba(251, 191, 36, 0.13);
-  color: rgb(251, 191, 36);
+  border-radius: 2px;
+  background: rgba(0, 255, 65, 0.1);
+  color: #00ff41;
   font-size: 10px;
   font-weight: 700;
   display: flex;
@@ -165,5 +267,5 @@ input:focus, textarea:focus {
   flex-shrink: 0;
   margin-top: 1px;
   line-height: 1;
-  font-family: "Inter", sans-serif;
+  font-family: "JetBrains Mono", monospace;
 }

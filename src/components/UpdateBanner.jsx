@@ -51,7 +51,7 @@ export default function UpdateBanner() {
           transition={{ duration: 0.25 }}
           className="overflow-hidden"
         >
-          <div className="flex items-center justify-center gap-2 px-3 py-1.5 bg-accent-600/90 text-white text-xs font-medium">
+          <div className="flex items-center justify-center gap-2 px-3 py-1.5 bg-[#00ff41] text-black text-xs font-bold font-mono shadow-elevation-2">
             {update.status === "downloading" && (
               <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />

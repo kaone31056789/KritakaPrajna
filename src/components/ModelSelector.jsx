@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
+﻿import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { filterModelsForTask } from "../utils/smartModelSelect";
 
@@ -77,7 +77,7 @@ function highlightMatch(text, query) {
   return (
     <>
       {text.slice(0, idx)}
-      <span className="bg-saffron-500/30 text-saffron-300 rounded-sm">{text.slice(idx, idx + query.length)}</span>
+      <span className="bg-[#00ff41]/20 text-[#00ff41] rounded-sm">{text.slice(idx, idx + query.length)}</span>
       {text.slice(idx + query.length)}
     </>
   );
@@ -223,20 +223,20 @@ function FavoriteItem({ model, selected, search, isFavorite, onSelect, onToggleF
     <li
       ref={selected ? selectedItemRef : null}
       onClick={onSelect}
-      className={`px-3 py-2.5 cursor-pointer flex items-center gap-2 border-b border-white/[0.03] ${selected ? "bg-saffron-500/12 text-saffron-300" : "text-dark-200 hover:bg-dark-700/70"}`}
+      className={`px-3 py-2.5 cursor-pointer flex items-center gap-2 border-b border-white/[0.03] ${selected ? "bg-[#00ff41]/12 text-[#00ff41]" : "text-[#e0e0e0] hover:bg-[#1a1a1a]/70"}`}
     >
       <div className="flex flex-col min-w-0 flex-1 gap-1">
         <div className="flex items-center gap-2 min-w-0">
           <span className="truncate text-sm font-medium">{highlightMatch(displayName(model), search)}</span>
           <PricingBadge model={model} compact />
         </div>
-        <div className="flex items-center gap-2 text-xs text-dark-400 min-w-0">
+        <div className="flex items-center gap-2 text-xs text-[#b0b0b0]/60 min-w-0">
           <span className="truncate">{sourceLabel(provider)}</span>
           <span className="truncate">{highlightMatch(model.id, search)}</span>
         </div>
       </div>
       <BudgetIndicator model={model} monthlyBudget={monthlyBudget} avgMsgTokens={avgMsgTokens} />
-      <StarIcon filled={isFavorite} className={isFavorite ? "text-saffron-400" : "text-dark-500 hover:text-saffron-400"} onClick={onToggleFav} />
+      <StarIcon filled={isFavorite} className={isFavorite ? "text-[#00ff41]" : "text-[#b0b0b0]/40 hover:text-[#00ff41]"} onClick={onToggleFav} />
     </li>
   );
 }
@@ -245,7 +245,7 @@ function BudgetIndicator({ model, monthlyBudget, avgMsgTokens }) {
   if (!monthlyBudget || monthlyBudget <= 0) return null;
   // Show for any model — free ones always fit, paid ones need pricing data
   if (isFreeModel(model)) return (
-    <span className="shrink-0 text-[11px] font-bold text-emerald-400" title="Free — fits any budget">✓</span>
+    <span className="shrink-0 text-[11px] font-bold text-emerald-400" title="Free — fits any budget">OK</span>
   );
   const p = model?.pricing;
   if (!p || (Number(p.prompt) === 0 && Number(p.completion) === 0)) return null;
@@ -258,7 +258,7 @@ function BudgetIndicator({ model, monthlyBudget, avgMsgTokens }) {
       className={`shrink-0 text-[11px] font-bold ${fits ? "text-emerald-400" : "text-red-400"}`}
       title={`~${estLabel}/mo · budget $${monthlyBudget}/mo`}
     >
-      {fits ? "✓" : "✗"}
+      {fits ? "OK" : "âœ—"}
     </span>
   );
 }
@@ -268,14 +268,14 @@ function ModelRow({ model, selected, search, isFavorite, onSelect, onToggleFav, 
     <li
       ref={selected ? selectedItemRef : null}
       onClick={onSelect}
-      className={`px-4 py-2 cursor-pointer flex items-center gap-2 ${selected ? "bg-saffron-500/12 text-saffron-300" : "text-dark-200 hover:bg-dark-700/60"}`}
+      className={`px-4 py-2 cursor-pointer flex items-center gap-2 ${selected ? "bg-[#00ff41]/12 text-[#00ff41]" : "text-[#e0e0e0] hover:bg-[#1a1a1a]/60 hover:shadow-inner-glow"}`}
     >
       <div className="flex items-center gap-2 min-w-0 flex-1">
         <span className="truncate text-sm">{highlightMatch(displayName(model), search)}</span>
         <PricingBadge model={model} compact />
       </div>
       <BudgetIndicator model={model} monthlyBudget={monthlyBudget} avgMsgTokens={avgMsgTokens} />
-      <StarIcon filled={isFavorite} className={isFavorite ? "text-saffron-400" : "text-dark-500 hover:text-saffron-400"} onClick={onToggleFav} />
+      <StarIcon filled={isFavorite} className={isFavorite ? "text-[#00ff41]" : "text-[#b0b0b0]/40 hover:text-[#00ff41]"} onClick={onToggleFav} />
     </li>
   );
 }
@@ -435,10 +435,10 @@ export default function ModelSelector({ models, selected, onSelect, selectedMode
         <button
           type="button"
           onClick={() => setTaskOpen((v) => !v)}
-          className="h-10 w-full flex items-center justify-between gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2 cursor-pointer"
+          className="h-10 w-full flex items-center justify-between gap-2 rounded-sm border border-white/[0.08] bg-white/[0.03] px-3 py-2 cursor-pointer"
         >
-          <span className="truncate text-sm font-medium text-dark-100">{currentTask?.label || "Text to Text"}</span>
-          <motion.span animate={{ rotate: taskOpen ? 180 : 0 }} transition={{ duration: 0.2, ease }} className="text-dark-400">
+          <span className="truncate text-sm font-medium text-[#e0e0e0]">{currentTask?.label || "Text to Text"}</span>
+          <motion.span animate={{ rotate: taskOpen ? 180 : 0 }} transition={{ duration: 0.2, ease }} className="text-[#b0b0b0]/60">
             <ChevronIcon className="w-4 h-4" />
           </motion.span>
         </button>
@@ -450,7 +450,7 @@ export default function ModelSelector({ models, selected, onSelect, selectedMode
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.18, ease }}
-              className="absolute z-50 mt-2 w-full bg-dark-800 border border-white/[0.08] rounded-xl shadow-xl shadow-black/30 overflow-hidden"
+              className="absolute z-50 mt-2 w-full bg-[#111111] border border-white/[0.08] rounded-sm shadow-xl shadow-black/30 overflow-hidden"
             >
               {taskMenuOptions.map((task) => (
                 <button
@@ -462,8 +462,8 @@ export default function ModelSelector({ models, selected, onSelect, selectedMode
                   }}
                   className={`w-full text-left px-3 py-2.5 text-sm transition-colors cursor-pointer ${
                     selectedTask === task.id
-                      ? "bg-saffron-500/16 text-saffron-300"
-                      : "text-dark-200 hover:bg-dark-700/70"
+                      ? "bg-[#00ff41]/16 text-[#00ff41]"
+                      : "text-[#e0e0e0] hover:bg-[#1a1a1a]/70"
                   }`}
                 >
                   {task.label}
@@ -481,14 +481,14 @@ export default function ModelSelector({ models, selected, onSelect, selectedMode
           whileHover={{ scale: 1.005 }}
           whileTap={{ scale: 0.995 }}
           transition={{ duration: 0.15, ease }}
-          className="h-10 w-full flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2 cursor-pointer"
+          className="h-10 w-full flex items-center gap-2 rounded-sm border border-white/[0.08] bg-white/[0.03] px-3 py-2 cursor-pointer"
         >
           <div className="min-w-0 flex-1 flex items-center gap-2">
-            <span className="text-sm font-semibold text-dark-100 truncate">{selectedObj ? displayName(selectedObj) : "Select a model"}</span>
-            <span className="text-xs text-dark-400 truncate">{sourceLabel(currentProvider)}</span>
+            <span className="text-sm font-semibold text-[#e0e0e0] truncate">{selectedObj ? displayName(selectedObj) : "Select a model"}</span>
+            <span className="text-xs text-[#b0b0b0]/60 truncate">{sourceLabel(currentProvider)}</span>
           </div>
           <PricingBadge model={selectedObj} compact showCost />
-          <motion.span animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.2, ease }} className="text-dark-400">
+          <motion.span animate={{ rotate: open ? 180 : 0 }} transition={{ duration: 0.2, ease }} className="text-[#b0b0b0]/60">
             <ChevronIcon className="w-4 h-4" />
           </motion.span>
         </motion.button>
@@ -501,7 +501,7 @@ export default function ModelSelector({ models, selected, onSelect, selectedMode
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.2, ease }}
-              className="absolute z-50 mt-2 w-full min-w-[420px] max-w-[720px] bg-dark-800 border border-white/[0.08] rounded-2xl shadow-2xl shadow-black/40 overflow-hidden"
+              className="absolute z-50 mt-2 w-full min-w-[420px] max-w-[720px] bg-[#111111] border border-white/[0.08] rounded-sm shadow-2xl shadow-black/40 overflow-hidden shadow-elevation-5"
             >
               <div ref={dropdownHeaderRef} className="p-3 border-b border-white/[0.06] space-y-2">
                 <input
@@ -510,17 +510,17 @@ export default function ModelSelector({ models, selected, onSelect, selectedMode
                   placeholder="Search models, families, providers..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="w-full bg-dark-700 border border-dark-600/50 rounded-xl px-3 py-2 text-sm text-dark-100 placeholder-dark-400 focus:outline-none focus:ring-2 focus:ring-saffron-500 focus:border-transparent"
+                  className="w-full bg-[#1a1a1a] border border-[#1a1a1a]/50 rounded-sm px-3 py-2 text-sm text-[#e0e0e0] placeholder-[#b0b0b0]/30 focus:outline-none focus:ring-2 focus:ring-[#00ff41] focus:border-transparent shadow-inner-shadow"
                 />
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] text-dark-500">Task: {currentTask?.label || "Text Generation"}</span>
+                  <span className="text-[11px] text-[#b0b0b0]/40">Task: {currentTask?.label || "Text Generation"}</span>
                   <div className="flex gap-1">
                     {["all", "free", "paid"].map((filterValue) => (
                       <button
                         key={filterValue}
                         type="button"
                         onClick={() => setPricingFilter(filterValue)}
-                        className={`px-2.5 py-1 text-[11px] font-medium rounded-md cursor-pointer transition-colors ${pricingFilter === filterValue ? "bg-saffron-500/20 text-saffron-300 border border-saffron-500/30" : "bg-dark-700/60 text-dark-400 border border-transparent hover:text-dark-200 hover:bg-dark-700"}`}
+                        className={`px-2.5 py-1 text-[11px] font-medium rounded-md cursor-pointer transition-colors ${pricingFilter === filterValue ? "bg-[#00ff41]/20 text-[#00ff41] border border-[#00ff41]/30" : "bg-[#1a1a1a]/60 text-[#b0b0b0]/60 border border-transparent hover:text-[#e0e0e0] hover:bg-[#1a1a1a]"}`}
                       >
                         {filterValue === "all" ? "All" : filterValue === "free" ? "Free" : "Paid"}
                       </button>
@@ -533,10 +533,10 @@ export default function ModelSelector({ models, selected, onSelect, selectedMode
                   <motion.div
                     initial={{ opacity: 0, y: -4 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="rounded-xl bg-red-500/10 border border-red-500/25 px-3 py-2.5 space-y-2"
+                    className="rounded-sm bg-red-500/10 border border-red-500/25 px-3 py-2.5 space-y-2"
                   >
                     <div className="flex items-start gap-2">
-                      <span className="text-red-400 text-sm shrink-0">⚠️</span>
+                      <span className="text-red-400 text-sm shrink-0">⚠️ï¸</span>
                       <div className="min-w-0">
                         <p className="text-xs font-semibold text-red-300">{warnModel.name}</p>
                         <p className="text-[11px] text-red-400/80 mt-0.5">
@@ -548,14 +548,14 @@ export default function ModelSelector({ models, selected, onSelect, selectedMode
                       <button
                         type="button"
                         onClick={() => setWarnModel(null)}
-                        className="flex-1 text-[11px] text-dark-300 bg-dark-700 hover:bg-dark-600 rounded-lg py-1.5 cursor-pointer transition-colors"
+                        className="flex-1 text-[11px] text-[#b0b0b0] bg-[#1a1a1a] hover:bg-[#1a1a1a] rounded-sm py-1.5 cursor-pointer transition-colors"
                       >
                         Cancel
                       </button>
                       <button
                         type="button"
                         onClick={() => handleSelect(warnModel.id)}
-                        className="flex-1 text-[11px] text-red-200 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded-lg py-1.5 cursor-pointer transition-colors font-medium"
+                        className="flex-1 text-[11px] text-red-200 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded-sm py-1.5 cursor-pointer transition-colors font-medium"
                       >
                         Use Anyway
                       </button>
@@ -565,13 +565,13 @@ export default function ModelSelector({ models, selected, onSelect, selectedMode
               </div>
 
               <div className="overflow-y-auto py-2" style={{ maxHeight: `${listMaxHeight}px` }}>
-                {filtered.length === 0 && <div className="px-4 py-6 text-sm text-dark-400 text-center">No models available for this task</div>}
+                {filtered.length === 0 && <div className="px-4 py-6 text-sm text-[#b0b0b0]/60 text-center">No models available for this task</div>}
 
                 {favoriteModels.length > 0 && (
                   <div className="mb-3 px-2">
                     <div className="flex items-center gap-2 px-2 py-2 border-b border-white/[0.05]">
-                      <span className="text-saffron-400 text-sm">★</span>
-                      <span className="text-sm font-semibold text-saffron-400">Favorites</span>
+                      <span className="text-[#00ff41] text-sm">â˜…</span>
+                      <span className="text-sm font-semibold text-[#00ff41]">Favorites</span>
                     </div>
                     <ul>
                       {favoriteModels.map((model) => (
@@ -599,19 +599,19 @@ export default function ModelSelector({ models, selected, onSelect, selectedMode
                       <button
                         type="button"
                         onClick={() => setCollapsedProviders((prev) => ({ ...prev, [provider.key]: !prev[provider.key] }))}
-                        className="w-full flex items-center gap-2 px-2 py-2.5 border-b border-white/[0.05] hover:bg-dark-700/40 rounded-t-xl cursor-pointer"
+                        className="w-full flex items-center gap-2 px-2 py-2.5 border-b border-white/[0.05] hover:bg-[#1a1a1a]/40 rounded-t-xl cursor-pointer"
                       >
-                        <ChevronIcon className={`w-4 h-4 text-dark-400 transition-transform ${isCollapsed ? "-rotate-90" : ""}`} />
+                        <ChevronIcon className={`w-4 h-4 text-[#b0b0b0]/60 transition-transform ${isCollapsed ? "-rotate-90" : ""}`} />
                         <span className="w-2.5 h-2.5 rounded-full" style={{ background: provider.color }} />
-                        <span className="text-sm font-semibold text-dark-200">{provider.label}</span>
-                        <span className="text-[11px] text-dark-500 ml-auto">{provider.count}</span>
+                        <span className="text-sm font-semibold text-[#e0e0e0]">{provider.label}</span>
+                        <span className="text-[11px] text-[#b0b0b0]/40 ml-auto">{provider.count}</span>
                       </button>
 
                       {!isCollapsed && (
-                        <div className="rounded-b-xl overflow-hidden border-x border-b border-white/[0.03] bg-dark-900/20">
+                        <div className="rounded-b-xl overflow-hidden border-x border-b border-white/[0.03] bg-[#0d0d0d]/20">
                           {provider.families.map((family) => (
                             <div key={`${provider.key}-${family.key}`} className="border-t border-white/[0.03] first:border-t-0">
-                              <div className="px-4 py-2 text-xs font-semibold text-dark-400 bg-dark-900/40">{family.label}</div>
+                              <div className="px-4 py-2 text-xs font-semibold text-[#b0b0b0]/60 bg-[#0d0d0d]/40">{family.label}</div>
                               <ul>
                                 {family.models.map((model) => (
                                   <ModelRow
@@ -643,3 +643,4 @@ export default function ModelSelector({ models, selected, onSelect, selectedMode
     </div>
   );
 }
+

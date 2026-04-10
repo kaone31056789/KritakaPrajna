@@ -29,6 +29,7 @@ export default function MessageInput({
   webSearchMode = "fast",
   onWebSearchToggle,
   onWebSearchModeChange,
+  onCompareActive,
 }) {
   const SLASH_COMMANDS = externalHints || [
     { cmd: "/explain", desc: "Explain a file", arg: "<file>" },
@@ -367,6 +368,20 @@ export default function MessageInput({
                 <path strokeLinecap="round" d="M2 12h20M12 2a15.3 15.3 0 010 20M12 2a15.3 15.3 0 000 20" />
               </svg>
               <span>Web</span>
+            </motion.button>
+          )}
+
+          {/* Compare Models trigger */}
+          {onCompareActive && (
+            <motion.button
+              type="button"
+              onClick={onCompareActive}
+              whileHover={{ scale: 1.08 }}
+              whileTap={{ scale: 0.94 }}
+              title="Compare two models side-by-side"
+              className="flex items-center justify-center px-2 h-7 rounded-full text-[11px] font-bold cursor-pointer shrink-0 transition-all border font-mono text-indigo-400 bg-indigo-500/10 border-indigo-500/25 hover:bg-indigo-500/20"
+            >
+              Vs
             </motion.button>
           )}
 

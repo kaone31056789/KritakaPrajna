@@ -1,10 +1,11 @@
 import React from "react";
 
 /**
- * KritakaPrajna logo — stylised lotus (padma) mark.
- * Clean, modern, Indian-inspired. Scales from 16 → 512px.
+ * KritakaPrajna logo — terminal >_ prompt symbol.
+ * Scales from 16 -> 512px.
  */
 export default function KPLogo({ size = 32, className = "" }) {
+  const showCursor = size >= 24;
   return (
     <svg
       width={size}
@@ -14,37 +15,28 @@ export default function KPLogo({ size = 32, className = "" }) {
       xmlns="http://www.w3.org/2000/svg"
       className={className}
     >
-      <defs>
-        <linearGradient id="kp-grad" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#ff9500" />
-          <stop offset="100%" stopColor="#e65100" />
-        </linearGradient>
-        <linearGradient id="kp-bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#1e293b" />
-          <stop offset="100%" stopColor="#0f172a" />
-        </linearGradient>
-      </defs>
+      {/* Background */}
+      <rect width="512" height="512" rx="40" fill="#111111" stroke="#1a1a1a" strokeWidth="4" />
 
-      {/* Rounded square background */}
-      <rect width="512" height="512" rx="112" fill="url(#kp-bg)" />
+      {/* >_ prompt text */}
+      <text
+        x="256"
+        y={showCursor ? "290" : "300"}
+        textAnchor="middle"
+        fill="#00ff41"
+        fontFamily="monospace"
+        fontWeight="700"
+        fontSize={showCursor ? "220" : "280"}
+      >
+        {showCursor ? ">_" : ">"}
+      </text>
 
-      {/* Lotus petals — 6 petals, clean teardrop shapes */}
-      <g transform="translate(256, 268)">
-        {/* Centre petal (top) */}
-        <path d="M0,-140 C30,-90 30,-30 0,0 C-30,-30 -30,-90 0,-140Z" fill="url(#kp-grad)" opacity="0.95" />
-        {/* 60° petals */}
-        <path d="M0,-140 C30,-90 30,-30 0,0 C-30,-30 -30,-90 0,-140Z" fill="url(#kp-grad)" opacity="0.85" transform="rotate(60)" />
-        <path d="M0,-140 C30,-90 30,-30 0,0 C-30,-30 -30,-90 0,-140Z" fill="url(#kp-grad)" opacity="0.85" transform="rotate(-60)" />
-        {/* 120° petals */}
-        <path d="M0,-140 C30,-90 30,-30 0,0 C-30,-30 -30,-90 0,-140Z" fill="url(#kp-grad)" opacity="0.7" transform="rotate(120)" />
-        <path d="M0,-140 C30,-90 30,-30 0,0 C-30,-30 -30,-90 0,-140Z" fill="url(#kp-grad)" opacity="0.7" transform="rotate(-120)" />
-        {/* Bottom petal */}
-        <path d="M0,-140 C30,-90 30,-30 0,0 C-30,-30 -30,-90 0,-140Z" fill="url(#kp-grad)" opacity="0.6" transform="rotate(180)" />
-
-        {/* Inner glow circle */}
-        <circle r="28" fill="#ff9500" opacity="0.9" />
-        <circle r="12" fill="#0f172a" opacity="0.8" />
-      </g>
+      {/* Blinking cursor line (only at larger sizes) */}
+      {showCursor && (
+        <rect x="340" y="180" width="16" height="140" rx="2" fill="#00ff41" opacity="0.7">
+          <animate attributeName="opacity" values="0.7;0;0.7" dur="1s" repeatCount="indefinite" calcMode="discrete" keyTimes="0;0.5;1" />
+        </rect>
+      )}
     </svg>
   );
 }

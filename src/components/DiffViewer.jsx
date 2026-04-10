@@ -7,7 +7,7 @@ const ease = [0.4, 0, 0.2, 1];
 
 function LineNum({ n }) {
   return (
-    <span className="inline-block w-8 text-right pr-2 text-[11px] text-dark-600 select-none shrink-0 font-mono">
+    <span className="inline-block w-8 text-right pr-2 text-[11px] text-[#b0b0b0]/40 select-none shrink-0 font-mono">
       {n}
     </span>
   );
@@ -72,7 +72,7 @@ export default function DiffViewer({ original, modified, fileName, filePath, onA
     switch (type) {
       case "add": return "bg-emerald-500/10";
       case "remove": return "bg-red-500/10";
-      case "pad": return "bg-dark-800/30";
+      case "pad": return "bg-[#0a0a0a]/30";
       default: return "";
     }
   };
@@ -81,7 +81,7 @@ export default function DiffViewer({ original, modified, fileName, filePath, onA
     switch (type) {
       case "add": return "text-emerald-300";
       case "remove": return "text-red-300";
-      default: return "text-dark-200";
+      default: return "text-[#e0e0e0]";
     }
   };
 
@@ -98,18 +98,18 @@ export default function DiffViewer({ original, modified, fileName, filePath, onA
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25, ease }}
-      className="rounded-xl border border-dark-700/40 overflow-hidden bg-dark-900 my-2"
+      className="rounded-sm border border-[#1a1a1a] overflow-hidden bg-[#0a0a0a] my-2"
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 bg-dark-800/60 border-b border-dark-700/30">
+      <div className="flex items-center justify-between px-3 py-2 bg-[#111111] border-b border-[#1a1a1a] inner-highlight">
         <div className="flex items-center gap-2">
-          <svg className="w-3.5 h-3.5 text-saffron-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+          <svg className="w-3.5 h-3.5 text-[#00ff41]" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
             <path strokeLinecap="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
           </svg>
-          <span className="text-xs text-dark-200 font-medium truncate max-w-[200px]">
+          <span className="text-xs text-[#e0e0e0] font-medium truncate max-w-[200px] font-mono">
             {fileName || "Diff View"}
           </span>
-          <span className="text-[10px] text-dark-500 ml-1">
+          <span className="text-[10px] text-[#b0b0b0]/50 ml-1 font-mono">
             <span className="text-emerald-400">+{stats.adds}</span>
             {" "}
             <span className="text-red-400">−{stats.removes}</span>
@@ -118,7 +118,7 @@ export default function DiffViewer({ original, modified, fileName, filePath, onA
         <div className="flex items-center gap-1">
           <button
             onClick={handleCopy}
-            className="text-[10px] text-dark-400 hover:text-dark-200 px-2 py-1 rounded-md hover:bg-white/[0.05] transition-colors cursor-pointer flex items-center gap-1"
+            className="text-[10px] text-[#b0b0b0]/50 hover:text-[#e0e0e0] px-2 py-1 rounded-sm hover:bg-[#1a1a1a] transition-colors cursor-pointer flex items-center gap-1 font-mono"
           >
             {copied ? (
               <>
@@ -141,17 +141,17 @@ export default function DiffViewer({ original, modified, fileName, filePath, onA
       </div>
 
       {/* Side-by-side diff */}
-      <div className="flex overflow-x-auto max-h-[400px] overflow-y-auto text-[12px] font-mono leading-5">
+      <div className="flex overflow-x-auto max-h-[400px] overflow-y-auto text-[12px] font-mono leading-5 shadow-inner-shadow">
         {/* Left: Original */}
-        <div className="flex-1 min-w-0 border-r border-dark-700/30">
-          <div className="px-1 py-0.5 text-[10px] text-dark-500 bg-dark-800/40 border-b border-dark-700/20 text-center uppercase tracking-wider">
+        <div className="flex-1 min-w-0 border-r border-[#1a1a1a]">
+          <div className="px-1 py-0.5 text-[10px] text-[#b0b0b0]/40 bg-[#111111] border-b border-[#1a1a1a] text-center uppercase tracking-wider font-mono">
             Original
           </div>
           {leftLines.map((line, i) => (
             <div key={i} className={`flex items-start min-h-[20px] ${lineBg(line.type)}`}>
               <LineNum n={line.num || ""} />
               <span className={`flex-1 pr-2 ${lineTextColor(line.type)}`}>
-                <span className={`inline-block w-3 text-center ${line.type === "remove" ? "text-red-400 font-bold" : "text-dark-700"}`}>
+                <span className={`inline-block w-3 text-center ${line.type === "remove" ? "text-red-400 font-bold" : "text-[#1a1a1a]"}`}>
                   {linePrefix(line.type)}
                 </span>
                 {line.text}
@@ -162,14 +162,14 @@ export default function DiffViewer({ original, modified, fileName, filePath, onA
 
         {/* Right: Modified */}
         <div className="flex-1 min-w-0">
-          <div className="px-1 py-0.5 text-[10px] text-dark-500 bg-dark-800/40 border-b border-dark-700/20 text-center uppercase tracking-wider">
+          <div className="px-1 py-0.5 text-[10px] text-[#b0b0b0]/40 bg-[#111111] border-b border-[#1a1a1a] text-center uppercase tracking-wider font-mono">
             Modified
           </div>
           {rightLines.map((line, i) => (
             <div key={i} className={`flex items-start min-h-[20px] ${lineBg(line.type)}`}>
               <LineNum n={line.num || ""} />
               <span className={`flex-1 pr-2 ${lineTextColor(line.type)}`}>
-                <span className={`inline-block w-3 text-center ${line.type === "add" ? "text-emerald-400 font-bold" : "text-dark-700"}`}>
+                <span className={`inline-block w-3 text-center ${line.type === "add" ? "text-emerald-400 font-bold" : "text-[#1a1a1a]"}`}>
                   {linePrefix(line.type)}
                 </span>
                 {line.text}
@@ -186,14 +186,14 @@ export default function DiffViewer({ original, modified, fileName, filePath, onA
             initial={{ opacity: 1 }}
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.2, ease }}
-            className="flex items-center gap-2 px-3 py-2.5 bg-dark-800/40 border-t border-dark-700/30"
+            className="flex items-center gap-2 px-3 py-2.5 bg-[#111111] border-t border-[#1a1a1a]"
           >
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.97 }}
               transition={{ duration: 0.12, ease }}
               onClick={handleAccept}
-              className="flex items-center gap-1.5 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/20 rounded-lg px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors"
+              className="flex items-center gap-1.5 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/20 rounded-sm px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors font-mono"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                 <path strokeLinecap="round" d="M5 13l4 4L19 7" />
@@ -205,14 +205,14 @@ export default function DiffViewer({ original, modified, fileName, filePath, onA
               whileTap={{ scale: 0.97 }}
               transition={{ duration: 0.12, ease }}
               onClick={() => onReject?.()}
-              className="flex items-center gap-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-lg px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors"
+              className="flex items-center gap-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-sm px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors font-mono"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                 <path strokeLinecap="round" d="M18 6L6 18M6 6l12 12" />
               </svg>
               Reject
             </motion.button>
-            <span className="text-[10px] text-dark-500 ml-auto">
+            <span className="text-[10px] text-[#b0b0b0]/40 ml-auto font-mono">
               {filePath ? "Will write to file" : "Copy to use"}
             </span>
           </motion.div>
@@ -226,7 +226,7 @@ export default function DiffViewer({ original, modified, fileName, filePath, onA
             <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path strokeLinecap="round" d="M5 13l4 4L19 7" />
             </svg>
-            <span className="text-xs text-emerald-400">
+            <span className="text-xs text-emerald-400 font-mono">
               {filePath ? "Changes applied to file" : "Code copied to clipboard"}
             </span>
           </motion.div>

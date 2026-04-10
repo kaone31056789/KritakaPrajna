@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+﻿import React, { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const ease = [0.4, 0, 0.2, 1];
@@ -71,12 +71,12 @@ function extLabel(name) {
 
 function FolderIcon({ open }) {
   return open ? (
-    <svg className="w-4 h-4 text-saffron-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+    <svg className="w-4 h-4 text-[#00ff41] shrink-0" fill="currentColor" viewBox="0 0 20 20">
       <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v1H2V6z" />
       <path fillRule="evenodd" d="M2 9h16l-1.5 7H3.5L2 9z" clipRule="evenodd" opacity="0.7" />
     </svg>
   ) : (
-    <svg className="w-4 h-4 text-saffron-500/70 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+    <svg className="w-4 h-4 text-[#00ff41]/70 shrink-0" fill="currentColor" viewBox="0 0 20 20">
       <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
     </svg>
   );
@@ -140,9 +140,9 @@ function TreeNode({ entry, depth, onFileClick, selectedPath }) {
       <button
         type="button"
         onClick={handleClick}
-        className={`group w-full flex items-center gap-1.5 py-[5px] rounded-lg transition-colors cursor-pointer text-left ${
+        className={`group w-full flex items-center gap-1.5 py-[5px] rounded-sm transition-colors cursor-pointer text-left ${
           isSelected
-            ? "bg-saffron-500/10 text-saffron-200"
+            ? "bg-[#00ff41]/10 text-[#00ff41]"
             : "text-dark-200 hover:bg-dark-700/40 hover:text-dark-100"
         }`}
         style={{ paddingLeft: `${depth * 14 + 8}px`, paddingRight: "8px" }}
@@ -152,7 +152,7 @@ function TreeNode({ entry, depth, onFileClick, selectedPath }) {
         <span className="truncate text-[12px] flex-1">{entry.name}</span>
         {loadingDir && (
           <span className="shrink-0">
-            <svg className="w-3 h-3 animate-spin text-saffron-400/60" viewBox="0 0 24 24" fill="none">
+            <svg className="w-3 h-3 animate-spin text-[#00ff41]/60" viewBox="0 0 24 24" fill="none">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
@@ -255,7 +255,7 @@ export default function FileContext({ onAttach }) {
       {/* Header */}
       <div className="px-3 pt-3 pb-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <svg className="w-4 h-4 text-saffron-500/60" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+          <svg className="w-4 h-4 text-[#00ff41]/60" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
           </svg>
           <span className="text-[11px] uppercase tracking-wider text-dark-400 font-semibold">Files</span>
@@ -265,7 +265,7 @@ export default function FileContext({ onAttach }) {
           onClick={handleSelectFolder}
           whileHover={{ scale: 1.04 }}
           whileTap={{ scale: 0.96 }}
-          className="flex items-center gap-1.5 text-[10px] font-medium text-saffron-400 hover:text-saffron-300 bg-saffron-500/10 hover:bg-saffron-500/20 rounded-lg px-2.5 py-1.5 cursor-pointer transition-all border border-saffron-500/10 hover:border-saffron-500/20"
+          className="flex items-center gap-1.5 text-[10px] font-medium text-[#00ff41] hover:text-[#00ff41]/80 bg-[#00ff41]/10 hover:bg-[#00ff41]/20 rounded-sm px-2.5 py-1.5 cursor-pointer transition-all border border-[#00ff41]/10 hover:border-[#00ff41]/20"
         >
           <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2.2} viewBox="0 0 24 24">
             {rootPath ? (
@@ -288,7 +288,7 @@ export default function FileContext({ onAttach }) {
             transition={{ duration: 0.15, ease }}
             className="px-3 pb-2 overflow-hidden"
           >
-            <div className="flex items-center gap-1.5 bg-dark-800/60 rounded-lg px-2.5 py-1.5 border border-dark-700/30">
+            <div className="flex items-center gap-1.5 bg-dark-800/60 rounded-sm px-2.5 py-1.5 border border-dark-700/30">
               <svg className="w-3 h-3 text-dark-500 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
               </svg>
@@ -315,7 +315,7 @@ export default function FileContext({ onAttach }) {
         </div>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center px-4 py-6 gap-3">
-          <div className="w-10 h-10 rounded-xl bg-dark-800/60 border border-dark-700/30 flex items-center justify-center">
+          <div className="w-10 h-10 rounded-sm bg-dark-800/60 border border-dark-700/30 flex items-center justify-center">
             <svg className="w-5 h-5 text-dark-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
             </svg>
@@ -334,11 +334,11 @@ export default function FileContext({ onAttach }) {
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2, ease }}
-            className="border-t border-saffron-500/10 overflow-hidden"
+            className="border-t border-[#00ff41]/10 overflow-hidden"
           >
             {loadingFile ? (
               <div className="px-3 py-4 flex items-center justify-center gap-2">
-                <svg className="w-3.5 h-3.5 animate-spin text-saffron-400/60" viewBox="0 0 24 24" fill="none">
+                <svg className="w-3.5 h-3.5 animate-spin text-[#00ff41]/60" viewBox="0 0 24 24" fill="none">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
@@ -372,7 +372,7 @@ export default function FileContext({ onAttach }) {
                     <span className="text-[10px] text-dark-500">{formatSize(preview.size)}{preview.extra || ""}</span>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
-                    <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 rounded-lg px-2.5 py-1.5 border border-emerald-500/20">
+                    <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 rounded-sm px-2.5 py-1.5 border border-emerald-500/20">
                       <svg className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                       </svg>
@@ -403,3 +403,4 @@ export default function FileContext({ onAttach }) {
     </div>
   );
 }
+

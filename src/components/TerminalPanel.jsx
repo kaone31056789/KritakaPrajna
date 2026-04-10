@@ -60,10 +60,10 @@ function ModeToggle({ autoRun, onChange }) {
     <button
       onClick={() => onChange(!autoRun)}
       title={autoRun ? "Auto-run is ON — click to switch to Ask mode" : "Ask mode — click to enable Auto-run"}
-      className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold border transition-colors ${
+      className={`flex items-center gap-1.5 px-2 py-0.5 rounded-sm text-[10px] font-semibold border transition-colors font-mono ${
         autoRun
           ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/25"
-          : "bg-white/[0.05] border-white/10 text-dark-400 hover:text-dark-200 hover:bg-white/[0.08]"
+          : "bg-[#1a1a1a] border-[#2a2a2a] text-[#b0b0b0]/50 hover:text-[#e0e0e0] hover:bg-[#2a2a2a]"
       }`}
     >
       {autoRun ? (
@@ -73,7 +73,7 @@ function ModeToggle({ autoRun, onChange }) {
         </>
       ) : (
         <>
-          <span className="w-1.5 h-1.5 rounded-full bg-dark-500" />
+          <span className="w-1.5 h-1.5 rounded-full bg-[#b0b0b0]/30" />
           Ask
         </>
       )}
@@ -200,15 +200,15 @@ export default function TerminalPanel({ command: initialCommand, language }) {
   const langLabel = (language || "Shell").charAt(0).toUpperCase() + (language || "Shell").slice(1);
 
   return (
-    <div className="my-3 rounded-xl overflow-hidden border border-amber-500/25 bg-[#1a1710]">
+    <div className="my-3 rounded-sm overflow-hidden border border-[#00ff41]/25 bg-[#0d0d0d]">
 
       {/* ── Header ── */}
-      <div className="flex items-center justify-between px-3 py-2 bg-amber-500/[0.08] border-b border-amber-500/20">
+      <div className="flex items-center justify-between px-3 py-2 bg-[#00ff41]/[0.08] border-b border-[#00ff41]/20 inner-highlight">
         <div className="flex items-center gap-2">
-          <svg className="w-3.5 h-3.5 text-amber-400/80" fill="currentColor" viewBox="0 0 24 24">
+          <svg className="w-3.5 h-3.5 text-[#00ff41]/80" fill="currentColor" viewBox="0 0 24 24">
             <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
           </svg>
-          <span className="text-[11px] font-semibold text-amber-300/90 tracking-wide uppercase">
+          <span className="text-[11px] font-semibold text-[#00ff41]/90 tracking-wide uppercase font-mono">
             Suggested Command
           </span>
         </div>
@@ -216,20 +216,20 @@ export default function TerminalPanel({ command: initialCommand, language }) {
           {isElectron && (
             <ModeToggle autoRun={autoRun} onChange={handleToggleMode} />
           )}
-          <span className="text-[10px] text-amber-400/50 font-mono">{langLabel}</span>
+          <span className="text-[10px] text-[#00ff41]/50 font-mono">{langLabel}</span>
         </div>
       </div>
 
       {/* ── Auto-run countdown banner ── */}
       {autoRun && status === "running" && hasAutoRan.current && (
-        <div className="px-3 py-1 bg-emerald-500/[0.06] border-b border-emerald-500/10 text-[11px] text-emerald-400/70 flex items-center gap-1.5">
+        <div className="px-3 py-1 bg-emerald-500/[0.06] border-b border-emerald-500/10 text-[11px] text-emerald-400/70 flex items-center gap-1.5 font-mono">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
           Auto-running…
         </div>
       )}
 
       {/* ── Command display / edit ── */}
-      <div className="px-3 py-2.5 border-b border-white/[0.04]">
+      <div className="px-3 py-2.5 border-b border-[#1a1a1a]">
         {editing ? (
           <textarea
             autoFocus
@@ -237,11 +237,11 @@ export default function TerminalPanel({ command: initialCommand, language }) {
             onChange={(e) => setEditDraft(e.target.value)}
             onKeyDown={handleEditKeyDown}
             rows={Math.min(editDraft.split("\n").length + 1, 6)}
-            className="w-full bg-transparent text-amber-100 font-mono text-[13px] resize-none outline-none"
+            className="w-full bg-transparent text-[#00ff41] font-mono text-[13px] resize-none outline-none"
             spellCheck={false}
           />
         ) : (
-          <pre className="font-mono text-[13px] text-amber-100 whitespace-pre-wrap break-all leading-relaxed">
+          <pre className="font-mono text-[13px] text-[#00ff41] whitespace-pre-wrap break-all leading-relaxed">
             {cmd}
           </pre>
         )}
@@ -249,20 +249,20 @@ export default function TerminalPanel({ command: initialCommand, language }) {
 
       {/* ── Action buttons — shown in Ask mode when idle/blocked ── */}
       {!autoRun && (status === "idle" || status === "blocked") && (
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.04]">
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-[#1a1a1a]">
           {isElectron ? (
             <>
               {editing ? (
                 <>
                   <button
                     onClick={handleEditSave}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm text-[12px] font-medium bg-[#00ff41]/20 text-[#00ff41] hover:bg-[#00ff41]/30 transition-colors font-mono"
                   >
                     <IconPlay /> Save &amp; Run
                   </button>
                   <button
                     onClick={() => { setEditing(false); setEditDraft(cmd); }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] text-dark-400 hover:text-dark-200 hover:bg-white/[0.05] transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm text-[12px] text-[#b0b0b0]/50 hover:text-[#e0e0e0] hover:bg-[#1a1a1a] transition-colors font-mono"
                   >
                     Cancel edit
                   </button>
@@ -271,19 +271,19 @@ export default function TerminalPanel({ command: initialCommand, language }) {
                 <>
                   <button
                     onClick={() => handleRun()}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm text-[12px] font-medium bg-[#00ff41]/20 text-[#00ff41] hover:bg-[#00ff41]/30 transition-colors font-mono"
                   >
                     <IconPlay /> Run
                   </button>
                   <button
                     onClick={() => { setEditing(true); setEditDraft(cmd); }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] text-dark-300 hover:text-dark-100 hover:bg-white/[0.05] transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm text-[12px] text-[#b0b0b0] hover:text-[#e0e0e0] hover:bg-[#1a1a1a] transition-colors font-mono"
                   >
                     <IconEdit /> Edit
                   </button>
                   <button
                     onClick={() => setStatus("dismissed")}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] text-dark-400 hover:text-dark-200 hover:bg-white/[0.05] transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm text-[12px] text-[#b0b0b0]/50 hover:text-[#e0e0e0] hover:bg-[#1a1a1a] transition-colors font-mono"
                   >
                     <IconX /> Cancel
                   </button>
@@ -291,28 +291,28 @@ export default function TerminalPanel({ command: initialCommand, language }) {
               )}
             </>
           ) : (
-            <span className="text-[11px] text-dark-500 italic">
+            <span className="text-[11px] text-[#b0b0b0]/40 italic font-mono">
               Terminal execution is only available in the desktop app.
             </span>
           )}
           {status === "blocked" && (
-            <span className="ml-2 text-[11px] text-red-400">Blocked: {blockReason}</span>
+            <span className="ml-2 text-[11px] text-red-400 font-mono">Blocked: {blockReason}</span>
           )}
         </div>
       )}
 
       {/* ── Auto-run mode: Edit / Cancel while idle ── */}
       {autoRun && status === "idle" && (
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.04]">
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-[#1a1a1a]">
           <button
             onClick={() => { setEditing((v) => !v); setEditDraft(cmd); }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] text-dark-300 hover:text-dark-100 hover:bg-white/[0.05] transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm text-[12px] text-[#b0b0b0] hover:text-[#e0e0e0] hover:bg-[#1a1a1a] transition-colors font-mono"
           >
             <IconEdit /> Edit before run
           </button>
           <button
             onClick={() => setStatus("dismissed")}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] text-dark-400 hover:text-dark-200 hover:bg-white/[0.05] transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-sm text-[12px] text-[#b0b0b0]/50 hover:text-[#e0e0e0] hover:bg-[#1a1a1a] transition-colors font-mono"
           >
             <IconX /> Cancel
           </button>
@@ -321,14 +321,14 @@ export default function TerminalPanel({ command: initialCommand, language }) {
 
       {/* ── Running bar ── */}
       {status === "running" && (
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.04]">
-          <span className="flex items-center gap-1.5 text-[11px] text-amber-400/70">
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-[#1a1a1a]">
+          <span className="flex items-center gap-1.5 text-[11px] text-[#00ff41]/70 font-mono">
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#00ff41] animate-pulse" />
             Running…
           </span>
           <button
             onClick={handleKill}
-            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-sm text-[12px] text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors font-mono"
           >
             <IconStop /> Kill
           </button>
@@ -337,7 +337,7 @@ export default function TerminalPanel({ command: initialCommand, language }) {
 
       {/* ── Blocked error in auto-run mode ── */}
       {status === "blocked" && autoRun && (
-        <div className="px-3 py-2 border-b border-red-500/10 text-[11px] text-red-400">
+        <div className="px-3 py-2 border-b border-red-500/10 text-[11px] text-red-400 font-mono">
           Blocked: {blockReason}
         </div>
       )}
@@ -346,8 +346,8 @@ export default function TerminalPanel({ command: initialCommand, language }) {
       {(output.length > 0 || status === "done") && (
         <div
           ref={outputRef}
-          className="max-h-64 overflow-y-auto px-3 py-2 font-mono text-[12px] leading-relaxed"
-          style={{ background: "#0f0f0d" }}
+          className="max-h-64 overflow-y-auto px-3 py-2 font-mono text-[12px] leading-relaxed shadow-inner-shadow"
+          style={{ background: "#050505" }}
         >
           {output.map((line, i) => (
             <div
@@ -356,8 +356,8 @@ export default function TerminalPanel({ command: initialCommand, language }) {
                 line.type === "stderr"
                   ? "text-red-400 whitespace-pre-wrap"
                   : line.type === "info"
-                  ? "text-dark-400 italic whitespace-pre-wrap"
-                  : "text-green-300/90 whitespace-pre-wrap"
+                  ? "text-[#b0b0b0]/50 italic whitespace-pre-wrap"
+                  : "text-[#00ff41]/90 whitespace-pre-wrap"
               }
             >
               {line.text}
@@ -365,9 +365,9 @@ export default function TerminalPanel({ command: initialCommand, language }) {
           ))}
 
           {status === "done" && exitCode !== null && (
-            <div className="mt-1.5 pt-1.5 border-t border-white/[0.06]">
+            <div className="mt-1.5 pt-1.5 border-t border-[#1a1a1a]">
               <span
-                className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full ${
+                className={`inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-sm font-mono ${
                   exitCode === 0
                     ? "bg-emerald-500/15 text-emerald-400"
                     : "bg-red-500/15 text-red-400"

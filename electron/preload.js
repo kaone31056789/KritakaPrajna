@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   ollamaApiRequest: (payload) => ipcRenderer.invoke("ollama-api-request", payload),
   // File system
   selectFolder: () => ipcRenderer.invoke("select-folder"),
+  setWorkspaceBase: (folderPath) => ipcRenderer.invoke("set-workspace-base", folderPath),
   readDir: (dirPath) => ipcRenderer.invoke("read-dir", dirPath),
   readFile: (filePath) => ipcRenderer.invoke("read-file", filePath),
   extractPdfText: (filePath) => ipcRenderer.invoke("extract-pdf-text", filePath),
@@ -64,5 +65,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on("terminal-done", handler);
     return () => ipcRenderer.removeListener("terminal-done", handler);
+  },
+  // OpenCode agent engine
+  openCodeStart: () => ipcRenderer.invoke("opencode-start"),
+  openCodeRun: (payload) => ipcRenderer.invoke("opencode-run", payload),
+  openCodeResetSession: (sessionId) => ipcRenderer.invoke("opencode-reset-session", sessionId),
+  onOpenCodeEvent: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on("opencode-event", handler);
+    return () => ipcRenderer.removeListener("opencode-event", handler);
+  },
+  onOpenCodeStatus: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on("opencode-status", handler);
+    return () => ipcRenderer.removeListener("opencode-status", handler);
   },
 });

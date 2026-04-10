@@ -1,0 +1,11 @@
+category: Design
+interface:
+  display_name: Canvas Design
+  short_description: Create posters, art, and visual designs as PNG/PDF
+  icon_dark: ./assets/icon-dark.png
+  icon_light: ./assets/icon-light.png
+  default_prompt: Create a visual design using code-driven canvas rendering.
+  label:
+  - creative
+  - design
+  - visual

@@ -79,9 +79,9 @@ function statusBadgeClass(tone) {
     case "google":
       return "bg-emerald-500/15 text-emerald-300 border border-emerald-400/25";
     case "warning":
-      return "bg-amber-500/15 text-amber-300 border border-amber-400/30";
+      return "bg-[#ffb000]/15 text-[#ffb000] border border-[#ffb000]/30";
     default:
-      return "bg-sky-500/10 text-sky-300/80 border border-sky-400/20";
+      return "bg-[#00d4ff]/10 text-[#00d4ff]/80 border border-[#00d4ff]/20";
   }
 }
 
@@ -92,8 +92,8 @@ function SourceRow({ source, defaultExpanded = false }) {
 
   if (!source.ok) {
     return (
-      <div className="flex items-center gap-2 px-3 py-1.5 text-[11px] text-red-400/70">
-        <span className="w-4 h-4 flex items-center justify-center rounded bg-red-500/10 text-[10px] font-bold shrink-0">
+      <div className="flex items-center gap-2 px-3 py-1.5 text-[11px] text-red-400/70 font-mono">
+        <span className="w-4 h-4 flex items-center justify-center rounded-sm bg-red-500/10 text-[10px] font-bold shrink-0">
           {source.index}
         </span>
         <span className="truncate">{source.url}</span>
@@ -103,29 +103,29 @@ function SourceRow({ source, defaultExpanded = false }) {
   }
 
   return (
-    <div className="border-b border-sky-500/10 last:border-0">
+    <div className="border-b border-[#00d4ff]/10 last:border-0">
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-sky-500/[0.05] transition-colors text-left"
+        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[#00d4ff]/[0.05] transition-colors text-left"
       >
         {/* Index badge */}
-        <span className="w-4 h-4 flex items-center justify-center rounded bg-sky-500/15 text-sky-400 text-[10px] font-bold shrink-0">
+        <span className="w-4 h-4 flex items-center justify-center rounded-sm bg-[#00d4ff]/15 text-[#00d4ff] text-[10px] font-bold shrink-0 font-mono">
           {source.index}
         </span>
-        <span className="font-medium text-sky-200/80 text-[12px] shrink-0">{source.domain}</span>
-        <span className="text-sky-500/40 text-[11px] truncate flex-1">{displayUrl}</span>
+        <span className="font-medium text-[#00d4ff]/80 text-[12px] shrink-0 font-mono">{source.domain}</span>
+        <span className="text-[#00d4ff]/40 text-[11px] truncate flex-1 font-mono">{displayUrl}</span>
         <ChevronIcon expanded={expanded} />
       </button>
 
       {expanded && (
         <div className="px-3 pb-2.5 space-y-1">
           {source.title && source.title !== source.domain && (
-            <p className="text-[11px] font-medium text-sky-100/60 leading-snug">
+            <p className="text-[11px] font-medium text-[#e0e0e0]/60 leading-snug font-mono">
               {source.title.slice(0, 100)}
             </p>
           )}
           {source.excerpt && (
-            <p className="text-[11px] text-dark-400 leading-relaxed">
+            <p className="text-[11px] text-[#b0b0b0] leading-relaxed font-mono">
               {source.excerpt}
             </p>
           )}
@@ -157,16 +157,16 @@ export default function WebResultCard({ results }) {
   const searchStatus = detectSearchStatus(sources, isGoogleAI);
 
   return (
-    <div className={`rounded-xl border overflow-hidden text-[12px] w-full max-w-[900px] ${
+    <div className={`rounded-sm border overflow-hidden text-[12px] w-full max-w-[900px] shadow-elevation-1 hover:shadow-elevation-2 transition-shadow font-mono ${
       isGoogleAI
         ? "border-emerald-500/20 bg-emerald-500/[0.03]"
-        : "border-sky-500/20 bg-sky-500/[0.03]"
+        : "border-[#00d4ff]/20 bg-[#00d4ff]/[0.03]"
     }`}>
       {/* ── Header ── */}
       <button
         onClick={() => setOpen((v) => !v)}
         className={`w-full flex items-center gap-2 px-3 py-2.5 transition-colors text-left ${
-          isGoogleAI ? "hover:bg-emerald-500/[0.06]" : "hover:bg-sky-500/[0.06]"
+          isGoogleAI ? "hover:bg-emerald-500/[0.06]" : "hover:bg-[#00d4ff]/[0.06]"
         }`}
       >
         {isGoogleAI ? (
@@ -178,14 +178,14 @@ export default function WebResultCard({ results }) {
             <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
           </svg>
         ) : (
-          <span className="text-sky-400/80"><GlobeIcon /></span>
+          <span className="text-[#00d4ff]/80"><GlobeIcon /></span>
         )}
 
         {/* Label / domain pills */}
         {isGoogleAI ? (
           <div className="flex items-center gap-1.5 flex-1 min-w-0">
             <span className="text-emerald-300/90 text-[11px] font-semibold" title={fullLabel}>{googleTypeLabel}</span>
-            <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400/70 text-[10px] font-medium shrink-0">
+            <span className="px-1.5 py-0.5 rounded-sm bg-emerald-500/10 text-emerald-400/70 text-[10px] font-medium shrink-0">
               {newsItems.length} headlines
             </span>
             {sources[0]?._searchQuery && (
@@ -195,22 +195,22 @@ export default function WebResultCard({ results }) {
         ) : (
           <div className="flex items-center gap-1 flex-1 min-w-0 flex-wrap">
             {domains.map((d) => (
-              <span key={d} className="px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-300/80 text-[10px] font-medium shrink-0">
+              <span key={d} className="px-1.5 py-0.5 rounded-sm bg-[#00d4ff]/10 text-[#00d4ff]/80 text-[10px] font-medium shrink-0">
                 {d}
               </span>
             ))}
             {goodCount > domains.length && (
-              <span className="text-sky-500/40 text-[10px]">+{goodCount - domains.length} more</span>
+              <span className="text-[#00d4ff]/40 text-[10px]">+{goodCount - domains.length} more</span>
             )}
           </div>
         )}
 
         {!isGoogleAI && (
           <div className="flex items-center gap-1.5 shrink-0 mr-1">
-            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${statusBadgeClass(searchStatus.tone)}`}>
+            <span className={`px-1.5 py-0.5 rounded-sm text-[10px] font-semibold ${statusBadgeClass(searchStatus.tone)}`}>
               {searchStatus.label}
             </span>
-            <span className="text-sky-500/40 text-[10px]">
+            <span className="text-[#00d4ff]/40 text-[10px]">
               {goodCount} source{goodCount !== 1 ? "s" : ""}
             </span>
           </div>
@@ -220,14 +220,14 @@ export default function WebResultCard({ results }) {
 
       {/* ── News headlines (RSS result) or source list ── */}
       {open && (
-        <div className={`border-t ${isGoogleAI ? "border-emerald-500/10" : "border-sky-500/10"}`}>
+        <div className={`border-t ${isGoogleAI ? "border-emerald-500/10" : "border-[#00d4ff]/10"}`}>
           {isGoogleAI && newsItems.length > 0 ? (
             <div className="divide-y divide-emerald-500/[0.08]">
               {newsItems.slice(0, 6).map((item, i) => (
                 <div key={i} className="px-3 py-2 space-y-0.5">
                   <p className="text-[11px] font-medium text-emerald-200/80 leading-snug">{item.title}</p>
                   {item.desc && (
-                    <p className="text-[10px] text-dark-400 leading-relaxed line-clamp-2">{item.desc}</p>
+                    <p className="text-[10px] text-[#b0b0b0] leading-relaxed line-clamp-2">{item.desc}</p>
                   )}
                   {item.pub && (
                     <p className="text-[10px] text-emerald-600/50">{item.pub.replace(/ \+\d{4}$/, "").trim()}</p>
@@ -244,10 +244,10 @@ export default function WebResultCard({ results }) {
       )}
 
       {/* ── Footer ── */}
-      <div className={`px-3 py-1.5 border-t text-[10px] flex items-center gap-1 ${
+      <div className={`px-3 py-1.5 border-t text-[10px] flex items-center gap-1 font-mono ${
         isGoogleAI
           ? "border-emerald-500/10 text-emerald-500/40"
-          : "border-sky-500/10 text-sky-500/40"
+          : "border-[#00d4ff]/10 text-[#00d4ff]/40"
       }`}>
         {isGoogleAI ? (
           <span>📡 Live RSS · {googleTypeLabel} · refined by AI</span>

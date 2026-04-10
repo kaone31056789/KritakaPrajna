@@ -1,0 +1,11 @@
+category: Development
+interface:
+  display_name: Git Commit
+  short_description: Generate smart conventional commit messages from diffs.
+  icon_dark: './assets/icon-dark.png'
+  icon_light: './assets/icon-light.png'
+  default_prompt: Commit my changes with a proper message.
+  label:
+    - git
+    - commit
+    - conventional-commits

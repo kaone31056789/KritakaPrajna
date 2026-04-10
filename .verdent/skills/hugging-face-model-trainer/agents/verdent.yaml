@@ -1,0 +1,12 @@
+category: AI & ML
+interface:
+  display_name: HuggingFace Model Trainer
+  short_description: Fine-tune LLMs on HuggingFace cloud GPUs.
+  icon_dark: './assets/icon-dark.png'
+  icon_light: './assets/icon-light.png'
+  default_prompt: Help me fine-tune a language model on HuggingFace.
+  label:
+    - ai
+    - machine-learning
+    - fine-tuning
+    - huggingface

@@ -1,0 +1,11 @@
+category: Backend
+interface:
+  display_name: Better Auth
+  short_description: Set up TypeScript authentication with Better Auth.
+  icon_dark: './assets/icon-dark.png'
+  icon_light: './assets/icon-light.png'
+  default_prompt: Help me set up authentication with Better Auth.
+  label:
+    - auth
+    - security
+    - backend

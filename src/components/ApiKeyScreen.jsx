@@ -3,23 +3,9 @@ import { motion, AnimatePresence } from "framer-motion";
 
 const ease = [0.4, 0, 0.2, 1];
 
-function MandalaSmall() {
+function TerminalPrompt() {
   return (
-    <svg className="w-10 h-10" viewBox="0 0 100 100" fill="none">
-      {[0, 45, 90, 135, 180, 225, 270, 315].map((angle) => (
-        <ellipse key={angle} cx="50" cy="26" rx="6" ry="16"
-          fill="url(#saffGrad)" opacity="0.6"
-          transform={`rotate(${angle} 50 50)`} />
-      ))}
-      <circle cx="50" cy="50" r="14" stroke="#f59e0b" strokeWidth="1" opacity="0.5" />
-      <circle cx="50" cy="50" r="4" fill="#fbbf24" opacity="0.9" />
-      <defs>
-        <radialGradient id="saffGrad" cx="50%" cy="30%">
-          <stop offset="0%" stopColor="#fbbf24" />
-          <stop offset="100%" stopColor="#f59e0b" stopOpacity="0.1" />
-        </radialGradient>
-      </defs>
-    </svg>
+    <span className="text-[#00ff41] text-2xl font-bold text-glow-green">&gt;_</span>
   );
 }
 
@@ -31,7 +17,7 @@ const PROVIDERS = [
     placeholder: "sk-or-v1-...",
     color: "#7c6ff7",
     badge: "Recommended",
-    badgeColor: "text-violet-400 bg-violet-500/10 border-violet-500/20",
+    badgeColor: "text-[#00ff41] bg-[#00ff41]/10 border-[#00ff41]/20",
     icon: (
       <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
         <circle cx="12" cy="12" r="10"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/><path d="M2 12h20"/>
@@ -95,13 +81,8 @@ const PROVIDERS = [
   },
 ];
 
-/**
- * Multi-provider API key setup screen.
- * onSave(providers) where providers = { openrouter, openai, anthropic, huggingface, ollama }
- */
 export default function ApiKeyScreen({ onSave, initialProviders = {} }) {
   const [selected, setSelected] = useState(() => {
-    // Pre-select providers that already have keys
     const pre = new Set(
       Object.entries(initialProviders)
         .filter(([, v]) => !!v)
@@ -141,21 +122,19 @@ export default function ApiKeyScreen({ onSave, initialProviders = {} }) {
   };
 
   return (
-    <div className="h-screen flex items-center justify-center bg-dark-950 overflow-y-auto py-8">
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full bg-saffron-500/5 blur-3xl pointer-events-none" />
-
+    <div className="h-screen flex items-center justify-center bg-[#0a0a0a] overflow-y-auto py-8">
       <motion.form
         onSubmit={handleSubmit}
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, ease }}
-        className="relative bg-dark-800 border border-dark-600 rounded-2xl shadow-2xl shadow-black/40 p-8 w-full max-w-lg flex flex-col gap-6 mx-4"
+        className="relative bg-[#111111] border border-[#1a1a1a] rounded-sm shadow-elevation-4 p-8 w-full max-w-lg flex flex-col gap-6 mx-4"
       >
         {/* Logo + heading */}
         <div className="flex flex-col items-center gap-2">
-          <MandalaSmall />
-          <h1 className="font-serif text-2xl font-semibold text-white tracking-wide">KritakaPrajna</h1>
-          <p className="text-dark-300 text-center text-sm">
+          <TerminalPrompt />
+          <h1 className="font-mono text-xl font-bold text-[#00ff41] tracking-wider text-glow-green">KritakaPrajna</h1>
+          <p className="text-[#b0b0b0] text-center text-sm">
             Select one or more API providers to get started.
           </p>
         </div>
@@ -171,18 +150,18 @@ export default function ApiKeyScreen({ onSave, initialProviders = {} }) {
                 onClick={() => toggleProvider(p.id)}
                 whileTap={{ scale: 0.97 }}
                 transition={{ duration: 0.12, ease }}
-                className={`relative flex flex-col gap-1.5 rounded-xl border px-4 py-3 text-left cursor-pointer transition-all ${
+                className={`relative flex flex-col gap-1.5 rounded-sm border px-4 py-3 text-left cursor-pointer transition-all ${
                   isOn
-                    ? "border-saffron-500/50 bg-saffron-500/8 shadow-sm"
-                    : "border-dark-600/50 bg-dark-900/50 hover:border-dark-500/60 hover:bg-dark-800"
+                    ? "border-[#00ff41]/40 bg-[#00ff41]/5 shadow-3d-button-active"
+                    : "border-[#1a1a1a] bg-[#0a0a0a] shadow-elevation-1 hover:border-[#2a2a2a] hover:bg-[#111111]"
                 }`}
               >
                 {/* Checkmark */}
-                <div className={`absolute top-2.5 right-2.5 w-4 h-4 rounded-full flex items-center justify-center transition-colors ${
-                  isOn ? "bg-saffron-500" : "border border-dark-500"
+                <div className={`absolute top-2.5 right-2.5 w-4 h-4 rounded-sm flex items-center justify-center transition-colors ${
+                  isOn ? "bg-[#00ff41]" : "border border-[#2a2a2a]"
                 }`}>
                   {isOn && (
-                    <svg className="w-2.5 h-2.5 text-dark-950" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                    <svg className="w-2.5 h-2.5 text-black" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                     </svg>
                   )}
@@ -194,21 +173,21 @@ export default function ApiKeyScreen({ onSave, initialProviders = {} }) {
                 {/* Label + badge */}
                 <div>
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-sm font-semibold text-white">{p.label}</span>
+                    <span className="text-sm font-semibold text-[#e0e0e0]">{p.label}</span>
                     {p.badge && (
-                      <span className={`text-[9px] font-medium border rounded-full px-1.5 py-0.5 leading-none ${p.badgeColor}`}>
+                      <span className={`text-[9px] font-medium border rounded-sm px-1.5 py-0.5 leading-none ${p.badgeColor}`}>
                         {p.badge}
                       </span>
                     )}
                   </div>
-                  <p className="text-[11px] text-dark-400 mt-0.5">{p.description}</p>
+                  <p className="text-[11px] text-[#b0b0b0] mt-0.5">{p.description}</p>
                 </div>
               </motion.button>
             );
           })}
         </div>
 
-        {/* Key inputs for selected providers */}
+        {/* Key inputs */}
         <AnimatePresence mode="sync">
           {PROVIDERS.filter((p) => selected.has(p.id)).map((p) => (
             <motion.div
@@ -220,15 +199,15 @@ export default function ApiKeyScreen({ onSave, initialProviders = {} }) {
               className="overflow-hidden -mt-2"
             >
               <div className="pt-0.5">
-                <label className="block text-xs font-medium text-dark-300 mb-1.5">
-                  <span style={{ color: p.color }}>●</span> {p.label} API Key
+                <label className="block text-xs font-medium text-[#b0b0b0] mb-1.5">
+                  <span style={{ color: p.color }}>$</span> {p.label} API Key
                 </label>
                 <input
                   type="password"
                   placeholder={p.placeholder}
                   value={keys[p.id]}
                   onChange={(e) => setKeys((prev) => ({ ...prev, [p.id]: e.target.value }))}
-                  className="w-full bg-dark-700 border border-dark-500 rounded-xl px-4 py-2.5 text-sm text-white placeholder-dark-300 focus:outline-none focus:ring-2 focus:ring-saffron-500 focus:border-transparent transition-all"
+                  className="w-full bg-[#0a0a0a] border border-[#1a1a1a] rounded-sm px-4 py-2.5 text-sm text-[#e0e0e0] placeholder-[#b0b0b0]/40 focus:outline-none focus:border-[#00ff41]/40 transition-all shadow-inner-shadow font-mono"
                 />
               </div>
             </motion.div>
@@ -239,15 +218,15 @@ export default function ApiKeyScreen({ onSave, initialProviders = {} }) {
         <motion.button
           type="submit"
           disabled={!canContinue}
-          whileHover={{ scale: 1.02, boxShadow: "0 0 16px rgba(245,158,11,0.2)" }}
+          whileHover={{ scale: 1.02, boxShadow: "0 0 16px rgba(0,255,65,0.15)" }}
           whileTap={{ scale: 0.98 }}
           transition={{ duration: 0.15, ease }}
-          className="bg-gradient-to-r from-saffron-600 to-saffron-500 hover:from-saffron-500 hover:to-saffron-400 disabled:opacity-40 text-dark-950 font-semibold rounded-xl px-4 py-3 text-sm cursor-pointer shadow-lg shadow-saffron-500/20"
+          className="bg-[#00ff41] hover:bg-[#00cc33] disabled:opacity-40 text-black font-bold rounded-sm px-4 py-3 text-sm cursor-pointer shadow-3d-button active:shadow-3d-button-active font-mono tracking-wide"
         >
-          Save &amp; Continue
+          [ ENTER ]
         </motion.button>
 
-        <p className="text-center text-[11px] text-dark-500">
+        <p className="text-center text-[11px] text-[#b0b0b0]/50">
           Keys are encrypted and stored locally — never sent to us.
         </p>
       </motion.form>

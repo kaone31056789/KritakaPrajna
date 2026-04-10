@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+﻿import React, { useState, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -95,16 +95,16 @@ function CodeBlock({ language, children }) {
 /** Replace common LaTeX math symbols with readable equivalents */
 function preprocessLatex(text) {
   return text
-    .replace(/\$\\rightarrow\$/g, "→")
-    .replace(/\$\\leftarrow\$/g, "←")
-    .replace(/\$\\Rightarrow\$/g, "⇒")
-    .replace(/\$\\Leftarrow\$/g, "⇐")
-    .replace(/\$\\leftrightarrow\$/g, "↔")
-    .replace(/\$\\Leftrightarrow\$/g, "⟺")
-    .replace(/\$\\uparrow\$/g, "↑")
-    .replace(/\$\\downarrow\$/g, "↓")
-    .replace(/\$\\to\$/g, "→")
-    .replace(/\$\\gets\$/g, "←");
+    .replace(/\$\\rightarrow\$/g, "â†’")
+    .replace(/\$\\leftarrow\$/g, "â†")
+    .replace(/\$\\Rightarrow\$/g, "=>")
+    .replace(/\$\\Leftarrow\$/g, "<=")
+    .replace(/\$\\leftrightarrow\$/g, "â†”")
+    .replace(/\$\\Leftrightarrow\$/g, "<=>")
+    .replace(/\$\\uparrow\$/g, "â†‘")
+    .replace(/\$\\downarrow\$/g, "â†“")
+    .replace(/\$\\to\$/g, "â†’")
+    .replace(/\$\\gets\$/g, "â†");
 }
 
 function extractNodeText(node) {
@@ -198,7 +198,7 @@ function parseSourceLine(line, fallbackIndex) {
   } else {
     url = normalizeExternalUrl(details);
     if (url) {
-      const stripped = details.replace(url, "").replace(/[\s\-–—:|]+$/, "").trim();
+      const stripped = details.replace(url, "").replace(/[\s\--—:|]+$/, "").trim();
       if (stripped) {
         label = stripped;
       }
@@ -369,7 +369,7 @@ export default function MarkdownRenderer({ content, onPointClick, sourceUrlMap =
               // Inline code
               return (
                 <code
-                  className="bg-white/[0.08] text-saffron-300 rounded px-1.5 py-0.5 text-[13px] font-mono"
+                  className="bg-white/[0.08] text-[#00ff41] rounded px-1.5 py-0.5 text-[13px] font-mono"
                   {...props}
                 >
                   {children}
@@ -416,7 +416,7 @@ export default function MarkdownRenderer({ content, onPointClick, sourceUrlMap =
             },
             // Blockquote
             blockquote: ({ children }) => (
-              <blockquote className="border-l-2 border-saffron-500/40 pl-3 my-2 text-dark-300 italic">
+              <blockquote className="border-l-2 border-[#00ff41]/40 pl-3 my-2 text-[#b0b0b0] italic">
                 {children}
               </blockquote>
             ),
@@ -433,7 +433,7 @@ export default function MarkdownRenderer({ content, onPointClick, sourceUrlMap =
               </th>
             ),
             td: ({ children }) => (
-              <td className="border border-white/[0.08] px-3 py-1.5 text-dark-300 text-xs">{children}</td>
+              <td className="border border-white/[0.08] px-3 py-1.5 text-[#b0b0b0] text-xs">{children}</td>
             ),
             // Link
             a: ({ href, children }) => {
@@ -445,7 +445,7 @@ export default function MarkdownRenderer({ content, onPointClick, sourceUrlMap =
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={(event) => openExternalUrl(safeHref, event)}
-                  className="text-saffron-400 hover:text-saffron-300 underline underline-offset-2 transition-colors"
+                  className="text-[#00ff41] hover:text-[#00ff41] underline underline-offset-2 transition-colors"
                 >
                   {children}
                 </a>
@@ -466,3 +466,4 @@ export default function MarkdownRenderer({ content, onPointClick, sourceUrlMap =
     </>
   );
 }
+

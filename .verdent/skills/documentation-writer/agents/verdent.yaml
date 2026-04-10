@@ -1,0 +1,10 @@
+category: Documentation
+interface:
+  display_name: Documentation Writer
+  short_description: Write structured technical docs using the Diátaxis framework.
+  icon_dark: './assets/icon-dark.png'
+  icon_light: './assets/icon-light.png'
+  default_prompt: Help me write documentation for my project.
+  label:
+    - documentation
+    - technical-writing

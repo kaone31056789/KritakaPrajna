@@ -30,22 +30,22 @@ export function TaskSuggestionBanner({ taskType, suggestedModelId, onSwitch, onI
       transition={{ duration: 0.25, ease }}
       className="shrink-0 overflow-hidden"
     >
-      <div className="flex items-center gap-3 px-5 py-2.5 text-sm border-b bg-saffron-500/[0.07] border-saffron-500/20">
+      <div className="flex items-center gap-3 px-5 py-2.5 text-sm border-b bg-[#00ff41]/[0.07] border-[#00ff41]/20 shadow-elevation-2 inner-highlight">
         <span className="text-base">{icon}</span>
-        <span className="flex-1 text-xs text-saffron-300">{text}</span>
+        <span className="flex-1 text-xs text-[#00ff41] font-mono">{text}</span>
         <motion.button
           type="button"
           onClick={onSwitch}
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
-          className="text-xs font-medium rounded-lg px-3 py-1.5 cursor-pointer bg-saffron-500/20 hover:bg-saffron-500/30 text-saffron-300 transition-colors"
+          className="text-xs font-medium rounded-sm px-3 py-1.5 cursor-pointer bg-[#00ff41]/20 hover:bg-[#00ff41]/30 text-[#00ff41] transition-colors font-mono"
         >
           Switch to {shortName(suggestedModelId)}
         </motion.button>
         <button
           type="button"
           onClick={onIgnore}
-          className="text-xs text-dark-400 hover:text-dark-200 cursor-pointer transition-colors px-2 py-1"
+          className="text-xs text-[#b0b0b0]/50 hover:text-[#e0e0e0] cursor-pointer transition-colors px-2 py-1"
         >
           Ignore
         </button>
@@ -68,9 +68,9 @@ export function RateLimitBanner({ modelId, fallbackModelId, onSwitch, onDismiss 
       transition={{ duration: 0.25, ease }}
       className="shrink-0 overflow-hidden"
     >
-      <div className="flex items-center gap-3 px-5 py-2.5 text-sm border-b bg-amber-500/[0.07] border-amber-500/20">
+      <div className="flex items-center gap-3 px-5 py-2.5 text-sm border-b bg-[#ffb000]/[0.07] border-[#ffb000]/20 shadow-elevation-2 inner-highlight">
         <span className="text-base">⚠️</span>
-        <span className="flex-1 text-xs text-amber-300">
+        <span className="flex-1 text-xs text-[#ffb000] font-mono">
           <strong>{shortName(modelId)}</strong> is currently busy or rate-limited. Try another model?
         </span>
         {fallbackModelId && (
@@ -79,7 +79,7 @@ export function RateLimitBanner({ modelId, fallbackModelId, onSwitch, onDismiss 
             onClick={onSwitch}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
-            className="text-xs font-medium rounded-lg px-3 py-1.5 cursor-pointer bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 transition-colors"
+            className="text-xs font-medium rounded-sm px-3 py-1.5 cursor-pointer bg-[#ffb000]/20 hover:bg-[#ffb000]/30 text-[#ffb000] transition-colors font-mono"
           >
             Switch to {shortName(fallbackModelId)}
           </motion.button>
@@ -87,7 +87,7 @@ export function RateLimitBanner({ modelId, fallbackModelId, onSwitch, onDismiss 
         <button
           type="button"
           onClick={onDismiss}
-          className="text-xs text-dark-400 hover:text-dark-200 cursor-pointer transition-colors px-2 py-1"
+          className="text-xs text-[#b0b0b0]/50 hover:text-[#e0e0e0] cursor-pointer transition-colors px-2 py-1"
         >
           Dismiss
         </button>
@@ -110,9 +110,9 @@ export function CheapestModelBanner({ cheapestLabel, cheapestModelId, currentMod
       transition={{ duration: 0.25, ease }}
       className="shrink-0 overflow-hidden"
     >
-      <div className="flex items-center gap-3 px-5 py-2.5 text-sm border-b bg-emerald-500/[0.07] border-emerald-500/20">
+      <div className="flex items-center gap-3 px-5 py-2.5 text-sm border-b bg-emerald-500/[0.07] border-emerald-500/20 shadow-elevation-2 inner-highlight">
         <span className="text-base">💰</span>
-        <span className="flex-1 text-xs text-emerald-300">
+        <span className="flex-1 text-xs text-emerald-300 font-mono">
           Cheapest model for this task: <strong>{cheapestLabel}</strong>
         </span>
         <motion.button
@@ -120,14 +120,14 @@ export function CheapestModelBanner({ cheapestLabel, cheapestModelId, currentMod
           onClick={onUseCheapest}
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
-          className="text-xs font-medium rounded-lg px-3 py-1.5 cursor-pointer bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 transition-colors"
+          className="text-xs font-medium rounded-sm px-3 py-1.5 cursor-pointer bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 transition-colors font-mono"
         >
           Use Cheapest
         </motion.button>
         <button
           type="button"
           onClick={onKeepCurrent}
-          className="text-xs text-dark-400 hover:text-dark-200 cursor-pointer transition-colors px-2 py-1"
+          className="text-xs text-[#b0b0b0]/50 hover:text-[#e0e0e0] cursor-pointer transition-colors px-2 py-1"
         >
           Keep Current
         </button>
