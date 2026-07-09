@@ -2,6 +2,7 @@ import { createStore } from "./store";
 import { getModelHealth } from "../utils/rateLimiter";
 import { supportsTask } from "../utils/smartModelSelect";
 import { loadLiveRankingSignals } from "../utils/advisorRanking";
+import { rankInfoFor, usageScore } from "./rankings";
 import { isFreeModel } from "./models";
 
 /* Model Advisor — offline-first heuristic scoring that always works.
@@ -110,7 +111,7 @@ export const PRIORITY_OPTIONS = [
 
 /**
  * Rank models for a task + priority. Pure and synchronous — always works offline.
- * Returns [{ model, score, parts: {cap, price, speed, rel}, live }]
+ * Returns [{ model, score, parts: {cap, price, speed, rel, usage?}, live, rankInfo }]
  */
 export function rankModels(models, { task = "general", priority = "balanced", limit = 12 } = {}) {
   const w = WEIGHTS[priority] || WEIGHTS.balanced;
@@ -128,8 +129,16 @@ export function rankModels(models, { task = "general", priority = "balanced", li
       };
       const base =
         parts.cap * w.cap + parts.price * w.price + parts.speed * w.speed + parts.rel * w.rel;
+      // Blend in live OpenRouter usage rank when available — real-world
+      // popularity is a strong quality + reliability proxy.
+      const rankInfo = rankInfoFor(model);
+      let blended = base;
+      if (rankInfo) {
+        parts.usage = usageScore(rankInfo.rank);
+        blended = base * 0.72 + parts.usage * 0.28;
+      }
       const live = liveBoost(model, signals);
-      return { model, parts, live, score: Math.round(Math.min(100, base + live)) };
+      return { model, parts, live, rankInfo, score: Math.round(Math.min(100, blended + live)) };
     })
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);

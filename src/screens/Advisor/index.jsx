@@ -8,8 +8,10 @@ import { providerLabel } from "../../api/providerRouter";
 import { setView } from "../../core/nav";
 import { EASE_OUT } from "../../design/motion";
 import Icon from "../../ui/icons";
-import { Segmented, GradientOrb, NeuBadge, NeuButton, SectionLabel, Spinner, EmptyState } from "../../ui/primitives";
+import { Segmented, NeuBadge, NeuButton, SectionLabel, Spinner, EmptyState } from "../../ui/primitives";
 import { toast } from "../../ui/Toaster";
+import BrandIcon from "../../ui/BrandIcon";
+import { rankingsStore, refreshRankings, initRankings, formatTokens, timeAgo } from "../../core/rankings";
 
 const TASK_OPTIONS = [
   { value: "general", label: "General", icon: "chat" },
@@ -38,7 +40,7 @@ function ScoreBar({ label, value }) {
 }
 
 function RankCard({ entry, rank, selected }) {
-  const { model, score, parts, live } = entry;
+  const { model, score, parts, live, rankInfo } = entry;
   const medal = rank === 0 ? "gold" : rank === 1 ? "silver" : rank === 2 ? "bronze" : null;
 
   return (
@@ -69,7 +71,7 @@ function RankCard({ entry, rank, selected }) {
       )}
 
       <div className="flex items-center gap-3 pt-1">
-        <GradientOrb seed={model._selectionId} size={34} glow={rank === 0} />
+        <BrandIcon model={model} seed={model._selectionId} size={34} glow={rank === 0} />
         <div className="min-w-0 flex-1">
           <p className="font-display font-semibold text-[14.5px] text-hi truncate">{modelDisplayName(model)}</p>
           <p className="text-[10.5px] text-faint">{providerLabel(model._provider)}</p>
@@ -85,6 +87,7 @@ function RankCard({ entry, rank, selected }) {
         <ScoreBar label="Price" value={parts.price} />
         <ScoreBar label="Speed" value={parts.speed} />
         <ScoreBar label="Uptime" value={parts.rel} />
+        {parts.usage != null && <ScoreBar label="Usage" value={parts.usage} />}
       </div>
 
       <div className="flex items-center gap-2 flex-wrap">
@@ -94,6 +97,13 @@ function RankCard({ entry, rank, selected }) {
           <NeuBadge>{formatPrice(model.pricing?.prompt)}</NeuBadge>
         )}
         {contextLabel(model) && <NeuBadge tone="info">{contextLabel(model)}</NeuBadge>}
+        {rankInfo && <NeuBadge tone="accent">#{rankInfo.rank} this week</NeuBadge>}
+        {rankInfo && <NeuBadge>{formatTokens(rankInfo.tokens)} tok/day</NeuBadge>}
+        {rankInfo?.trendPct != null && rankInfo.trendPct !== 0 && (
+          <NeuBadge tone={rankInfo.trendPct > 0 ? "ok" : undefined}>
+            {rankInfo.trendPct > 0 ? "▲" : "▼"} {Math.abs(rankInfo.trendPct)}%
+          </NeuBadge>
+        )}
         {live > 0 && <NeuBadge tone="accent">+{live} live</NeuBadge>}
         <div className="flex-1" />
         <NeuButton
@@ -117,8 +127,17 @@ export default function AdvisorScreen() {
   const { models, selectedId } = useStore(modelsStore, (s) => ({ models: s.models, selectedId: s.selectedId }));
   const { signals, signalsLoading } = useStore(advisorStore);
   const { advisorPrefs } = useStore(settingsStore, (s) => ({ advisorPrefs: s.advisorPrefs }));
+  const rankings = useStore(rankingsStore, (s) => ({
+    updatedAt: s.updatedAt,
+    loading: s.loading,
+    count: s.items.length,
+  }));
   const [task, setTask] = useState("general");
   const priority = advisorPrefs?.priority || "balanced";
+
+  useEffect(() => {
+    initRankings();
+  }, []);
 
   useEffect(() => {
     if (models.length > 0 && !signals && !signalsLoading) refreshSignals(models);
@@ -126,7 +145,7 @@ export default function AdvisorScreen() {
 
   const ranked = useMemo(
     () => rankModels(models, { task, priority, limit: 9 }),
-    [models, task, priority, signals]
+    [models, task, priority, signals, rankings.updatedAt]
   );
 
   const liveActive = !!(signals?.sources?.hf || signals?.sources?.or || signals?.sources?.leaderboard);
@@ -145,12 +164,17 @@ export default function AdvisorScreen() {
               Best model for the job
             </h1>
             <p className="text-[12.5px] text-dim mt-1">
-              Offline heuristics always work; live popularity signals add a small boost when available.
+              Offline heuristics blended with live OpenRouter usage rankings when available.
             </p>
           </div>
           <div className="flex items-center gap-2 text-[11px]">
-            {signalsLoading ? (
-              <span className="flex items-center gap-1.5 text-dim"><Spinner size={11} /> fetching live signals…</span>
+            {signalsLoading || rankings.loading ? (
+              <span className="flex items-center gap-1.5 text-dim"><Spinner size={11} /> updating live signals…</span>
+            ) : rankings.count > 0 ? (
+              <span className="flex items-center gap-1.5 text-ok">
+                <span className="w-1.5 h-1.5 rounded-full bg-ok" />
+                Live rankings · updated {timeAgo(rankings.updatedAt)}
+              </span>
             ) : (
               <span className={`flex items-center gap-1.5 ${liveActive ? "text-ok" : "text-faint"}`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${liveActive ? "bg-ok" : "bg-faint"}`} />
@@ -159,7 +183,7 @@ export default function AdvisorScreen() {
             )}
             <button
               type="button"
-              onClick={() => refreshSignals(models)}
+              onClick={() => { refreshSignals(models); refreshRankings(true); }}
               className="pressable w-7 h-7 rounded-xs flex items-center justify-center text-dim hover:text-hi"
               aria-label="Refresh live signals"
             >

@@ -838,6 +838,51 @@ ipcMain.handle("web-fetch", async (_event, rawUrl) => {
   return fetchUrl(rawUrl.trim());
 });
 
+// ── Live model rankings feed (JSON, fetched in main to bypass CORS) ─────────
+// Fixed allowlisted URL — renderer cannot request arbitrary hosts through this.
+const RANKINGS_FEED_URL = "https://openrouter.ai/api/frontend/v1/rankings/models";
+const RANKINGS_MAX_BYTES = 8 * 1024 * 1024;
+
+ipcMain.handle("rankings-fetch", async () => {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (result) => {
+      if (!settled) { settled = true; resolve(result); }
+    };
+    const req = https.get(
+      RANKINGS_FEED_URL,
+      {
+        headers: { "User-Agent": BROWSER_UA, Accept: "application/json" },
+        timeout: 20000,
+      },
+      (res) => {
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          res.resume();
+          return done({ ok: false, error: `HTTP ${res.statusCode}` });
+        }
+        let body = "";
+        res.on("data", (chunk) => {
+          body += chunk;
+          if (body.length > RANKINGS_MAX_BYTES) {
+            req.destroy();
+            done({ ok: false, error: "Response too large." });
+          }
+        });
+        res.on("end", () => {
+          try {
+            const json = JSON.parse(body);
+            done({ ok: true, data: Array.isArray(json?.data) ? json.data : [] });
+          } catch {
+            done({ ok: false, error: "Invalid JSON in rankings feed." });
+          }
+        });
+      }
+    );
+    req.on("timeout", () => { req.destroy(); done({ ok: false, error: "Request timed out." }); });
+    req.on("error", (err) => done({ ok: false, error: err.message }));
+  });
+});
+
 // ── DDG result URL extractor ─────────────────────────────────────────────────
 
 function parseDDGResultUrls(html) {

@@ -8,9 +8,11 @@ import { sendMessage, sendStore, stopStreaming } from "../../core/send";
 import { estimateTokensFromText } from "../../utils/tokenOptimizer";
 import { EASE_OUT } from "../../design/motion";
 import Icon from "../../ui/icons";
-import { GradientOrb, NeuPopover, MenuItem, NeuTooltip } from "../../ui/primitives";
+import { NeuPopover, MenuItem, NeuTooltip } from "../../ui/primitives";
+import BrandIcon from "../../ui/BrandIcon";
 import { toast } from "../../ui/Toaster";
 import ModelPicker from "./ModelPicker";
+import ModelAdvice from "./ModelAdvice";
 
 const WEB_MODES = ["auto", "always", "off"];
 const WEB_META = {
@@ -106,6 +108,7 @@ export default function Composer() {
 
   return (
     <div className="px-6 pb-5 pt-2">
+      <ModelAdvice />
       <div
         className={`max-w-[880px] mx-auto rounded-lg bg-surface [box-shadow:var(--neu-raised)] ${
           dragOver ? "[box-shadow:var(--neu-raised),0_0_0_2px_var(--accent)]" : ""
@@ -189,7 +192,7 @@ export default function Composer() {
               className="pressable flex items-center gap-2 h-8 pl-2 pr-3 rounded-full bg-deep [box-shadow:var(--neu-inset-sm)] hover:[box-shadow:var(--neu-inset-sm),0_0_8px_var(--accent-glow)]"
               style={{ transition: "box-shadow 180ms var(--ease-out)" }}
             >
-              {model ? <GradientOrb seed={model._selectionId} size={16} /> : <Icon name="cpu" size={14} className="text-dim" />}
+              {model ? <BrandIcon model={model} seed={model._selectionId} size={16} /> : <Icon name="cpu" size={14} className="text-dim" />}
               <span className="text-[11.5px] text-body max-w-[170px] truncate">
                 {model ? modelDisplayName(model) : "Pick a model"}
               </span>

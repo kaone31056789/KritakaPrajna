@@ -45,6 +45,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   // Web page fetching (runs in main process, bypasses CORS/CSP)
   fetchWebPage: (url) => ipcRenderer.invoke("web-fetch", url),
+  // Live OpenRouter model rankings feed (fixed URL, JSON)
+  fetchModelRankings: () => ipcRenderer.invoke("rankings-fetch"),
   // Real web search: DDG → parse result URLs → fetch articles in parallel
   searchWeb: (query) => ipcRenderer.invoke("web-search", query),
   // Fast news RSS search (detailed mode fetches full article text)

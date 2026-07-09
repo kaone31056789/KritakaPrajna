@@ -26,6 +26,7 @@ import {
   IconButton,
   NeuModal,
 } from "../../ui/primitives";
+import BrandIcon from "../../ui/BrandIcon";
 import { toast } from "../../ui/Toaster";
 
 const TABS = [
@@ -55,7 +56,7 @@ function ProviderRow({ id }) {
 
   return (
     <div className="neu-raised-sm rounded-sm p-4 flex items-center gap-3.5 flex-wrap">
-      <GradientOrb seed={`provider-${id}`} size={26} glow={!!current} />
+      <BrandIcon provider={id} seed={`provider-${id}`} size={26} glow={!!current} />
       <div className="w-[130px]">
         <p className="text-[13px] font-semibold text-hi">{meta.label}</p>
         {current ? (
@@ -366,7 +367,7 @@ function UsageTab() {
         rows.map((r) => (
           <div key={r.provider} className="neu-raised-sm rounded-sm p-4">
             <div className="flex items-center gap-2.5 mb-2">
-              <GradientOrb seed={`provider-${r.provider}`} size={18} />
+              <BrandIcon provider={r.provider} seed={`provider-${r.provider}`} size={18} />
               <p className="text-[12.5px] font-semibold text-hi flex-1">{PROVIDER_META[r.provider]?.label || r.provider}</p>
               <span className="text-[11px] font-mono text-dim">{r.requests} req</span>
               <span className="text-[11px] font-mono text-accent">{formatCost(r.cost || 0)}</span>

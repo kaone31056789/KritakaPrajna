@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useMemo } from "react";
+import React, { Suspense, lazy, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useStore } from "../core/store";
 import { navStore, setView, openPalette } from "../core/nav";
@@ -7,9 +7,11 @@ import { sendStore, stopStreaming } from "../core/send";
 import { islandStore } from "../core/island";
 import { chatsStore } from "../core/chats";
 import { modelsStore, getSelectedModel, modelDisplayName } from "../core/models";
+import { initRankings } from "../core/rankings";
 import { SPRING_ISLAND, EASE_OUT } from "../design/motion";
 import Icon from "../ui/icons";
-import { NeuTooltip, GradientOrb, Spinner, Kbd } from "../ui/primitives";
+import { NeuTooltip, Spinner, Kbd } from "../ui/primitives";
+import BrandIcon from "../ui/BrandIcon";
 import CommandPalette from "../ui/CommandPalette";
 import { Toaster } from "../ui/Toaster";
 
@@ -64,7 +66,7 @@ function Island() {
   } else {
     content = (
       <>
-        {model ? <GradientOrb seed={model._selectionId} size={14} /> : <Icon name="spark" size={13} className="text-accent" />}
+        {model ? <BrandIcon model={model} seed={model._selectionId} size={14} /> : <Icon name="spark" size={13} className="text-accent" />}
         <span className="truncate max-w-[220px] text-[11.5px] text-dim">
           {model ? modelDisplayName(model) : "KritakaPrajna"}
         </span>
@@ -217,6 +219,11 @@ const VIEW_COMPONENTS = {
 export default function Shell() {
   const { view } = useStore(navStore, (s) => ({ view: s.view }));
   const View = VIEW_COMPONENTS[view] || ChatScreen;
+
+  // Live model rankings: fetch on launch, auto-refresh every 6h.
+  useEffect(() => {
+    initRankings();
+  }, []);
 
   return (
     <div className="h-screen flex flex-col relative overflow-hidden bg-bg">
