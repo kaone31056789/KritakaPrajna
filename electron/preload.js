@@ -66,18 +66,4 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("terminal-done", handler);
     return () => ipcRenderer.removeListener("terminal-done", handler);
   },
-  // OpenCode agent engine
-  openCodeStart: () => ipcRenderer.invoke("opencode-start"),
-  openCodeRun: (payload) => ipcRenderer.invoke("opencode-run", payload),
-  openCodeResetSession: (sessionId) => ipcRenderer.invoke("opencode-reset-session", sessionId),
-  onOpenCodeEvent: (callback) => {
-    const handler = (_event, data) => callback(data);
-    ipcRenderer.on("opencode-event", handler);
-    return () => ipcRenderer.removeListener("opencode-event", handler);
-  },
-  onOpenCodeStatus: (callback) => {
-    const handler = (_event, data) => callback(data);
-    ipcRenderer.on("opencode-status", handler);
-    return () => ipcRenderer.removeListener("opencode-status", handler);
-  },
 });

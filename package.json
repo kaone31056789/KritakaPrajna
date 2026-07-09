@@ -1,7 +1,7 @@
 {
   "name": "kritakaprajna",
-  "version": "3.0.0",
-  "description": "AI coding assistant powered by OpenRouter",
+  "version": "4.0.0",
+  "description": "KritakaPrajna — multi-provider AI chat + agent workspace (Soft Machine edition)",
   "author": "Parikshit",
   "private": true,
   "homepage": ".",
@@ -10,20 +10,13 @@
     "electron-store": "^8.2.0",
     "electron-updater": "^6.8.3",
     "framer-motion": "^11.18.2",
-    "graphify": "^1.0.0",
-    "highlight.js": "^11.11.1",
-    "opencode-ai": "^1.3.17",
     "pdf-parse": "^2.4.5",
-    "prismjs": "^1.30.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-file-icon": "^1.6.0",
     "react-markdown": "^10.1.0",
     "react-scripts": "5.0.1",
-    "react-simple-code-editor": "^0.14.1",
     "react-syntax-highlighter": "^16.1.1",
-    "remark-gfm": "^4.0.1",
-    "web-vitals": "^2.1.4"
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.19",
@@ -61,10 +54,6 @@
       "build/**/*",
       "electron/**/*",
       "assets/**/*"
-    ],
-    "asarUnpack": [
-      "node_modules/opencode-ai/**/*",
-      "node_modules/opencode-*/**/*"
     ],
     "extraMetadata": {
       "main": "electron/main.js"
