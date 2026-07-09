@@ -1,6 +1,18 @@
 const CLOUD_OLLAMA_BASE_URL = "https://ollama.com";
 const LEGACY_LOCAL_BASE_URL = "http://127.0.0.1:11434";
 
+/**
+ * Curated image-generation model IDs for Ollama.
+ * Some require explicit pull/availability in the connected Ollama runtime.
+ */
+export const IMAGE_GEN_MODELS = [
+  { id: "x/z-image-turbo", name: "z-image-turbo", _provider: "ollama", _isImageGen: true, pricing: { prompt: "0", completion: "0" }, context_length: 0 },
+  { id: "black-forest-labs/flux.1-schnell", name: "FLUX.1 Schnell", _provider: "ollama", _isImageGen: true, pricing: { prompt: "0", completion: "0" }, context_length: 0 },
+  { id: "black-forest-labs/flux.1-dev", name: "FLUX.1 Dev", _provider: "ollama", _isImageGen: true, pricing: { prompt: "0", completion: "0" }, context_length: 0 },
+  { id: "stabilityai/stable-diffusion-xl", name: "Stable Diffusion XL", _provider: "ollama", _isImageGen: true, pricing: { prompt: "0", completion: "0" }, context_length: 0 },
+  { id: "stabilityai/stable-diffusion-3.5-large", name: "Stable Diffusion 3.5 Large", _provider: "ollama", _isImageGen: true, pricing: { prompt: "0", completion: "0" }, context_length: 0 },
+];
+
 function normalizeBaseUrl(value) {
   const raw = String(value || "").trim();
   if (!raw) return LEGACY_LOCAL_BASE_URL;
@@ -1026,5 +1038,172 @@ export async function streamMessage(
     if (buffer.trim()) processJsonLine(buffer);
 
     return { text: full || "(No response)", usage };
+  });
+}
+
+function toImageDataUrl(candidate, fallbackMime = "image/png") {
+  const value = String(candidate || "").trim();
+  if (!value) return null;
+  if (/^data:image\//i.test(value) || /^https?:\/\//i.test(value)) return value;
+
+  const compact = value.replace(/\s+/g, "");
+  if (/^[A-Za-z0-9+/=]+$/.test(compact) && compact.length > 40) {
+    return `data:${fallbackMime};base64,${compact}`;
+  }
+
+  return null;
+}
+
+function extractImageDataUrlFromOllamaPayload(payload, fallbackMime = "image/png") {
+  const candidates = [];
+  const push = (value) => {
+    if (value == null) return;
+    candidates.push(value);
+  };
+
+  push(payload?.image);
+  push(payload?.b64_json);
+
+  const buckets = [payload?.images, payload?.artifacts, payload?.data, payload?.output];
+  for (const bucket of buckets) {
+    if (!Array.isArray(bucket)) continue;
+    for (const item of bucket) {
+      if (typeof item === "string") {
+        push(item);
+        continue;
+      }
+      if (item && typeof item === "object") {
+        push(item?.image);
+        push(item?.base64);
+        push(item?.b64_json);
+        push(item?.url);
+        push(item?.image_url?.url);
+      }
+    }
+  }
+
+  return candidates
+    .map((candidate) => toImageDataUrl(candidate, fallbackMime))
+    .find(Boolean) || null;
+}
+
+/** Generate an image via Ollama's /api/generate endpoint (image models only). */
+export async function generateImage(baseUrlConfig, modelId, prompt) {
+  const { baseUrl, apiKey } = resolveConnection(baseUrlConfig);
+  const promptText = String(prompt || "").trim();
+  const timeoutMs = 15 * 60 * 1000;
+
+  const runWithModelRetries = async (runner) => {
+    const queue = deriveModelRetryCandidates(modelId);
+    const seen = new Set();
+    let knownNames = null;
+    let lastError = null;
+
+    while (queue.length > 0) {
+      const candidate = queue.shift();
+      if (!candidate || seen.has(candidate)) continue;
+      seen.add(candidate);
+
+      try {
+        return await runner(candidate);
+      } catch (err) {
+        lastError = err;
+
+        if (!isModelNotFoundMessage(err?.message)) {
+          throw err;
+        }
+
+        if (!knownNames) {
+          knownNames = await fetchKnownModelNames(baseUrl, apiKey);
+          const extras = deriveModelRetryCandidates(modelId, knownNames);
+          for (const extra of extras) {
+            if (!seen.has(extra) && !queue.includes(extra)) {
+              queue.push(extra);
+            }
+          }
+        }
+      }
+    }
+
+    if (lastError && knownNames?.length) {
+      const preview = knownNames.slice(0, 8).join(", ");
+      throw new Error(
+        `${lastError.message} Available Ollama models: ${preview}${knownNames.length > 8 ? ", ..." : ""}`
+      );
+    }
+
+    throw lastError || new Error(`Ollama model \"${modelId}\" not found.`);
+  };
+
+  return runWithModelRetries(async (candidateModel) => {
+    const payloads = [
+      {
+        model: candidateModel,
+        prompt: promptText,
+        stream: false,
+        width: 1024,
+        height: 1024,
+        steps: 28,
+      },
+      {
+        model: candidateModel,
+        prompt: promptText,
+        stream: false,
+      },
+    ];
+
+    let lastError = null;
+
+    for (const payload of payloads) {
+      try {
+        const raw = await requestText(baseUrl, "/api/generate", {
+          method: "POST",
+          headers: withAuthHeaders({ "Content-Type": "application/json" }, apiKey),
+          body: JSON.stringify(payload),
+          timeoutMs,
+        });
+
+        let json;
+        try {
+          json = JSON.parse(raw || "{}");
+        } catch {
+          throw new Error("Ollama: invalid image generation response");
+        }
+
+        const modelError = String(json?.error || "").trim();
+        if (modelError) {
+          throw new Error(`Ollama: ${modelError}`);
+        }
+
+        const imageUrl = extractImageDataUrlFromOllamaPayload(json);
+        if (!imageUrl) {
+          continue;
+        }
+
+        const usage = {
+          prompt_tokens: Number(json?.prompt_eval_count) || 0,
+          completion_tokens: Number(json?.eval_count) || 0,
+          image_tokens: 1,
+          cost: 0,
+        };
+
+        return { imageUrl, usage, cost: 0 };
+      } catch (err) {
+        lastError = err;
+        const msg = String(err?.message || "").toLowerCase();
+        const canRetryPayload =
+          msg.includes(" 400") ||
+          msg.includes(" 422") ||
+          msg.includes("validation") ||
+          msg.includes("unknown field") ||
+          msg.includes("unsupported");
+
+        if (!canRetryPayload) {
+          throw err;
+        }
+      }
+    }
+
+    throw new Error(String(lastError?.message || "No image returned by selected Ollama model"));
   });
 }

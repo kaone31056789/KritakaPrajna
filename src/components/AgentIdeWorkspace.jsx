@@ -5,25 +5,26 @@ import hljs from "highlight.js/lib/common";
 import { FileIcon, defaultStyles } from "react-file-icon";
 import MarkdownRenderer from "./MarkdownRenderer";
 import { safeCopyText } from "../utils/clipboard";
+import { parseAgentResponse } from "../utils/agentLoop";
 import "highlight.js/styles/github-dark.css";
 
 const C = {
-  mainBg: "#0a0a0a",
-  panelBg: "#111111",
-  activityBg: "#0d0d0d",
-  border: "#1a1a1a",
-  tabBg: "#111111",
-  accent: "#00ff41",
-  accentSoft: "rgba(0,255,65,0.15)",
-  accentText: "#00ff41",
-  text: "#b0b0b0",
-  textDim: "#666666",
-  textBright: "#e0e0e0",
-  editorBg: "#0a0a0a",
-  terminalBg: "#050505",
-  green: "#00ff41",
-  orange: "#00d4ff",
-  blue: "#00d4ff",
+  mainBg: "var(--bg-primary, #030712)",
+  panelBg: "var(--bg-secondary, #0a0f1c)",
+  activityBg: "var(--bg-secondary, #0a0f1c)",
+  border: "var(--border-color, rgba(255,255,255,0.08))",
+  tabBg: "var(--bg-secondary, #0a0f1c)",
+  accent: "var(--accent, #ea580c)",
+  accentSoft: "rgba(255,255,255,0.03)",
+  accentText: "var(--text-primary, #ffffff)",
+  text: "var(--text-secondary, #e2e8f0)",
+  textDim: "var(--text-tertiary, #9ca3af)",
+  textBright: "var(--text-primary, #ffffff)",
+  editorBg: "var(--bg-primary, #030712)",
+  terminalBg: "var(--bg-secondary, #0a0f1c)",
+  green: "#10b981",
+  orange: "#ea580c",
+  blue: "#3b82f6",
 };
 
 function modelSelectionId(model) {
@@ -320,20 +321,38 @@ function LoadingSpinner({ size = 12, accent = C.accentText }) {
 }
 
 function sanitizeAssistantMessageText(value = "") {
-  let output = String(value || "").trim();
-  if (!output) return "";
-
-  output = output
-    .replace(/<\/?plan>/gi, "")
-    .replace(/<step[^>]*>/gi, "")
-    .replace(/<\/step>/gi, "")
-    .replace(/^\s*\*\*REPORT\*\*\s*$/gim, "## Report")
-    .trim();
-
-  return output;
+  return String(value || "").trim();
 }
 
-// ── Chat-style helpers for agent panel ──────────────────────────────────────
+const ToolChip = ({ tool }) => {
+  const [expanded, setExpanded] = useState(false);
+  const color = tool.tool === 'run_command' ? 'var(--accent, #ea580c)' : tool.tool.includes('delete') ? '#ef4444' : '#60a5fa';
+  const badgeText = tool.tool === 'run_command' ? 'CMD' : tool.tool.includes('delete') ? 'DEL' : tool.tool.includes('edit') ? 'EDIT' : tool.tool.includes('search') ? 'FIND' : 'FILE';
+  let summary = tool.params.command || tool.params.path || tool.params.query || tool.tool;
+  
+  return (
+    <div className="my-4 rounded-lg border shadow-sm overflow-hidden" style={{ borderColor: 'var(--border-color, rgba(255,255,255,0.08))', background: 'var(--bg-secondary, rgba(255,255,255,0.02))' }}>
+      <button onClick={() => setExpanded(!expanded)} className="w-full flex items-center px-4 py-3 text-left cursor-pointer hover:bg-white/[0.04] transition-colors" style={{ border: 'none', background: 'transparent' }}>
+        <span className="flex items-center justify-center w-8 h-6 rounded mr-3" style={{ background: `color-mix(in srgb, ${color} 15%, transparent)`, color }}>
+          <span className="text-[10px] font-bold">{badgeText}</span>
+        </span>
+        <div className="flex-1 min-w-0 flex flex-col justify-center">
+          <div className="text-[10px] font-bold tracking-wider uppercase" style={{ color: 'var(--text-tertiary, #9ca3af)' }}>{tool.tool.replace(/_/g, ' ')}</div>
+          <div className="text-[14px] truncate font-mono mt-0.5 font-medium" style={{ color: 'var(--text-primary, #e2e8f0)' }}>{summary}</div>
+        </div>
+        <svg className={`w-4 h-4 ml-2 transition-transform duration-300 ${expanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" style={{ color: '#9ca3af' }}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+      </button>
+      {expanded && (
+          <div className="px-4 py-3 border-t text-[13px] font-mono whitespace-pre-wrap overflow-x-auto shadow-inner" style={{ borderColor: 'var(--border-color, rgba(255,255,255,0.05))', color: '#cbd5e1', background: 'rgba(0,0,0,0.6)' }}>
+             {Object.entries(tool.params || {}).map(([key, val]) => (
+               <div key={key} className="mb-2 last:mb-0"><strong style={{ color: 'var(--accent, #ea580c)' }}>{key}:</strong> {val}</div>
+             ))}
+          </div>
+      )}
+    </div>
+  );
+};
+
 const agentEase = [0.4, 0, 0.2, 1];
 const agentMsgVariants = {
   hidden: { opacity: 0, y: 10 },
@@ -410,15 +429,49 @@ function AgentThinkingBlock({ content, isThinking }) {
   );
 }
 
-function AgentAiIcon() {
+function AgentMessageContent({ content }) {
+  if (typeof content !== "string") return String(content || "");
+  const { thinking, isThinking, rest } = parseThinking(content);
+  
+  let strippedRest = rest;
+  const plans = [];
+  const planRegex = /<plan>([\s\S]*?)<\/plan>/gi;
+  let pm;
+  while ((pm = planRegex.exec(rest)) !== null) {
+      plans.push(pm[1]);
+      strippedRest = strippedRest.replace(pm[0], '');
+  }
+
+  let blocks = [];
+  try {
+     blocks = typeof parseToolCalls === 'function' ? parseToolCalls(strippedRest) : [];
+  } catch(e) {}
+  
   return (
-    <div
-      className="w-5 h-5 flex items-center justify-center shrink-0 mt-0.5 rounded-sm"
-      style={{ background: "rgba(0,255,65,0.1)", border: "1px solid rgba(0,255,65,0.3)" }}
-    >
-      <span className="font-mono text-[9px] font-bold text-[#00ff41] tracking-tighter ml-[1px]">
-        &gt;_
-      </span>
+    <div className="w-full flex flex-col gap-1">
+      {thinking != null && <AgentThinkingBlock content={thinking} isThinking={isThinking} />}
+      
+      {plans.map((p, i) => (
+         <div key={`plan-${i}`} className="my-4 p-4 rounded-xl border flex flex-col gap-2 shadow-sm" style={{ borderColor: 'var(--accent, #ea580c)', background: 'color-mix(in srgb, var(--accent, #ea580c) 4%, transparent)' }}>
+            <div className="text-[12px] font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--accent, #ea580c)' }}>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+              Execution Plan
+            </div>
+            <div className="text-[13px] text-gray-200 mt-1 leading-relaxed markdown-body">
+              <MarkdownRenderer content={p} />
+            </div>
+         </div>
+      ))}
+
+      {blocks.length === 0 && strippedRest.trim() ? (
+         <div className="my-1"><MarkdownRenderer content={strippedRest} /></div>
+      ) : (
+         blocks.map((b, i) => b.type === 'text' && b.content.trim() ? (
+           <div key={i} className="my-1"><MarkdownRenderer content={b.content} /></div>
+         ) : b.type === 'tool_call' ? (
+           <ToolChip key={i} tool={b} />
+         ) : null)
+      )}
     </div>
   );
 }
@@ -468,14 +521,16 @@ function AgentCopyButton({ text }) {
   );
 }
 
-function AgentMessageContent({ content }) {
-  if (typeof content !== "string") return String(content || "");
-  const { thinking, isThinking, rest } = parseThinking(content);
+function AgentAiIcon() {
   return (
-    <>
-      {thinking != null && <AgentThinkingBlock content={thinking} isThinking={isThinking} />}
-      {rest && <MarkdownRenderer content={rest} />}
-    </>
+    <div
+      className="w-5 h-5 flex items-center justify-center shrink-0 mt-0.5 rounded-sm"
+      style={{ background: "rgba(0,255,65,0.1)", border: "1px solid rgba(0,255,65,0.3)" }}
+    >
+      <span className="font-mono text-[9px] font-bold text-[#00ff41] tracking-tighter ml-[1px]">
+        &gt;_
+      </span>
+    </div>
   );
 }
 

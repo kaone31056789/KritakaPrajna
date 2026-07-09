@@ -24,6 +24,7 @@ const FALLBACK_MODELS = [
   "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
   "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
   "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+  "THUDM/glm-4-9b-chat",
 ];
 
 const PREFERRED_PREFIXES = [
@@ -48,6 +49,7 @@ const PREFERRED_PREFIXES = [
   "mistralai/Mistral-",
   "deepseek-ai/DeepSeek-R1-Distill",
   "HuggingFaceH4/zephyr",
+  "THUDM/glm",
   "TinyLlama/",
 ];
 
@@ -458,6 +460,8 @@ export const IMAGE_GEN_MODELS = [
   { id: "black-forest-labs/FLUX.1-schnell", name: "FLUX.1 Schnell (Free)", _provider: "huggingface", _isImageGen: true, pricing: { prompt: "0", completion: "0" }, context_length: 0 },
   { id: "black-forest-labs/FLUX.1-dev",     name: "FLUX.1 Dev",            _provider: "huggingface", _isImageGen: true, pricing: { prompt: "0", completion: "0" }, context_length: 0 },
   { id: "stabilityai/stable-diffusion-xl-base-1.0", name: "SDXL Base",    _provider: "huggingface", _isImageGen: true, pricing: { prompt: "0", completion: "0" }, context_length: 0 },
+  { id: "stabilityai/stable-diffusion-3-medium-diffusers", name: "SD3 Medium", _provider: "huggingface", _isImageGen: true, pricing: { prompt: "0", completion: "0" }, context_length: 0 },
+  { id: "stabilityai/stable-diffusion-3.5-large", name: "SD3.5 Large", _provider: "huggingface", _isImageGen: true, pricing: { prompt: "0", completion: "0" }, context_length: 0 },
 ];
 
 

@@ -80,6 +80,7 @@ const TASK_PREF_KEY = "openrouter_task_pref";
 const REASONING_DEPTH_KEY = "openrouter_reasoning_depth";
 const SYSTEM_PROMPT_KEY = "openrouter_system_prompt";
 const PERSONAS_KEY = "kp_chat_personas";
+const ACTIVE_PERSONA_KEY = "kp_active_persona";
 const FOLDERS_KEY = "kp_chat_folders";
 const ADVISOR_PREFS_KEY = "openrouter_advisor_prefs";
 const RESPONSE_LENGTH_KEY = "openrouter_response_length";
@@ -214,6 +215,24 @@ function loadResponseLengthSetting() {
   return "medium";
 }
 
+function normalizePersonas(personaList) {
+  const list = Array.isArray(personaList)
+    ? personaList.filter((persona) => persona && typeof persona === "object")
+    : [];
+  if (list.length === 0) return DEFAULT_PERSONAS;
+  if (list.some((persona) => persona.id === "default")) return list;
+  return [DEFAULT_PERSONAS[0], ...list];
+}
+
+function loadActivePersonaSetting() {
+  try {
+    const raw = String(localStorage.getItem(ACTIVE_PERSONA_KEY) || "").trim();
+    return raw || "default";
+  } catch {
+    return "default";
+  }
+}
+
 /** Derive a title from the first user message, or fallback */
 function deriveTitle(messages) {
   const first = messages.find((m) => m.role === "user");
@@ -308,21 +327,23 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
   const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem(LAST_MODEL_KEY) || "");
   const [selectedTask, setSelectedTask] = useState(() => {
     const savedTask = localStorage.getItem(TASK_PREF_KEY) || "text-generation";
-    return (savedTask === "more" || savedTask === "any-to-any") ? "text-generation" : savedTask;
+    return (savedTask === "more" || savedTask === "any-to-any" || savedTask === "text-to-video") ? "text-generation" : savedTask;
   });
   const [reasoningDepth, setReasoningDepth] = useState(() => localStorage.getItem(REASONING_DEPTH_KEY) || "balanced");
   const [chats, setChats] = useState(loadChats);
   const [personas, setPersonas] = useState(() => {
     try {
       const stored = localStorage.getItem(PERSONAS_KEY);
-      return stored ? JSON.parse(stored) : DEFAULT_PERSONAS;
+      return normalizePersonas(stored ? JSON.parse(stored) : DEFAULT_PERSONAS);
     } catch {
       return DEFAULT_PERSONAS;
     }
   });
+  const [activePersonaId, setActivePersonaId] = useState(loadActivePersonaSetting);
   const handleSavePersonas = (p) => {
-    setPersonas(p);
-    localStorage.setItem(PERSONAS_KEY, JSON.stringify(p));
+    const normalized = normalizePersonas(p);
+    setPersonas(normalized);
+    localStorage.setItem(PERSONAS_KEY, JSON.stringify(normalized));
   };
   const [folders, setFolders] = useState(() => {
     try {
@@ -438,18 +459,34 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
   const agentLoopAbortRef = useRef(null);
   const agentPermissionRequestRef = useRef(null);
 
+  const personaIdSet = useMemo(
+    () => new Set((personas || []).map((persona) => String(persona?.id || ""))),
+    [personas]
+  );
+
+  const resolvePersonaId = useCallback((personaId) => {
+    const candidate = String(personaId || "").trim();
+    return candidate && personaIdSet.has(candidate) ? candidate : "default";
+  }, [personaIdSet]);
+
   const currentChatPersonaId = useMemo(() => {
-    if (interactionMode === "agent") {
-      return agentChats.find(c => c.id === activeAgentChatId)?.personaId || "default";
-    }
-    return chats.find(c => c.id === activeChatId)?.personaId || "default";
-  }, [chats, activeChatId, agentChats, activeAgentChatId, interactionMode]);
+    const fallbackPersonaId = resolvePersonaId(activePersonaId);
+    const chatPersonaId = interactionMode === "agent"
+      ? agentChats.find((c) => c.id === activeAgentChatId)?.personaId
+      : chats.find((c) => c.id === activeChatId)?.personaId;
+    return resolvePersonaId(chatPersonaId || fallbackPersonaId);
+  }, [activePersonaId, chats, activeChatId, agentChats, activeAgentChatId, interactionMode, resolvePersonaId]);
 
   const handleUpdateChatPersona = (personaId) => {
+    const nextPersonaId = resolvePersonaId(personaId);
+    setActivePersonaId(nextPersonaId);
+
     if (interactionMode === "agent") {
-      setAgentChats(prev => prev.map(c => c.id === activeAgentChatId ? { ...c, personaId } : c));
+      if (!activeAgentChatId) return;
+      setAgentChats((prev) => prev.map((c) => c.id === activeAgentChatId ? { ...c, personaId: nextPersonaId } : c));
     } else {
-      setChats(prev => prev.map(c => c.id === activeChatId ? { ...c, personaId } : c));
+      if (!activeChatId) return;
+      setChats((prev) => prev.map((c) => c.id === activeChatId ? { ...c, personaId: nextPersonaId } : c));
     }
   };
 
@@ -594,6 +631,34 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
   useEffect(() => {
     saveSecondaryId(secondaryChatId);
   }, [secondaryChatId]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(ACTIVE_PERSONA_KEY, currentChatPersonaId);
+    } catch { }
+  }, [currentChatPersonaId]);
+
+  useEffect(() => {
+    if (activePersonaId !== currentChatPersonaId) {
+      setActivePersonaId(currentChatPersonaId);
+    }
+  }, [activePersonaId, currentChatPersonaId]);
+
+  useEffect(() => {
+    const normalizeChatPersonaIds = (prevChats) => {
+      let changed = false;
+      const nextChats = prevChats.map((chat) => {
+        const nextPersonaId = resolvePersonaId(chat?.personaId);
+        if (chat?.personaId === nextPersonaId) return chat;
+        changed = true;
+        return { ...chat, personaId: nextPersonaId };
+      });
+      return changed ? nextChats : prevChats;
+    };
+
+    setChats((prev) => normalizeChatPersonaIds(prev));
+    setAgentChats((prev) => normalizeChatPersonaIds(prev));
+  }, [resolvePersonaId]);
 
   // Apply saved theme + accent color on startup using dynamic CSS overrides
   useEffect(() => {
@@ -1371,8 +1436,11 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
     async (text, opts = {}) => {
       let chatId = opts.targetChatId || activeChatId;
       const targetChatObj = chats.find(c => c.id === chatId);
-      const activePersonaIdInChat = targetChatObj?.personaId || (chatId === activeChatId ? currentChatPersonaId : "default");
-      const personaSelected = personas.find(p => p.id === activePersonaIdInChat);
+      const fallbackPersonaId = resolvePersonaId(activePersonaId);
+      const activePersonaIdInChat = resolvePersonaId(
+        targetChatObj?.personaId || (chatId === activeChatId ? currentChatPersonaId : fallbackPersonaId)
+      );
+      const personaSelected = personas.find((p) => p.id === activePersonaIdInChat);
 
       let requestedModelSelection = opts.modelOverride || selectedModel;
       if (personaSelected && personaSelected.modelId) {
@@ -2325,8 +2393,15 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
       selectedModel,
       activeChatId,
       chats,
+      personas,
+      activePersonaId,
+      currentChatPersonaId,
+      resolvePersonaId,
       attachedFiles,
       uploads,
+      customCommands,
+      webSearchEnabled,
+      tokenBudgetInfo,
       models,
       systemPrompt,
       advisorPrefs,
@@ -2466,7 +2541,13 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
       return;
     }
 
-    const requestedModelSelection = opts.modelOverride || selectedModel;
+    const personaSelected = personas.find((p) => p.id === currentChatPersonaId);
+    const agentPersonaPrompt = String(personaSelected?.systemPrompt || "").trim();
+    const effectiveAgentInput = agentPersonaPrompt
+      ? `[Persona Instruction]\n${agentPersonaPrompt}\n\n[User Task]\n${sendText}`
+      : sendText;
+
+    const requestedModelSelection = opts.modelOverride || personaSelected?.modelId || selectedModel;
     if (!requestedModelSelection) {
       setAgentError("Select an agent-compatible model before running.");
       return;
@@ -2523,14 +2604,24 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
       const existing = prevChats.find((chat) => chat.id === chatId);
       if (!existing) {
         const initialMessages = [{ role: "user", content: sendText }];
-        const newChat = { id: chatId, title: deriveTitle(initialMessages), messages: initialMessages };
+        const newChat = {
+          id: chatId,
+          title: deriveTitle(initialMessages),
+          messages: initialMessages,
+          personaId: currentChatPersonaId,
+        };
         return [newChat, ...prevChats];
       }
 
       return prevChats.map((chat) => {
         if (chat.id !== chatId) return chat;
         const nextMessages = [...(chat.messages || []), { role: "user", content: sendText }];
-        return { ...chat, messages: nextMessages, title: deriveTitle(nextMessages) };
+        return {
+          ...chat,
+          personaId: resolvePersonaId(chat.personaId || currentChatPersonaId),
+          messages: nextMessages,
+          title: deriveTitle(nextMessages),
+        };
       });
     });
 
@@ -2660,7 +2751,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
           }),
       });
 
-      const result = await loop.run({ userMessage: sendText, contextMessages });
+      const result = await loop.run({ userMessage: effectiveAgentInput, contextMessages });
       if (abortController.signal.aborted) return;
 
       if (!result?.success) {
@@ -2704,7 +2795,7 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
       }
       setAgentRequestId((prev) => (prev === requestId ? "" : prev));
     }
-  }, [activeAgentChatId, agentChats, agentWorkspacePath, models, platformInfo, providers, selectedModel]);
+  }, [activeAgentChatId, agentChats, agentWorkspacePath, models, platformInfo, providers, selectedModel, personas, currentChatPersonaId, resolvePersonaId]);
 
   const handleModeAwareSend = useCallback((text, opts = {}) => {
     if (interactionMode === "agent") {
@@ -2971,7 +3062,12 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
   }, [selectModelAndSyncTask]);
 
   const handleNewChat = () => {
-    const newChat = { id: generateId(), title: "New Chat", messages: [] };
+    const newChat = {
+      id: generateId(),
+      title: "New Chat",
+      messages: [],
+      personaId: currentChatPersonaId,
+    };
     setChats((prev) => [newChat, ...prev]);
     setActiveChatId(newChat.id);
     setError("");
@@ -3128,11 +3224,12 @@ export default function ChatApp({ providers, onSaveProviderKey, onRemoveProvider
       id: generateId(),
       title: branchTitle,
       messages: branchedMessages,
+      personaId: resolvePersonaId(chat.personaId || currentChatPersonaId),
     };
 
     setChats((prev) => [newChat, ...prev]);
     setActiveChatId(newChat.id);
-  }, [chats, activeChatId]);
+  }, [chats, activeChatId, currentChatPersonaId, resolvePersonaId]);
 
   const handleTogglePin = (id, e) => {
     e.stopPropagation();

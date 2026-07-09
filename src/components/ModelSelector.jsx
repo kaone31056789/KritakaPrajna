@@ -1,11 +1,11 @@
-﻿import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { filterModelsForTask } from "../utils/smartModelSelect";
+import { TASK_OPTIONS, filterModelsForTask } from "../utils/smartModelSelect";
 
 const ease = [0.4, 0, 0.2, 1];
 const FAVORITES_KEY = "openrouter_favorites";
 const MAX_FAVORITES = 10;
-const SOURCE_PROVIDER_ORDER = ["openrouter", "huggingface", "ollama", "openai", "anthropic"];
+const SOURCE_PROVIDER_ORDER = ["openrouter", "huggingface", "ollama", "openai", "anthropic", "nvidia"];
 
 const SOURCE_LABELS = {
   openrouter: "OpenRouter",
@@ -13,6 +13,7 @@ const SOURCE_LABELS = {
   ollama: "Ollama",
   openai: "OpenAI",
   anthropic: "Anthropic",
+  nvidia: "Nvidia NIM",
 };
 
 const SOURCE_COLORS = {
@@ -21,6 +22,23 @@ const SOURCE_COLORS = {
   ollama: "#22c55e",
   openai: "#34d399",
   anthropic: "#fb923c",
+  nvidia: "#76b900",
+};
+
+const TASK_MENU_IDS = [
+  "text-generation",
+  "text-to-image",
+  "image-to-text",
+  "image-to-image",
+  "text-to-speech",
+];
+
+const TASK_MENU_LABELS = {
+  "text-generation": "Text to Text",
+  "text-to-image": "Text to Image",
+  "image-to-text": "Image to Text",
+  "image-to-image": "Image to Image",
+  "text-to-speech": "Text to Speech",
 };
 
 const FAMILY_PATTERNS = [
@@ -90,7 +108,7 @@ function isFreeModel(model) {
 }
 
 function supportsMeaningfulPricing(provider) {
-  return provider === "openrouter" || provider === "huggingface" || provider === "ollama";
+  return provider === "openrouter" || provider === "huggingface" || provider === "ollama" || provider === "nvidia";
 }
 
 function familyForModel(model) {
@@ -403,14 +421,25 @@ export default function ModelSelector({ models, selected, onSelect, selectedMode
 
   const selectedObj = selectedModel || models.find((m) => selectionId(m) === selected || m.id === selected);
   const currentProvider = selectedObj?._provider || "openrouter";
-  const taskMenuOptions = [
-    { id: "text-generation", label: "Text to Text" },
-    { id: "text-to-image", label: "Image Generation" },
-    { id: "image-to-text", label: "Image to Text" },
-    { id: "image-to-image", label: "Image to Image" },
-    { id: "text-to-speech", label: "Text to Speech" },
-  ];
-  const currentTask = taskMenuOptions.find((task) => task.id === selectedTask);
+  const taskMenuOptions = useMemo(() => {
+    return TASK_MENU_IDS.map((taskId) => {
+      const base = TASK_OPTIONS.find((task) => task.id === taskId);
+      return {
+        id: taskId,
+        label: TASK_MENU_LABELS[taskId] || base?.label || taskId,
+      };
+    });
+  }, []);
+
+  const taskCounts = useMemo(() => {
+    const counts = {};
+    for (const task of taskMenuOptions) {
+      counts[task.id] = filterModelsForTask(models, task.id).length;
+    }
+    return counts;
+  }, [models, taskMenuOptions]);
+
+  const currentTask = taskMenuOptions.find((task) => task.id === selectedTask) || taskMenuOptions[0];
 
   const handleSelect = (id) => {
     onSelect(id);
@@ -466,7 +495,10 @@ export default function ModelSelector({ models, selected, onSelect, selectedMode
                       : "text-[#e0e0e0] hover:bg-[#1a1a1a]/70"
                   }`}
                 >
-                  {task.label}
+                  <span className="flex items-center justify-between gap-2">
+                    <span>{task.label}</span>
+                    <span className="text-[10px] font-medium text-[#b0b0b0]/55">{taskCounts[task.id] ?? 0}</span>
+                  </span>
                 </button>
               ))}
             </motion.div>

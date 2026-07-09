@@ -49,6 +49,7 @@ const PROVIDER_DEFS = [
   { id: "anthropic",   label: "Anthropic",      placeholder: "sk-ant-...",  color: "#c96442", note: "Claude Opus, Sonnet, Haiku", valueLabel: "Key", inputType: "password" },
   { id: "huggingface", label: "HuggingFace",    placeholder: "hf_...",      color: "#f5a623", note: "Popular open models, free + paid router options", valueLabel: "Key", inputType: "password" },
   { id: "ollama",      label: "Ollama",         placeholder: "ollama_...", color: "#22c55e", note: "Cloud models via API key from ollama.com/settings/keys", valueLabel: "Key", inputType: "password" },
+  { id: "nvidia",      label: "Nvidia NIM",     placeholder: "nvapi-...",   color: "#76b900", note: "Llama 3, Mistral, Nemotron via NIM", valueLabel: "Key", inputType: "password" },
 ];
 
 function ProviderRow({ def, currentKey, onSave, onRemove }) {

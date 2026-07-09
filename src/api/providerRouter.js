@@ -5,15 +5,16 @@
  * to the correct provider API. Each model object carries a `_provider` field
  * that determines which API client handles the call.
  *
- * Provider keys shape:  { openrouter, openai, anthropic, huggingface, ollama }
+ * Provider keys shape:  { openrouter, openai, anthropic, huggingface, ollama, nvidia }
  * Each value is a provider credential/config string (API key or endpoint) or null/undefined.
  */
 
-import { fetchModels as fetchOpenRouterModels, streamMessage as streamOpenRouter, fetchCredits, generateImage as generateImageOR } from "./openrouter";
+import { fetchModels as fetchOpenRouterModels, streamMessage as streamOpenRouter, fetchCredits, generateImage as generateImageOR, IMAGE_GEN_MODELS as OR_IMAGE_MODELS } from "./openrouter";
 import { fetchModels as fetchOpenAIModels, streamMessage as streamOpenAI } from "./openai";
 import { fetchModels as fetchAnthropicModels, streamMessage as streamAnthropic } from "./anthropic";
 import { fetchModels as fetchHFModels, streamMessage as streamHF, generateImage as generateImageHF, IMAGE_GEN_MODELS as HF_IMAGE_MODELS } from "./huggingface";
 import { fetchModels as fetchOllamaModels, streamMessage as streamOllama } from "./ollama";
+import { fetchModels as fetchNvidiaModels, streamMessage as streamNvidia } from "./nvidia";
 
 export { fetchCredits };
 
@@ -39,6 +40,7 @@ export const PROVIDER_META = {
   anthropic:   { label: "Anthropic API",    color: "#c96442", hasSuggestions: false },
   huggingface: { label: "HuggingFace",      color: "#f5a623", hasSuggestions: true  },
   ollama:      { label: "Ollama",           color: "#22c55e", hasSuggestions: true  },
+  nvidia:      { label: "Nvidia NIM",       color: "#76b900", hasSuggestions: false },
 };
 
 export function providerLabel(provider) {
@@ -63,11 +65,11 @@ function inferImageOutputCapability(model) {
  * Fetch and merge models from every provider that has a key.
  * Each model gets a `_provider` tag so the router knows which API to call.
  *
- * @param {object} providerKeys - { openrouter, openai, anthropic, huggingface, ollama }
+ * @param {object} providerKeys - { openrouter, openai, anthropic, huggingface, ollama, nvidia }
  * @returns {Promise<Array>} Flat array of model objects with `_provider` set
  */
 export async function fetchAllModels(providerKeys) {
-  const providerOrder = ["openrouter", "openai", "anthropic", "huggingface", "ollama"];
+  const providerOrder = ["openrouter", "openai", "anthropic", "huggingface", "ollama", "nvidia"];
   const results = await Promise.allSettled([
     providerKeys?.openrouter
       ? fetchOpenRouterModels(providerKeys.openrouter).then((ms) =>
@@ -82,6 +84,7 @@ export async function fetchAllModels(providerKeys) {
     providerKeys?.anthropic   ? fetchAnthropicModels(providerKeys.anthropic)                                                                 : Promise.resolve([]),
     providerKeys?.huggingface ? fetchHFModels(providerKeys.huggingface)                                                                      : Promise.resolve([]),
     providerKeys?.ollama      ? fetchOllamaModels(providerKeys.ollama)                                                                       : Promise.resolve([]),
+    providerKeys?.nvidia      ? fetchNvidiaModels(providerKeys.nvidia)                                                                       : Promise.resolve([]),
   ]);
 
   results.forEach((result, index) => {
@@ -97,6 +100,7 @@ export async function fetchAllModels(providerKeys) {
 
   // Append image and video generation models for active providers
   const imageModels = [
+    ...(providerKeys?.openrouter ? OR_IMAGE_MODELS : []),
     ...(providerKeys?.huggingface ? HF_IMAGE_MODELS : []),
   ].map(withSelectionMeta);
 
@@ -160,6 +164,7 @@ export async function routeStream(providerKeys, model, messages, opts = {}) {
     case "anthropic":   return streamAnthropic(key, model.id, messages, opts);
     case "huggingface": return streamHF(key, model.id, messages, opts);
     case "ollama":      return streamOllama(key, model.id, messages, opts);
+    case "nvidia":      return streamNvidia(key, model.id, messages, opts);
     default:            throw new Error(`Unknown provider: ${provider}`);
   }
 }

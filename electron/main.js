@@ -22,6 +22,7 @@ const store = new Store({
     anthropicKeyEncrypted:   { type: "string", default: "" },
     huggingfaceKeyEncrypted: { type: "string", default: "" },
     ollamaKeyEncrypted:      { type: "string", default: "" },
+    nvidiaKeyEncrypted:      { type: "string", default: "" },
     keyboardShortcuts:       { type: "object", default: {} },
     userMemory:              {
       type: "object",
@@ -64,6 +65,7 @@ const PROVIDER_KEY_MAP = {
   anthropic:    "anthropicKeyEncrypted",
   huggingface:  "huggingfaceKeyEncrypted",
   ollama:       "ollamaKeyEncrypted",
+  nvidia:       "nvidiaKeyEncrypted",
 };
 
 function getProviderKey(provider) {
@@ -104,6 +106,7 @@ function getAllProviderKeys() {
     anthropic:   getProviderKey("anthropic"),
     huggingface: getProviderKey("huggingface"),
     ollama:      getProviderKey("ollama"),
+    nvidia:      getProviderKey("nvidia"),
   };
 }
 
@@ -1213,23 +1216,31 @@ function createWindow() {
   Menu.setApplicationMenu(null);
 
   // ── CSP: restrict what the renderer can load/connect to ────────────────────
+  // Also inject CORS headers for API domains that don't provide them (e.g. Nvidia NIM)
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    callback({
-      responseHeaders: {
-        ...details.responseHeaders,
-        "Content-Security-Policy": [
-          "default-src 'self'; " +
-          "script-src 'self'; " +
-          "style-src 'self' 'unsafe-inline'; " +
-          "img-src 'self' data: blob: https:; " +
-          "connect-src https://openrouter.ai https://api.openai.com https://api.anthropic.com https://router.huggingface.co https://huggingface.co https://ollama.com http://127.0.0.1:11434 http://localhost:11434; " +
-          "font-src 'self' data:; " +
-          "media-src blob:; " +
-          "object-src 'none'; " +
-          "base-uri 'none';",
-        ],
-      },
-    });
+    const responseHeaders = { ...details.responseHeaders };
+
+    // Nvidia NIM API doesn't send CORS headers — inject them so fetch() works
+    const url = (details.url || "").toLowerCase();
+    if (url.includes("integrate.api.nvidia.com") || url.includes("ai.api.nvidia.com")) {
+      responseHeaders["Access-Control-Allow-Origin"] = ["*"];
+      responseHeaders["Access-Control-Allow-Headers"] = ["Content-Type, Authorization"];
+      responseHeaders["Access-Control-Allow-Methods"] = ["GET, POST, PUT, DELETE, OPTIONS"];
+    }
+
+    responseHeaders["Content-Security-Policy"] = [
+      "default-src 'self'; " +
+      "script-src 'self'; " +
+      "style-src 'self' 'unsafe-inline'; " +
+      "img-src 'self' data: blob: https:; " +
+      "connect-src https://openrouter.ai https://api.openai.com https://api.anthropic.com https://router.huggingface.co https://huggingface.co https://ollama.com http://127.0.0.1:11434 http://localhost:11434 https://integrate.api.nvidia.com https://ai.api.nvidia.com; " +
+      "font-src 'self' data:; " +
+      "media-src blob:; " +
+      "object-src 'none'; " +
+      "base-uri 'none';",
+    ];
+
+    callback({ responseHeaders });
   });
 
   // ── Block all permission requests (camera, mic, geolocation, etc.) ──────────
@@ -1250,6 +1261,7 @@ function createWindow() {
       sandbox: true,
       preload: path.join(__dirname, "preload.js"),
       backgroundThrottling: false,
+      webSecurity: false, // Allow cross-origin API calls (Nvidia NIM lacks CORS headers)
     },
   });
 
@@ -1485,7 +1497,7 @@ ipcMain.handle("store-set-key", (_event, key) => { setApiKey(key); });
 ipcMain.handle("store-remove-key", () => { removeApiKey(); });
 
 // ── IPC: multi-provider key management ──────────────────────────────────────
-const VALID_PROVIDERS = new Set(["openrouter", "openai", "anthropic", "huggingface", "ollama"]);
+const VALID_PROVIDERS = new Set(["openrouter", "openai", "anthropic", "huggingface", "ollama", "nvidia"]);
 ipcMain.handle("provider-get-key", (_event, provider) => {
   if (!VALID_PROVIDERS.has(provider)) return null;
   return getProviderKey(provider);

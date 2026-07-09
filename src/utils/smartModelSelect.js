@@ -22,7 +22,6 @@ export const TASK_OPTIONS = [
   { id: "image-to-text", label: "Image-to-Text", capability: "vision" },
   { id: "image-to-image", label: "Image-to-Image", capability: "image-edit" },
   { id: "text-to-image", label: "Text-to-Image", capability: "image-gen" },
-  { id: "text-to-video", label: "Text-to-Video", capability: "video" },
   { id: "text-to-speech", label: "Text-to-Speech", capability: "audio" },
   { id: "more", label: "More", capability: "specialized" },
 ];
@@ -45,7 +44,7 @@ export function detectUiTask(text, uploads = [], attachedFiles = []) {
 
   if (uploads.some((u) => u.type === "image")) return "image-to-text";
   if (/(generate|create|make).*(image|logo|poster|art|photo|picture)/.test(lower)) return "text-to-image";
-  if (/(generate|create|make).*(video|clip|animation)/.test(lower)) return "text-to-video";
+  if (/(generate|create|make).*(video|clip|animation)/.test(lower)) return "text-generation";
   if (/(text to speech|tts|voiceover|narrate|read aloud|speak this)/.test(lower)) return "text-to-speech";
   if (/(edit image|modify image|restyle image|image to image|img2img)/.test(lower)) return "image-to-image";
   if (/(any to any|multimodal|audio and image|video and text)/.test(lower)) return "text-generation";
@@ -166,7 +165,7 @@ export function supportsTask(model, taskId) {
     case "image-to-image":
       return supportsImageEditing(model);
     case "text-to-video":
-      return supportsVideo(model);
+      return false;
     case "text-to-speech":
       return supportsAudio(model);
     case "any-to-any":

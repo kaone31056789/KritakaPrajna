@@ -65,6 +65,19 @@ const PROVIDERS = [
     ),
   },
   {
+    id: "nvidia",
+    label: "Nvidia NIM",
+    description: "Llama 3, Mistral, Nemotron via NIM",
+    placeholder: "nvapi-...",
+    color: "#76b900",
+    badge: null,
+    icon: (
+      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 21.6c-5.3 0-9.6-4.3-9.6-9.6s4.3-9.6 9.6-9.6 9.6 4.3 9.6 9.6-4.3 9.6-9.6 9.6zM6.9 8.2l7.1 7.1V12h2v5.8c0 .2-.1.4-.3.5-.2.1-.4.1-.6 0l-7.1-7.1v3.4h-2V6.6c0-.2.1-.4.3-.5.2-.1.4-.1.6 0l7.1 7.1V9.8h2v-6H14v5.8L6.9 2.5v3.4h-2V20h2V8.2z"/>
+      </svg>
+    ),
+  },
+  {
     id: "ollama",
     label: "Ollama",
     description: "Cloud models via Ollama API key",
@@ -96,6 +109,7 @@ export default function ApiKeyScreen({ onSave, initialProviders = {} }) {
     anthropic:   initialProviders.anthropic   || "",
     huggingface: initialProviders.huggingface || "",
     ollama:      initialProviders.ollama      || "",
+    nvidia:      initialProviders.nvidia      || "",
   });
 
   const toggleProvider = (id) => {

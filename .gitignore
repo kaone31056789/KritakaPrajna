@@ -28,3 +28,9 @@ Thumbs.db
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Graphify (generated knowledge graph)
+graphify-out/
+
+# Agent config (local rules/workflows)
+.agent/

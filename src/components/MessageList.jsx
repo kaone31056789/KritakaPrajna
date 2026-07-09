@@ -13,36 +13,149 @@ const msgVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.25, ease } },
 };
 
-/** Split <think>…</think> from the rest of the message */
-function parseThinking(content) {
-  if (typeof content !== "string") return { thinking: null, isThinking: false, rest: content };
-  const openIdx = content.indexOf("<think>");
-  if (openIdx === -1) return { thinking: null, isThinking: false, rest: content };
-  const closeIdx = content.indexOf("</think>", openIdx);
-  if (closeIdx === -1) {
-    // Still streaming the thinking block
-    return { thinking: content.slice(openIdx + 7), isThinking: true, rest: content.slice(0, openIdx) };
+function splitParagraphs(value) {
+  return String(value || "")
+    .replace(/\r\n/g, "\n")
+    .split(/\n{2,}/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function looksLikeImplicitThinkingParagraph(paragraph) {
+  const text = String(paragraph || "").trim();
+  if (!text || text.includes("```")) return false;
+
+  const hasFirstPerson = /\b(i|my|mine|i(?:'|’)ll)\b/i.test(text);
+  if (!hasFirstPerson) return false;
+
+  const planningSignals = [
+    /\bi need to\b/i,
+    /\bi should\b/i,
+    /\bi(?:'|’)ll\b/i,
+    /\blet me\b/i,
+    /\bfirst\b/i,
+    /\bnext\b/i,
+    /\bthen\b/i,
+    /\bfinally\b/i,
+    /\bstart by\b/i,
+    /\bbreak down\b/i,
+    /\boutline\b/i,
+  ];
+
+  const score = planningSignals.reduce((sum, re) => (re.test(text) ? sum + 1 : sum), 0);
+  return score >= 1;
+}
+
+function hasStrongPlanningCue(text) {
+  const sample = String(text || "").trim();
+  if (!sample) return false;
+  return /\b(i need to|i should|let me|i(?:'|’)ll)\b/i.test(sample);
+}
+
+function parseImplicitThinking(content, { streaming = false } = {}) {
+  const paragraphs = splitParagraphs(content);
+  if (paragraphs.length === 0) return null;
+
+  let cursor = 0;
+  while (cursor < paragraphs.length && looksLikeImplicitThinkingParagraph(paragraphs[cursor])) {
+    cursor += 1;
   }
+
+  // Require at least two planning paragraphs to avoid false positives on normal explanations.
+  // During streaming, allow one strong planning paragraph so leaked thoughts are hidden immediately.
+  if (cursor < 2) {
+    const first = paragraphs[0] || "";
+    const allowSingleStreamingParagraph = streaming && cursor === 1 && hasStrongPlanningCue(first);
+    if (!allowSingleStreamingParagraph) return null;
+  }
+
+  const thinking = paragraphs.slice(0, cursor).join("\n\n").trim();
+  const rest = paragraphs.slice(cursor).join("\n\n").trim();
+
+  if (!thinking) return null;
+  return { thinking, rest };
+}
+
+/** Split <think>…</think> from the rest of the message */
+function parseThinking(content, { streaming = false } = {}) {
+  if (typeof content !== "string") return { thinking: null, isThinking: false, rest: content };
+  const text = String(content);
+  const stripThinkTags = (value) =>
+    String(value || "").replace(/<\s*\/?\s*think\s*>/gi, "");
+
+  const chunkList = [];
+  let rest = text.replace(/<\s*think\s*>([\s\S]*?)<\s*\/\s*think\s*>/gi, (_m, chunk) => {
+    const cleaned = String(chunk || "").trim();
+    if (cleaned) chunkList.push(cleaned);
+    return "\n";
+  });
+
+  const openMatch = rest.match(/<\s*think\s*>/i);
+  const closeMatch = rest.match(/<\s*\/\s*think\s*>/i);
+
+  if (openMatch) {
+    // Streaming or malformed output: opening tag arrived but closing tag not yet present.
+    const openIdx = openMatch.index ?? 0;
+    const openEnd = openIdx + openMatch[0].length;
+    const prefix = rest.slice(0, openIdx);
+    const streamChunk = stripThinkTags(rest.slice(openEnd)).trim();
+    if (streamChunk) chunkList.push(streamChunk);
+
+    return {
+      thinking: chunkList.join("\n\n").trim() || null,
+      isThinking: true,
+      rest: stripThinkTags(prefix).trimStart(),
+    };
+  }
+
+  if (chunkList.length === 0 && closeMatch) {
+    // Legacy leakage case: chain-of-thought appears before a lone closing tag.
+    const closeIdx = closeMatch.index ?? 0;
+    const closeEnd = closeIdx + closeMatch[0].length;
+    const leakedThinking = stripThinkTags(rest.slice(0, closeIdx)).trim();
+    if (leakedThinking) chunkList.push(leakedThinking);
+    rest = stripThinkTags(rest.slice(closeEnd));
+  }
+
+  if (chunkList.length === 0) {
+    const stripped = stripThinkTags(rest);
+    const implicit = parseImplicitThinking(stripped, { streaming });
+    if (!implicit) {
+      return { thinking: null, isThinking: false, rest: stripped };
+    }
+
+    return {
+      thinking: implicit.thinking,
+      isThinking: streaming && !implicit.rest,
+      rest: implicit.rest,
+    };
+  }
+
   return {
-    thinking: content.slice(openIdx + 7, closeIdx),
+    thinking: chunkList.join("\n\n").trim(),
     isThinking: false,
-    rest: (content.slice(0, openIdx) + content.slice(closeIdx + 8)).trimStart(),
+    rest: stripThinkTags(rest).trimStart(),
   };
 }
 
 function ThinkingBlock({ content, isThinking }) {
-  const [expanded, setExpanded] = useState(isThinking);
+  const [expanded, setExpanded] = useState(true);
 
-  // Auto-collapse when thinking finishes
+  // Keep reasoning visibly open while it's actively streaming.
   useEffect(() => {
-    if (!isThinking) setExpanded(false);
+    if (isThinking) setExpanded(true);
   }, [isThinking]);
+
+  const safeContent = String(content || "").trim();
 
   return (
     <div className="mb-3 rounded-sm border border-[#1a1a1a] bg-[#111111] overflow-hidden shadow-inner-shadow">
       {/* Header */}
       <button
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => {
+          if (isThinking) return;
+          setExpanded((v) => !v);
+        }}
         className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/[0.03] transition-colors"
       >
         {isThinking ? (
@@ -59,14 +172,12 @@ function ThinkingBlock({ content, isThinking }) {
         <span className="text-[11px] text-[#b0b0b0]/50 font-medium font-mono">
           {isThinking ? "Thinking…" : "Thought"}
         </span>
-        {!isThinking && (
-          <svg
-            className={`w-3 h-3 text-[#b0b0b0]/30 ml-auto transition-transform ${expanded ? "rotate-180" : ""}`}
-            fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-          </svg>
-        )}
+        <svg
+          className={`w-3 h-3 text-[#b0b0b0]/30 ml-auto transition-transform ${expanded ? "rotate-180" : ""}`}
+          fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
       </button>
 
       {/* Body */}
@@ -81,7 +192,11 @@ function ThinkingBlock({ content, isThinking }) {
             className="overflow-hidden"
           >
             <div className="px-3 pb-3 text-[12px] text-[#b0b0b0]/50 leading-relaxed border-t border-[#1a1a1a] pt-2 italic font-mono">
-              <MarkdownRenderer content={content} />
+              {safeContent ? (
+                <MarkdownRenderer content={safeContent} />
+              ) : (
+                <span className="text-[#b0b0b0]/40">Waiting for reasoning tokens…</span>
+              )}
             </div>
           </motion.div>
         )}
@@ -145,10 +260,10 @@ function findNearestSourceUrlMap(messages, assistantMsgIndex) {
 }
 
 /** Render message content — handles both plain strings and multimodal arrays */
-function MessageContent({ content, isAssistant = false, onPointClick, sourceUrlMap = null }) {
+function MessageContent({ content, isAssistant = false, onPointClick, sourceUrlMap = null, isStreaming = false }) {
   if (typeof content === "string") {
     if (isAssistant) {
-      const { thinking, isThinking, rest } = parseThinking(content);
+      const { thinking, isThinking, rest } = parseThinking(content, { streaming: isStreaming });
       return (
         <>
           {thinking != null && <ThinkingBlock content={thinking} isThinking={isThinking} />}
@@ -163,7 +278,7 @@ function MessageContent({ content, isAssistant = false, onPointClick, sourceUrlM
   return content.map((part, idx) => {
     if (part.type === "text") {
       if (isAssistant) {
-        const { thinking, isThinking, rest } = parseThinking(part.text);
+        const { thinking, isThinking, rest } = parseThinking(part.text, { streaming: isStreaming });
         return (
           <React.Fragment key={idx}>
             {thinking != null && <ThinkingBlock content={thinking} isThinking={isThinking} />}
@@ -370,7 +485,7 @@ export default function MessageList({ messages, loading, onRefine, onRetry, onRe
                                    </div>
                                </div>
                                <div className="p-4 text-sm text-[#e0e0e0] overflow-y-auto leading-relaxed markdown-body max-h-[60vh]">
-                                   <MessageContent content={m.content || "Waiting..."} />
+                                  <MessageContent content={m.content || "Waiting..."} isAssistant isStreaming={m.status === "streaming"} />
                                </div>
                                <div className="mt-auto p-3 border-t border-[#1a1a1a] bg-[#111]">
                                    <button 
@@ -565,6 +680,7 @@ export default function MessageList({ messages, loading, onRefine, onRetry, onRe
                           isAssistant
                           onPointClick={onPointDeepDive}
                           sourceUrlMap={sourceUrlMap}
+                          isStreaming={isStreaming}
                         />
                       ) : !msg._retrying ? (
                         <span className="inline-flex gap-1 text-[#00ff41]/60">

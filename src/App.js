@@ -12,7 +12,7 @@ const pageTransition = {
   transition: { duration: 0.25, ease: [0.4, 0, 0.2, 1] },
 };
 
-const EMPTY_PROVIDERS = { openrouter: null, openai: null, anthropic: null, huggingface: null, ollama: null };
+const EMPTY_PROVIDERS = { openrouter: null, openai: null, anthropic: null, huggingface: null, ollama: null, nvidia: null };
 
 async function loadAllProviderKeys() {
   if (window.electronAPI?.getAllProviderKeys) {
@@ -25,6 +25,7 @@ async function loadAllProviderKeys() {
     anthropic:   localStorage.getItem("anthropic_key")        || null,
     huggingface: localStorage.getItem("huggingface_key")      || null,
     ollama:      localStorage.getItem("ollama_key")           || null,
+    nvidia:      localStorage.getItem("nvidia_key")           || null,
   };
 }
 
