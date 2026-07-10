@@ -11,6 +11,7 @@ import { GradientOrb, IconButton, EmptyState, NeuButton } from "../../ui/primiti
 import BrandIcon from "../../ui/BrandIcon";
 import Markdown from "../../ui/Markdown";
 import { toast } from "../../ui/Toaster";
+import { LogoMark } from "../../ui/Logo";
 
 async function copyText(text) {
   try {

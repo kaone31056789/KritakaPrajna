@@ -82,7 +82,9 @@ export async function fetchAllModels(providerKeys) {
       : Promise.resolve([]),
     providerKeys?.openai      ? fetchOpenAIModels(providerKeys.openai)                                                                       : Promise.resolve([]),
     providerKeys?.anthropic   ? fetchAnthropicModels(providerKeys.anthropic)                                                                 : Promise.resolve([]),
-    providerKeys?.huggingface ? fetchHFModels(providerKeys.huggingface)                                                                      : Promise.resolve([]),
+    // HuggingFace: always fetch — the Hub catalog is public and fetchHFModels
+    // falls back to a curated free list, so models show even before a key is set.
+    fetchHFModels(providerKeys?.huggingface || ""),
     providerKeys?.ollama      ? fetchOllamaModels(providerKeys.ollama)                                                                       : Promise.resolve([]),
     providerKeys?.nvidia      ? fetchNvidiaModels(providerKeys.nvidia)                                                                       : Promise.resolve([]),
   ]);
@@ -101,7 +103,7 @@ export async function fetchAllModels(providerKeys) {
   // Append image and video generation models for active providers
   const imageModels = [
     ...(providerKeys?.openrouter ? OR_IMAGE_MODELS : []),
-    ...(providerKeys?.huggingface ? HF_IMAGE_MODELS : []),
+    ...HF_IMAGE_MODELS,
   ].map(withSelectionMeta);
 
   // De-duplicate by selection id so image model metadata wins when ids overlap.
