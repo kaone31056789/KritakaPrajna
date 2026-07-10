@@ -76,13 +76,14 @@ export function setChatFolder(id, folderId) {
 
 /** Append a message; creates the chat first if it doesn't exist yet. */
 export function appendMessage(chatId, message) {
+  const stamped = message.ts ? message : { ...message, ts: Date.now() };
   chatsStore.set((s) => {
     const exists = s.chats.some((c) => c.id === chatId);
     if (!exists) {
       const chat = {
         id: chatId,
-        title: deriveTitle([message]),
-        messages: [message],
+        title: deriveTitle([stamped]),
+        messages: [stamped],
         createdAt: Date.now(),
       };
       return { chats: [chat, ...s.chats] };
@@ -90,7 +91,7 @@ export function appendMessage(chatId, message) {
     return {
       chats: s.chats.map((c) => {
         if (c.id !== chatId) return c;
-        const messages = [...(c.messages || []), message];
+        const messages = [...(c.messages || []), stamped];
         return { ...c, messages, title: c.title === "New chat" ? deriveTitle(messages) : c.title };
       }),
     };

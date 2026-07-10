@@ -25,6 +25,13 @@ export const DEFAULT_SYSTEM_PROMPT = `KritakaPrajna assistant rules:
 - For terminal output: confirm success on exit 0; diagnose failures and provide a fixed command block.
 - For web sources: cite as [1], [2] and keep final source list concise (max 5 unique lines).`;
 
+// Guard against stale/corrupt persisted values (e.g. JSON-quoted strings from
+// older versions) — an invalid enum here crashes lookups downstream.
+function readEnum(key, allowed, fallback) {
+  const raw = String(readRaw(key, fallback) || "").replace(/^"|"$/g, "");
+  return allowed.includes(raw) ? raw : fallback;
+}
+
 export const settingsStore = createStore({
   systemPrompt: readRaw(K.systemPrompt, "") || DEFAULT_SYSTEM_PROMPT,
   responseLength: readRaw(K.responseLength, "balanced"),
@@ -35,8 +42,8 @@ export const settingsStore = createStore({
   modelPref: readRaw(K.modelPref, "balanced"),
   advisorPrefs: readJSON(K.advisorPrefs, { priority: "balanced" }),
   shortcuts: mergeShortcuts(readJSON(K.shortcuts, {}) || {}),
-  webMode: readRaw(K.webMode, "auto"), // auto | off | always
-  sendKey: readRaw(K.sendKey, "enter"), // enter | mod-enter
+  webMode: readEnum(K.webMode, ["auto", "always", "off"], "auto"),
+  sendKey: readEnum(K.sendKey, ["enter", "mod-enter"], "enter"),
 });
 
 const RAW_KEYS = new Set([

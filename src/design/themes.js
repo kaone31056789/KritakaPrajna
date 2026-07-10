@@ -1,0 +1,175 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   KritakaPrajna — Theme registry
+   20 design languages. Every theme ships a dark + light variant and its own
+   motion personality (durations/easings live in themes.css per [data-skin]).
+   Pure data — no imports — safe to use from core/theme.js and Settings.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+export const THEMES = [
+  {
+    id: "neumorphism",
+    name: "Neumorphism",
+    tag: "Soft Machine — the original",
+    motion: "Soft & tactile",
+    dark: ["#16181d", "#1b1e24", "#ffb454"],
+    light: ["#e3e7ee", "#e8ecf3", "#f0921f"],
+  },
+  {
+    id: "minimalism",
+    name: "Minimalism",
+    tag: "Nothing extra. Everything intentional.",
+    motion: "Fast & silent",
+    dark: ["#111113", "#17171a", "#e8e8ea"],
+    light: ["#fafafa", "#ffffff", "#18181b"],
+  },
+  {
+    id: "maximalism",
+    name: "Maximalism",
+    tag: "More is more.",
+    motion: "Big & bouncy",
+    dark: ["#1c0f2e", "#2a1745", "#ff3d8b"],
+    light: ["#ffe9f3", "#ffffff", "#e6007e"],
+  },
+  {
+    id: "brutalism",
+    name: "Brutalism",
+    tag: "Raw concrete. Zero decoration.",
+    motion: "Instant snap",
+    dark: ["#000000", "#0a0a0a", "#ffe600"],
+    light: ["#ffffff", "#ffffff", "#0000ee"],
+  },
+  {
+    id: "neobrutalism",
+    name: "Neobrutalism",
+    tag: "Hard shadows, loud color, thick ink.",
+    motion: "Punchy snap",
+    dark: ["#17151f", "#221f2e", "#ffd23f"],
+    light: ["#f7f2e7", "#ffffff", "#ffd23f"],
+  },
+  {
+    id: "glassmorphism",
+    name: "Glassmorphism",
+    tag: "Frosted panes over deep color.",
+    motion: "Slow & smooth",
+    dark: ["#0f1226", "#262a4a", "#7dd3fc"],
+    light: ["#e8edfb", "#ffffff", "#2563eb"],
+  },
+  {
+    id: "claymorphism",
+    name: "Claymorphism",
+    tag: "Chunky, squishy, friendly 3D.",
+    motion: "Squish & spring",
+    dark: ["#241d3d", "#322a52", "#a78bfa"],
+    light: ["#f2ecff", "#ffffff", "#8b5cf6"],
+  },
+  {
+    id: "skeuomorphism",
+    name: "Skeuomorphism",
+    tag: "Leather, brass and machined bevels.",
+    motion: "Mechanical",
+    dark: ["#22201c", "#2c2925", "#d29b3f"],
+    light: ["#d9d2c5", "#ece6da", "#a8681f"],
+  },
+  {
+    id: "flat",
+    name: "Flat Design",
+    tag: "Bold color, no depth, pure shape.",
+    motion: "Crisp & quick",
+    dark: ["#22303f", "#2c3e50", "#1abc9c"],
+    light: ["#ecf0f1", "#ffffff", "#3498db"],
+  },
+  {
+    id: "material",
+    name: "Material Design",
+    tag: "Paper, ink and elevation — M3 tonal.",
+    motion: "Emphasized ease",
+    dark: ["#141218", "#1d1b22", "#d0bcff"],
+    light: ["#fef7ff", "#ffffff", "#6750a4"],
+  },
+  {
+    id: "swiss",
+    name: "Swiss Style",
+    tag: "Grid, Helvetica, one red.",
+    motion: "Precise & flat",
+    dark: ["#101010", "#161616", "#ff2d3a"],
+    light: ["#ffffff", "#ffffff", "#e30613"],
+  },
+  {
+    id: "bauhaus",
+    name: "Bauhaus",
+    tag: "Form follows function. Red, yellow, blue.",
+    motion: "Geometric glide",
+    dark: ["#191714", "#221f1b", "#e04a41"],
+    light: ["#f4efe6", "#ffffff", "#d02e26"],
+  },
+  {
+    id: "memphis",
+    name: "Memphis Design",
+    tag: "Squiggles, confetti and 1981 attitude.",
+    motion: "Wobble & play",
+    dark: ["#201a26", "#2b2333", "#ff5ea8"],
+    light: ["#fdf6ee", "#ffffff", "#ff4d97"],
+  },
+  {
+    id: "y2k",
+    name: "Y2K",
+    tag: "Chrome, gloss and bubble buttons.",
+    motion: "Elastic pop",
+    dark: ["#0d1526", "#14203a", "#4da3ff"],
+    light: ["#dfe6ef", "#f2f6fb", "#1f7cff"],
+  },
+  {
+    id: "frutiger-aero",
+    name: "Frutiger Aero",
+    tag: "Skies, grass, bubbles — 2007 optimism.",
+    motion: "Airy float",
+    dark: ["#06222f", "#0b3345", "#35c1f1"],
+    light: ["#dff2fb", "#ffffff", "#0f9ee8"],
+  },
+  {
+    id: "cyberpunk",
+    name: "Cyberpunk",
+    tag: "Neon on black. Scanlines included.",
+    motion: "Glitch-fast",
+    dark: ["#0a0a12", "#12121d", "#fcee0a"],
+    light: ["#e8f0f2", "#f5fafb", "#0098b8"],
+  },
+  {
+    id: "vaporwave",
+    name: "Vaporwave",
+    tag: "Dusk mall aesthetics. ＡＥＳＴＨＥＴＩＣ.",
+    motion: "Dreamy drift",
+    dark: ["#190f2e", "#241543", "#ff71ce"],
+    light: ["#ffe6f7", "#fff6fc", "#e6399b"],
+  },
+  {
+    id: "synthwave",
+    name: "Synthwave",
+    tag: "Grid horizon, magenta sun, 1986 forever.",
+    motion: "Pulse & glow",
+    dark: ["#120b26", "#1c1138", "#ff2975"],
+    light: ["#fdeef4", "#fffafd", "#e0116b"],
+  },
+  {
+    id: "retrofuturism",
+    name: "Retrofuturism",
+    tag: "The future, as promised in 1972.",
+    motion: "Sweeping arc",
+    dark: ["#14201f", "#1c2b2a", "#ff8a3c"],
+    light: ["#f3e9d8", "#fdf8ee", "#e85d26"],
+  },
+  {
+    id: "liquid-glass",
+    name: "Liquid Glass",
+    tag: "Iridescent, fluid, pill-shaped light.",
+    motion: "Fluid morph",
+    dark: ["#101318", "#232830", "#6ab8ff"],
+    light: ["#eef2f7", "#ffffff", "#0a84ff"],
+  },
+];
+
+export const THEME_IDS = THEMES.map((t) => t.id);
+
+export function themeById(id) {
+  return THEMES.find((t) => t.id === id) || THEMES[0];
+}

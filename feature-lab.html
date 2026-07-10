@@ -1,0 +1,928 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>KritakaPrajna · Feature Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0e0f12;
+    --bg-2: #121317;
+    --card: linear-gradient(160deg, #191b20 0%, #131418 100%);
+    --line: rgba(255, 255, 255, 0.055);
+    --hi: #f2efe7;
+    --ink: #ece7dc;
+    --dim: #9a978f;
+    --faint: #6b6963;
+    --accent: #ffc46b;
+    --accent-2: #ff8a3d;
+    --accent-ink: #23150a;
+    --accent-glow: rgba(255, 150, 70, 0.28);
+    --ok: #7fd08f;
+    --raised: 10px 10px 22px rgba(0, 0, 0, 0.45), -6px -6px 16px rgba(255, 255, 255, 0.028);
+    --raised-sm: 5px 5px 12px rgba(0, 0, 0, 0.4), -3px -3px 8px rgba(255, 255, 255, 0.025);
+    --inset: inset 3px 3px 7px rgba(0, 0, 0, 0.5), inset -2px -2px 5px rgba(255, 255, 255, 0.03);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Plus Jakarta Sans", system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  .aurora {
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background:
+      radial-gradient(560px 340px at 82% -6%, rgba(255, 138, 61, 0.13), transparent 65%),
+      radial-gradient(500px 320px at -8% 22%, rgba(120, 90, 255, 0.07), transparent 65%),
+      radial-gradient(700px 480px at 50% 115%, rgba(255, 196, 107, 0.05), transparent 60%);
+  }
+  .wrap { position: relative; z-index: 1; max-width: 1180px; margin: 0 auto; padding: 26px 22px 90px; }
+
+  /* ── header ─────────────────────────────────────────── */
+  header { display: flex; align-items: center; gap: 13px; margin-bottom: 34px; }
+  .k-tile {
+    width: 42px; height: 42px; border-radius: 13px; flex: none;
+    display: grid; place-items: center;
+    background: linear-gradient(150deg, #1d1f24, #101114);
+    box-shadow: 0 0 16px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 2px 8px rgba(0, 0, 0, 0.5);
+  }
+  .wordmark { font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 17px; letter-spacing: 0.01em; }
+  .wordmark .grad, .grad-text {
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .header-sub { font-size: 11px; color: var(--faint); letter-spacing: 0.18em; text-transform: uppercase; margin-top: 2px; }
+
+  /* ── hero ───────────────────────────────────────────── */
+  .hero h1 { font-family: "Space Grotesk", sans-serif; font-size: clamp(26px, 4.5vw, 38px); font-weight: 700; color: var(--hi); letter-spacing: -0.01em; }
+  .hero p { color: var(--dim); margin-top: 8px; max-width: 640px; font-size: 14.5px; }
+  .hero { margin-bottom: 30px; }
+
+  /* ── panels ─────────────────────────────────────────── */
+  .panel {
+    background: var(--card); border: 1px solid var(--line); border-radius: 20px;
+    box-shadow: var(--raised); padding: 20px 22px;
+  }
+  .q-label { font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--faint); font-weight: 700; margin-bottom: 12px; }
+  .budget-row { display: flex; gap: 9px; flex-wrap: wrap; }
+  .budget-btn {
+    font: 600 13px "Plus Jakarta Sans", sans-serif; color: var(--dim);
+    background: var(--bg-2); border: 1px solid var(--line); border-radius: 999px;
+    padding: 9px 18px; cursor: pointer; box-shadow: var(--raised-sm);
+    transition: transform 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+  }
+  .budget-btn:hover { transform: translateY(-2px); color: var(--hi); }
+  .budget-btn.on {
+    color: var(--accent-ink);
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    border-color: transparent; box-shadow: 0 4px 18px var(--accent-glow);
+  }
+
+  /* ── design gallery ─────────────────────────────────── */
+  .design-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+  .design-toolbar .q-label { margin-bottom: 0; }
+  .mode-toggle { display: flex; gap: 5px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 999px; padding: 4px; box-shadow: var(--inset); }
+  .mode-toggle button {
+    font: 700 11px "Plus Jakarta Sans", sans-serif; color: var(--dim);
+    background: transparent; border: 0; border-radius: 999px; padding: 6px 14px; cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .mode-toggle button.on { color: var(--accent-ink); background: linear-gradient(135deg, var(--accent), var(--accent-2)); box-shadow: 0 2px 10px var(--accent-glow); }
+  .design-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(172px, 1fr)); gap: 13px; }
+  .theme-card {
+    cursor: pointer; padding: 9px; border-radius: 16px;
+    background: var(--card); border: 1px solid var(--line); box-shadow: var(--raised-sm);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  }
+  .theme-card:hover { transform: translateY(-3px); box-shadow: var(--raised); }
+  .theme-card.on { border-color: rgba(255, 170, 90, 0.6); box-shadow: var(--raised-sm), 0 0 20px rgba(255, 150, 70, 0.16); }
+  .t-meta { padding: 8px 4px 3px; }
+  .t-name { font-size: 12px; font-weight: 700; color: var(--hi); display: flex; align-items: center; gap: 6px; }
+  .t-check { font: 700 9px "JetBrains Mono", monospace; color: var(--accent); }
+  .t-vibe { font-size: 10px; color: var(--faint); margin-top: 1px; }
+
+  /* mini app mockup — themed via --mb/--ms/--ma/--mt/--mr */
+  .mini {
+    display: flex; height: 96px; border-radius: 10px; overflow: hidden;
+    background: var(--mb); border: 1px solid rgba(127, 127, 127, 0.18);
+  }
+  .m-side { width: 22%; background: color-mix(in srgb, var(--ms) 72%, var(--mb)); padding: 8px 6px; display: flex; flex-direction: column; gap: 5px; }
+  .m-side i { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--mt) 20%, transparent); }
+  .m-side i:first-child { background: var(--ma); }
+  .m-body { flex: 1; padding: 8px 9px; display: flex; flex-direction: column; gap: 6px; }
+  .m-top { display: flex; gap: 5px; align-items: center; }
+  .m-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ma); flex: none; }
+  .m-line { height: 5px; border-radius: 3px; background: color-mix(in srgb, var(--mt) 30%, transparent); }
+  .m-bub { height: 12px; border-radius: var(--mr); background: var(--ms); }
+  .m-bub.r { align-self: flex-end; width: 44%; background: var(--ma); opacity: 0.92; }
+  .m-cta { margin-top: auto; height: 14px; width: 44%; border-radius: calc(var(--mr) + 2px); background: var(--ma); }
+  /* style variants — shape & depth language per design school */
+  .mini[data-ms="line"] .m-bub, .mini[data-ms="line"] .m-cta { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mt) 28%, transparent); }
+  .mini[data-ms="flat"] .m-bub, .mini[data-ms="flat"] .m-cta { box-shadow: none; }
+  .mini[data-ms="soft"] .m-bub, .mini[data-ms="soft"] .m-cta { box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.35), -1px -1px 3px rgba(255, 255, 255, 0.07); }
+  .mini[data-ms="elev"] .m-bub, .mini[data-ms="elev"] .m-cta { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35); }
+  .mini[data-ms="hard"] .m-bub, .mini[data-ms="hard"] .m-cta { box-shadow: 2px 2px 0 0 var(--mt), inset 0 0 0 1px var(--mt); }
+  .mini[data-ms="brut"] { border-radius: 0; border: 2px solid var(--mt); }
+  .mini[data-ms="brut"] .m-bub, .mini[data-ms="brut"] .m-cta { border-radius: 0; box-shadow: inset 0 0 0 1px var(--mt); }
+  .mini[data-ms="glow"] .m-bub.r, .mini[data-ms="glow"] .m-cta { box-shadow: 0 0 10px var(--ma); }
+  .mini[data-ms="glass"] { background: linear-gradient(135deg, var(--mb), color-mix(in srgb, var(--ma) 22%, var(--mb))); }
+  .mini[data-ms="glass"] .m-bub { background: color-mix(in srgb, var(--mt) 13%, transparent); }
+  .mini[data-ms="glass"] .m-bub.r { background: var(--ma); }
+  .mini[data-ms="bevel"] .m-bub, .mini[data-ms="bevel"] .m-cta { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 1px 2px rgba(0, 0, 0, 0.4); }
+  .mini[data-ms="clay"] .m-bub, .mini[data-ms="clay"] .m-cta { box-shadow: 0 3px 6px rgba(0, 0, 0, 0.25), inset 0 2px 3px rgba(255, 255, 255, 0.28); }
+  .mini[data-ms="gloss"] .m-bub.r, .mini[data-ms="gloss"] .m-cta { background: linear-gradient(180deg, color-mix(in srgb, white 45%, var(--ma)), var(--ma)); }
+
+  /* ── per-theme signature fx — every school gets its own tell ── */
+  .mini { position: relative; }
+  .m-fx { position: absolute; inset: 0; pointer-events: none; }
+  /* Liquid Glass — vivid liquid behind clear lens pills */
+  .mini[data-id="liquid-glass"] { background:
+      radial-gradient(60% 75% at 16% -5%, rgba(56, 150, 255, 0.6), transparent 60%),
+      radial-gradient(55% 70% at 102% 30%, rgba(150, 90, 255, 0.5), transparent 62%),
+      radial-gradient(50% 60% at 50% 118%, rgba(40, 220, 190, 0.4), transparent 60%), var(--mb); }
+  .mini[data-id="liquid-glass"] .m-side { background: rgba(255, 255, 255, 0.07); backdrop-filter: blur(5px); }
+  .mini[data-id="liquid-glass"] .m-bub, .mini[data-id="liquid-glass"] .m-cta {
+      border-radius: 99px; background: rgba(255, 255, 255, 0.12); backdrop-filter: blur(5px);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), inset 0 -1px 0 rgba(255, 255, 255, 0.14); }
+  .mini[data-id="liquid-glass"] .m-bub.r, .mini[data-id="liquid-glass"] .m-cta { background: color-mix(in srgb, var(--ma) 55%, rgba(255, 255, 255, 0.18)); }
+  /* Glassmorphism — frosted matte panes, crisp 1px borders */
+  .mini[data-id="glassmorphism"] { background: linear-gradient(135deg, var(--mb), color-mix(in srgb, var(--ma) 24%, var(--mb))); }
+  .mini[data-id="glassmorphism"] .m-bub, .mini[data-id="glassmorphism"] .m-cta {
+      background: rgba(255, 255, 255, 0.09); border: 1px solid rgba(255, 255, 255, 0.25); backdrop-filter: blur(3px); box-shadow: none; }
+  .mini[data-id="glassmorphism"] .m-bub.r, .mini[data-id="glassmorphism"] .m-cta { background: color-mix(in srgb, var(--ma) 65%, transparent); }
+  /* Cyberpunk — scanlines + corner-cut neon */
+  .mini[data-id="cyberpunk"] .m-fx { background: repeating-linear-gradient(0deg, rgba(0, 255, 240, 0.055) 0 1px, transparent 1px 3px); }
+  .mini[data-id="cyberpunk"] .m-cta { border-radius: 0; clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 6px 100%, 0 calc(100% - 6px)); box-shadow: 0 0 12px var(--ma); }
+  /* Synthwave — sun + horizon grid */
+  .mini[data-id="synthwave"] .m-fx { background:
+      radial-gradient(24px 24px at 80% 20%, var(--ma) 40%, transparent 65%),
+      repeating-linear-gradient(0deg, color-mix(in srgb, var(--ma) 32%, transparent) 0 1px, transparent 1px 7px) bottom / 100% 36% no-repeat,
+      repeating-linear-gradient(90deg, color-mix(in srgb, var(--ma) 22%, transparent) 0 1px, transparent 1px 15px) bottom / 100% 36% no-repeat; }
+  /* Vaporwave — chromatic ＡＥＳ glyphs + dusk floor */
+  .mini[data-id="vaporwave"] .m-fx { background: linear-gradient(180deg, transparent 60%, color-mix(in srgb, var(--ma) 20%, transparent)); }
+  .mini[data-id="vaporwave"] .m-top::after { content: "ＡＥＳ"; margin-left: auto; font: 700 6.5px monospace; color: #fff; text-shadow: 1px 0 0 rgba(1, 205, 254, 0.9), -1px 0 0 rgba(255, 113, 206, 0.9); }
+  /* Memphis — confetti + dashed stitching */
+  .mini[data-id="memphis"] { outline: 2px dashed color-mix(in srgb, var(--ma) 60%, transparent); outline-offset: -5px; }
+  .mini[data-id="memphis"] .m-fx { background:
+      radial-gradient(circle 2px at 22% 28%, var(--ma) 97%, transparent),
+      radial-gradient(circle 2px at 72% 62%, #35c1f1 97%, transparent),
+      radial-gradient(circle 2px at 86% 18%, #ffd23f 97%, transparent),
+      radial-gradient(circle 2px at 40% 80%, #7ed957 97%, transparent); }
+  /* Frutiger Aero — wet bubbles + grass glow */
+  .mini[data-id="frutiger-aero"] .m-fx { background:
+      radial-gradient(circle 10px at 82% 68%, rgba(255, 255, 255, 0.4) 38%, rgba(255, 255, 255, 0.07) 58%, transparent 62%),
+      radial-gradient(circle 6px at 70% 38%, rgba(255, 255, 255, 0.34) 38%, transparent 62%),
+      linear-gradient(180deg, transparent 45%, color-mix(in srgb, #7ed957 22%, transparent)); }
+  /* Y2K — chrome sparkle */
+  .mini[data-id="y2k"] .m-fx::after { content: "✦"; position: absolute; top: 7px; right: 9px; font-size: 10px; color: #fff; text-shadow: 0 0 7px var(--ma); }
+  /* Bauhaus — primary geometry */
+  .mini[data-id="bauhaus"] .m-fx { background:
+      radial-gradient(circle 8px at 84% 22%, #2b58a5 97%, transparent),
+      linear-gradient(#f2b632, #f2b632) 88% 84% / 12px 12px no-repeat; }
+  /* Swiss — the red rule */
+  .mini[data-id="swiss"] { border-top: 3px solid var(--ma); }
+  /* Skeuomorphism — linen + stitching */
+  .mini[data-id="skeuomorphism"] { background-image: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.05) 0 1px, transparent 1px 3px); }
+  .mini[data-id="skeuomorphism"] .m-side { outline: 1px dashed rgba(127, 127, 127, 0.5); outline-offset: -3px; }
+  /* Material — the FAB */
+  .mini[data-id="material"] .m-fx::after { content: ""; position: absolute; right: 9px; bottom: 9px; width: 15px; height: 15px; border-radius: 50%; background: var(--ma); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4); }
+  /* Maximalism — gradient wash */
+  .mini[data-id="maximalism"] { background: linear-gradient(140deg, var(--mb), color-mix(in srgb, var(--ma) 28%, var(--mb)) 58%, color-mix(in srgb, #35c1f1 22%, var(--mb))); }
+  /* Neobrutalism — tilted sticker CTA */
+  .mini[data-id="neobrutalism"] .m-cta { transform: rotate(-2deg); border: 1.5px solid var(--mt); box-shadow: 3px 3px 0 0 var(--mt); }
+  /* Retrofuturism — sunrise arc */
+  .mini[data-id="retrofuturism"] .m-fx { background: radial-gradient(120% 90% at 50% 120%, color-mix(in srgb, var(--ma) 32%, transparent), transparent 62%); }
+  .t-zoom { margin-left: auto; background: none; border: 0; cursor: pointer; color: var(--faint); font-size: 12px; padding: 0 2px; line-height: 1; }
+  .t-zoom:hover { color: var(--accent); }
+
+  /* ── roadmap ────────────────────────────────────────── */
+  .road { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: 13px; }
+  .road-col { background: var(--bg-2); border: 1px solid var(--line); border-radius: 14px; padding: 13px 14px; }
+  .road-col h4 { font: 700 11px "Space Grotesk", sans-serif; letter-spacing: 0.14em; text-transform: uppercase; display: flex; align-items: center; gap: 7px; margin-bottom: 10px; }
+  .road-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .road-col.done h4 { color: var(--ok); } .road-col.done .road-dot { background: var(--ok); box-shadow: 0 0 8px rgba(127, 208, 143, 0.5); }
+  .road-col.now h4 { color: var(--accent); } .road-col.now .road-dot { background: var(--accent); box-shadow: 0 0 8px var(--accent-glow); animation: blink 1.4s ease-in-out infinite; }
+  @keyframes blink { 50% { opacity: 0.4; } }
+  .road-col.next h4 { color: #8ab4ff; } .road-col.next .road-dot { background: #8ab4ff; }
+  .road-col.later h4 { color: var(--dim); } .road-col.later .road-dot { background: var(--faint); }
+  .road-col ul { list-style: none; display: flex; flex-direction: column; gap: 5px; }
+  .road-col li { font-size: 11.5px; color: var(--dim); padding-left: 14px; position: relative; }
+  .road-col li::before { content: "·"; position: absolute; left: 3px; color: var(--faint); }
+  .road-col.done li::before { content: "✓"; color: var(--ok); font-size: 9px; top: 1px; }
+
+  /* ── tabs ───────────────────────────────────────────── */
+  .tabs {
+    display: flex; gap: 6px; margin: 30px 0 20px; flex-wrap: wrap;
+    position: sticky; top: 12px; z-index: 5;
+    background: rgba(14, 15, 18, 0.82); backdrop-filter: blur(14px);
+    border: 1px solid var(--line); border-radius: 999px; padding: 6px; width: fit-content;
+  }
+  .tab {
+    font: 600 12.5px "Plus Jakarta Sans", sans-serif; color: var(--dim);
+    background: transparent; border: 0; border-radius: 999px; padding: 8px 15px;
+    cursor: pointer; transition: color 0.15s, background 0.15s;
+    white-space: nowrap;
+  }
+  .tab:hover { color: var(--hi); }
+  .tab.on { color: var(--accent-ink); background: linear-gradient(135deg, var(--accent), var(--accent-2)); box-shadow: 0 3px 14px var(--accent-glow); }
+  .tab .n { font-family: "JetBrains Mono", monospace; font-size: 10px; opacity: 0.75; margin-left: 4px; }
+
+  /* ── layout ─────────────────────────────────────────── */
+  .cols { display: grid; grid-template-columns: 1fr; gap: 26px; align-items: start; }
+  @media (min-width: 1020px) { .cols { grid-template-columns: 1fr 322px; } .summary { position: sticky; top: 74px; } }
+
+  /* ── groups & cards ─────────────────────────────────── */
+  .group { margin-bottom: 30px; animation: rise 0.4s cubic-bezier(0.22, 0.9, 0.3, 1) both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+  .group-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; }
+  .group-head h2 { font-family: "Space Grotesk", sans-serif; font-size: 17px; color: var(--hi); }
+  .group-head .price { font: 600 11px "JetBrains Mono", monospace; color: var(--accent); }
+  .group-head .hint { font-size: 11.5px; color: var(--faint); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(255px, 1fr)); gap: 14px; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+    box-shadow: var(--raised-sm); padding: 13px 13px 16px; display: flex; flex-direction: column; gap: 11px;
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, opacity 0.18s ease;
+    animation: rise 0.4s cubic-bezier(0.22, 0.9, 0.3, 1) both;
+  }
+  .card:hover { transform: translateY(-3px); box-shadow: var(--raised); }
+  .card.is-need { border-color: rgba(255, 170, 90, 0.55); box-shadow: var(--raised-sm), 0 0 18px rgba(255, 150, 70, 0.12); }
+  .card.is-skip { opacity: 0.5; }
+  .card-top { display: flex; gap: 11px; align-items: flex-start; }
+  .emoji {
+    width: 36px; height: 36px; border-radius: 11px; flex: none; display: grid; place-items: center;
+    font-size: 17px; background: var(--bg-2); box-shadow: var(--inset);
+  }
+  .card h3 { font-size: 13.5px; font-weight: 700; color: var(--hi); }
+  .card .desc { font-size: 12px; color: var(--dim); margin-top: 3px; }
+  .tier-chip {
+    margin-left: auto; flex: none; font: 600 9.5px "JetBrains Mono", monospace;
+    color: var(--accent); border: 1px solid rgba(255, 170, 90, 0.3); border-radius: 999px; padding: 3px 8px;
+    white-space: nowrap;
+  }
+  .tri { display: flex; gap: 6px; margin-top: auto; }
+  .tri button {
+    flex: 1; font: 700 10.5px "Plus Jakarta Sans", sans-serif; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 7px 0; border-radius: 10px; cursor: pointer; color: var(--faint);
+    background: var(--bg-2); border: 1px solid var(--line); box-shadow: var(--raised-sm);
+    transition: all 0.14s ease;
+  }
+  .tri button:hover { color: var(--hi); transform: translateY(-1px); }
+  .tri button.on-need { color: var(--accent-ink); background: linear-gradient(135deg, var(--accent), var(--accent-2)); border-color: transparent; box-shadow: 0 3px 12px var(--accent-glow); }
+  .tri button.on-want { color: var(--hi); background: #23262d; border-color: rgba(255, 255, 255, 0.12); }
+  .tri button.on-skip { color: var(--dim); background: transparent; box-shadow: var(--inset); }
+
+  /* ── glances (mini feature mockups) ─────────────────── */
+  .glance {
+    position: relative; height: 112px; border-radius: 12px; overflow: hidden;
+    background: #0a0b0e; border: 1px solid var(--line); box-shadow: var(--inset);
+    display: grid; place-items: center; cursor: zoom-in;
+  }
+  .glance.big { height: 250px; cursor: default; }
+  .mw {
+    width: 88%; height: 82%; background: #14161b; border-radius: 9px;
+    border: 1px solid rgba(255, 255, 255, 0.06); padding: 9px 11px; display: flex;
+    flex-direction: column; gap: 6px; overflow: hidden; position: relative; justify-content: center;
+    transition: transform 0.3s cubic-bezier(0.22, 0.9, 0.3, 1);
+  }
+  .glance.big .mw { width: 70%; height: 74%; transform: scale(1.15); }
+  .card:hover .glance .mw { transform: translateY(-2px) scale(1.02); }
+  .sk { display: block; height: 5px; border-radius: 3px; background: #23262d; }
+  .sk.a { background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+  .row { display: flex; gap: 5px; align-items: center; }
+  .cap { font: 600 8px "JetBrains Mono", monospace; color: var(--faint); letter-spacing: 0.02em; }
+  .pill { font: 700 7.5px "JetBrains Mono", monospace; padding: 2.5px 6px; border-radius: 99px; border: 1px solid rgba(255, 255, 255, 0.12); color: var(--dim); white-space: nowrap; }
+  .pill.a { color: var(--accent-ink); background: linear-gradient(135deg, var(--accent), var(--accent-2)); border-color: transparent; }
+  .arrow { color: var(--faint); font-size: 8px; }
+  .dot { width: 5px; height: 5px; border-radius: 50%; background: #3a3e46; flex: none; }
+  .dot.ok { background: var(--ok); box-shadow: 0 0 6px rgba(127, 208, 143, 0.5); }
+  .cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; flex: 1; }
+  .cols2 > div { display: flex; flex-direction: column; gap: 5px; justify-content: center; }
+  .vs {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    font: 800 8px "Space Grotesk", sans-serif; color: var(--accent-ink); padding: 3px 6px; border-radius: 99px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2)); box-shadow: 0 2px 8px var(--accent-glow);
+  }
+  .term { font: 600 8.5px "JetBrains Mono", monospace; color: var(--dim); }
+  .term .ln { display: block; }
+  .term .ok { color: var(--ok); }
+  .term .acc { color: var(--accent); }
+  .eq { display: flex; gap: 3px; align-items: flex-end; height: 34px; margin: 0 auto; }
+  .eq i { width: 4px; border-radius: 2px; background: linear-gradient(180deg, var(--accent), var(--accent-2)); animation: eq 1s ease-in-out infinite; }
+  .eq i:nth-child(2) { animation-delay: 0.15s; } .eq i:nth-child(3) { animation-delay: 0.3s; }
+  .eq i:nth-child(4) { animation-delay: 0.45s; } .eq i:nth-child(5) { animation-delay: 0.6s; }
+  .eq i:nth-child(6) { animation-delay: 0.75s; } .eq i:nth-child(7) { animation-delay: 0.9s; }
+  @keyframes eq { 0%, 100% { height: 9px; } 50% { height: 30px; } }
+  .bars { display: flex; gap: 4px; align-items: flex-end; height: 30px; }
+  .bars i { flex: 1; border-radius: 2px 2px 0 0; background: #23262d; }
+  .bars i.a { background: linear-gradient(180deg, var(--accent), var(--accent-2)); }
+  .pod { display: flex; gap: 5px; align-items: flex-end; height: 32px; justify-content: center; }
+  .pod i { width: 14px; border-radius: 3px 3px 0 0; background: #23262d; }
+  .pod i.g { background: linear-gradient(180deg, var(--accent), var(--accent-2)); box-shadow: 0 0 8px var(--accent-glow); }
+  .img-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; flex: 1; }
+  .img-grid i { border-radius: 5px; background: linear-gradient(135deg, #2a2d35, #1a1c22); position: relative; overflow: hidden; min-height: 16px; }
+  .img-grid i.shine::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, rgba(255, 196, 107, 0.25) 50%, transparent 70%); animation: shine 1.6s linear infinite; }
+  @keyframes shine { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+  .sw-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; flex: 1; }
+  .sw { border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.08); display: flex; align-items: flex-end; padding: 4px; font: 600 6.5px "JetBrains Mono", monospace; font-style: normal; min-height: 30px; }
+  .diffline { display: block; height: 11px; border-radius: 3px; font: 600 7.5px "JetBrains Mono", monospace; padding: 0 5px; line-height: 11px; }
+  .rippler { position: relative; width: 34px; height: 34px; margin: 0 auto; display: grid; place-items: center; font-size: 14px; }
+  .rippler::before, .rippler::after { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 1px solid var(--accent); opacity: 0; animation: rip 1.8s ease-out infinite; }
+  .rippler::after { animation-delay: 0.9s; }
+  @keyframes rip { from { transform: scale(0.5); opacity: 0.7; } to { transform: scale(1.5); opacity: 0; } }
+  .ring { width: 26px; height: 26px; border-radius: 50%; display: block; background: conic-gradient(var(--accent) 0 70%, #23262d 70% 100%); -webkit-mask: radial-gradient(closest-side, transparent 68%, #000 70%); mask: radial-gradient(closest-side, transparent 68%, #000 70%); }
+  .ring.r2 { background: conic-gradient(var(--accent-2) 0 45%, #23262d 45% 100%); }
+
+  /* ── custom ideas ───────────────────────────────────── */
+  .custom { margin-top: 4px; }
+  .custom-row { display: flex; gap: 9px; }
+  .custom input {
+    flex: 1; font: 500 13px "Plus Jakarta Sans", sans-serif; color: var(--ink);
+    background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px;
+    padding: 11px 14px; outline: none; box-shadow: var(--inset);
+  }
+  .custom input:focus { border-color: rgba(255, 170, 90, 0.4); }
+  .add-btn {
+    font: 700 12.5px "Plus Jakarta Sans", sans-serif; color: var(--accent-ink);
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    border: 0; border-radius: 12px; padding: 0 20px; cursor: pointer;
+    box-shadow: 0 4px 16px var(--accent-glow); transition: transform 0.15s;
+  }
+  .add-btn:hover { transform: translateY(-2px); }
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink);
+    background: var(--bg-2); border: 1px solid var(--line); border-radius: 999px; padding: 6px 8px 6px 13px;
+    box-shadow: var(--raised-sm);
+  }
+  .chip button { background: none; border: 0; color: var(--faint); cursor: pointer; font-size: 13px; line-height: 1; padding: 2px 4px; }
+  .chip button:hover { color: var(--hi); }
+
+  /* ── summary ────────────────────────────────────────── */
+  .summary { display: flex; flex-direction: column; gap: 16px; }
+  .gauge-row { display: flex; align-items: center; gap: 16px; }
+  .gauge { position: relative; width: 84px; height: 84px; flex: none; }
+  .gauge svg { transform: rotate(-90deg); display: block; }
+  .gauge .mid { position: absolute; inset: 0; display: grid; place-items: center; }
+  .gauge .pct { font: 700 18px "Space Grotesk", sans-serif; color: var(--hi); }
+  .stat { font-size: 12px; color: var(--dim); }
+  .stat b { color: var(--hi); font-size: 15px; font-family: "Space Grotesk", sans-serif; }
+  .counts { display: flex; gap: 14px; margin-top: 5px; }
+  .plan-box {
+    border: 1px dashed rgba(255, 170, 90, 0.35); border-radius: 14px; padding: 13px 15px;
+    background: rgba(255, 150, 70, 0.05);
+  }
+  .plan-box .pl { font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--faint); font-weight: 700; }
+  .plan-box .pv { font-family: "Space Grotesk", sans-serif; font-size: 16.5px; font-weight: 700; margin-top: 3px; }
+  .sum-list { font-size: 11.5px; color: var(--dim); max-height: 150px; overflow-y: auto; }
+  .sum-list::-webkit-scrollbar { width: 4px; }
+  .sum-list::-webkit-scrollbar-thumb { background: #2a2d34; border-radius: 4px; }
+  .sum-list .h { color: var(--accent); font-weight: 700; font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; margin: 8px 0 4px; }
+  .sum-list .h:first-child { margin-top: 0; }
+  .copy-btn {
+    font: 800 13.5px "Plus Jakarta Sans", sans-serif; color: var(--accent-ink);
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    border: 0; border-radius: 13px; padding: 13px; cursor: pointer; width: 100%;
+    box-shadow: 0 5px 20px var(--accent-glow); transition: transform 0.15s;
+  }
+  .copy-btn:hover { transform: translateY(-2px); }
+  .reset-btn { background: none; border: 0; color: var(--faint); font-size: 11.5px; cursor: pointer; text-decoration: underline dotted; }
+  .reset-btn:hover { color: var(--hi); }
+
+  /* ── modals ─────────────────────────────────────────── */
+  .modal { position: fixed; inset: 0; z-index: 50; display: none; place-items: center; background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(4px); }
+  .modal.show { display: grid; }
+  .modal .box { width: min(620px, 92vw); animation: rise 0.25s cubic-bezier(0.22, 0.9, 0.3, 1) both; }
+  .modal textarea {
+    width: 100%; height: 300px; margin-top: 10px; font: 12px "JetBrains Mono", monospace;
+    color: var(--ink); background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; padding: 12px;
+  }
+</style>
+</head>
+<body>
+<div class="aurora"></div>
+<div class="wrap">
+
+  <header>
+    <span class="k-tile">
+      <svg width="26" height="26" viewBox="0 0 32 32" fill="none">
+        <defs><linearGradient id="kg" x1="15" y1="25" x2="24" y2="7" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="#ff8a3d"/><stop offset="1" stop-color="#ffc46b"/>
+        </linearGradient></defs>
+        <path d="M10.6 6.8v18.4" stroke="#ECE7DC" stroke-width="3.5" stroke-linecap="round"/>
+        <path d="M23.2 7 15.4 16l7.8 9" stroke="url(#kg)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </span>
+    <div>
+      <div class="wordmark">Kritaka<span class="grad">Prajna</span> · Feature Lab <span style="font:700 10px 'JetBrains Mono',monospace;color:var(--accent)">v3</span></div>
+      <div class="header-sub">Tell me what to build next</div>
+    </div>
+  </header>
+
+  <section class="hero">
+    <h1>Pick the future of <span class="grad-text">your app</span>.</h1>
+    <p>New in v3 — every theme in the <b style="color:var(--hi)">Design Gallery</b> now shows its own signature look (hit <b style="color:var(--hi)">⤢</b> for a big dark + light preview), and the <b style="color:var(--hi)">Future Plans</b> roadmap at the bottom shows what's shipped, in progress and coming. Answer, add ideas, then <b style="color:var(--hi)">Copy my answers</b> and paste into chat.</p>
+  </section>
+
+  <section class="panel">
+    <div class="q-label">Q1 · What monthly budget feels right?</div>
+    <div class="budget-row" id="budget"></div>
+  </section>
+
+  <section class="panel" style="margin-top:26px">
+    <div class="design-toolbar">
+      <div class="q-label">Q2 · Design gallery — which look should the app wear by default?</div>
+      <div class="mode-toggle">
+        <button id="dmDark">● Dark</button>
+        <button id="dmLight">○ Light</button>
+      </div>
+    </div>
+    <div class="design-grid" id="designs"></div>
+  </section>
+
+  <nav class="tabs" id="tabs"></nav>
+
+  <div class="cols">
+    <main id="groups"></main>
+
+    <aside class="summary">
+      <div class="panel">
+        <div class="q-label">Your build</div>
+        <div class="gauge-row">
+          <div class="gauge">
+            <svg width="84" height="84" viewBox="0 0 84 84">
+              <circle cx="42" cy="42" r="36" fill="none" stroke="rgba(127,127,127,0.16)" stroke-width="8"/>
+              <circle id="gaugeArc" cx="42" cy="42" r="36" fill="none" stroke="url(#sg)" stroke-width="8"
+                stroke-linecap="round" stroke-dasharray="226.2" stroke-dashoffset="226.2"
+                style="transition: stroke-dashoffset 0.5s cubic-bezier(0.22,0.9,0.3,1)"/>
+              <defs><linearGradient id="sg" x1="0" y1="84" x2="84" y2="0">
+                <stop offset="0" stop-color="#ff8a3d"/><stop offset="1" stop-color="#ffc46b"/>
+              </linearGradient></defs>
+            </svg>
+            <div class="mid"><span class="pct" id="gaugePct">0%</span></div>
+          </div>
+          <div>
+            <div class="stat">answered</div>
+            <div class="stat"><b id="answered">0</b> <span style="color:var(--faint)">/ <span id="total">0</span></span></div>
+            <div class="counts">
+              <span class="stat">🔥 <b id="cNeed">0</b></span>
+              <span class="stat">✨ <b id="cWant">0</b></span>
+              <span class="stat">💤 <b id="cSkip">0</b></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="plan-box">
+        <div class="pl">Suggested plan</div>
+        <div class="pv grad-text" id="plan">—</div>
+        <div class="stat" id="planWhy" style="margin-top:4px"></div>
+      </div>
+
+      <div class="plan-box">
+        <div class="pl">Design pick</div>
+        <div class="pv" id="designPick" style="color:var(--hi)">—</div>
+        <div class="stat" id="designPickWhy" style="margin-top:4px">choose one in the gallery</div>
+      </div>
+
+      <div class="panel">
+        <div class="q-label">Needs so far</div>
+        <div class="sum-list" id="sumList">Nothing picked yet.</div>
+      </div>
+
+      <button class="copy-btn" id="copyBtn">Copy my answers ↗</button>
+      <button class="reset-btn" id="resetBtn">reset everything</button>
+    </aside>
+  </div>
+
+  <section class="panel" style="margin-top:26px">
+    <div class="q-label">Future plans — the build roadmap</div>
+    <div class="road" id="road"></div>
+  </section>
+
+  <section class="panel custom" style="margin-top:26px">
+    <div class="q-label">Q-last · Anything I missed? Add your own feature ideas</div>
+    <div class="custom-row">
+      <input id="customInput" placeholder="e.g. translate whole chats, RSS agent, calendar integration…" maxlength="140"/>
+      <button class="add-btn" id="customAdd">Add</button>
+    </div>
+    <div class="chips" id="customChips"></div>
+  </section>
+</div>
+
+<div class="modal" id="modal">
+  <div class="panel box">
+    <div class="q-label">Clipboard blocked — select & copy manually (Ctrl+A, Ctrl+C)</div>
+    <textarea id="modalText" readonly></textarea>
+    <button class="copy-btn" style="margin-top:12px" onclick="document.getElementById('modal').classList.remove('show')">Done</button>
+  </div>
+</div>
+
+<div class="modal" id="gmodal">
+  <div class="panel box" style="width:min(560px,94vw)">
+    <div class="q-label" id="gmTitle"></div>
+    <div class="glance big" id="gmBody"></div>
+    <p id="gmDesc" style="color:var(--dim);font-size:12.5px;margin-top:12px"></p>
+    <button class="copy-btn" style="margin-top:14px" onclick="document.getElementById('gmodal').classList.remove('show')">Close</button>
+  </div>
+</div>
+
+<div class="modal" id="tmodal">
+  <div class="panel box" style="width:min(700px,94vw)">
+    <div class="q-label" id="tmTitle"></div>
+    <div id="tmBody" style="display:grid;grid-template-columns:1fr 1fr;gap:12px"></div>
+    <button class="copy-btn" style="margin-top:14px" onclick="document.getElementById('tmodal').classList.remove('show')">Close</button>
+  </div>
+</div>
+
+<script>
+/* ═══ data ═══ */
+const GROUPS = [
+  { id: "core", name: "Core Pro", price: "$8/mo", hint: "monetize what already works", features: [
+    { id: "routing",    e: "🔀", n: "Pro Model Routing",        d: "Auto-failover OpenRouter → NVIDIA → HF on errors or rate limits, with a per-chat cost ceiling." },
+    { id: "memory",     e: "🧠", n: "Permanent Memory+",        d: "Unlimited retention plus semantic recall across every chat you've ever had." },
+    { id: "advisorpro", e: "📈", n: "Advisor Pro",              d: "On-demand live benchmarks, price-drop alerts, and \"cheapest model above ability X\" queries." },
+    { id: "promptlib",  e: "📚", n: "Prompt Library",           d: "Save, tag, version and A/B test system prompts; export as bundles." },
+    { id: "backup",     e: "🔐", n: "Encrypted Backup",         d: "E2E encrypted export & restore of chats, personas and settings." },
+  ]},
+  { id: "signature", name: "Signature", price: "$15/mo", hint: "the differentiators", features: [
+    { id: "duel",        e: "⚔️", n: "Multi-Model Duel",        d: "One prompt to 2–4 models side-by-side, diff the answers, keep the winner in the thread." },
+    { id: "agentpacks",  e: "🤖", n: "Agent Workspace Packs",   d: "Research, refactor and data-cleanup agent templates with tool permissions preconfigured." },
+    { id: "imagestudio", e: "🎨", n: "Image Studio Pro",        d: "Batch generation, style presets, and an NVIDIA FLUX upscale pass." },
+    { id: "voice",       e: "🎙️", n: "Voice Mode",              d: "Real-time speech-to-text and text-to-speech conversation with any model." },
+    { id: "analytics",   e: "📊", n: "Usage Analytics",         d: "Spend per provider/model/week, token heatmap, cost forecasting." },
+  ]},
+  { id: "team", name: "Team", price: "$15/seat", hint: "for small teams", features: [
+    { id: "sync",  e: "☁️", n: "Workspace Sync",   d: "E2E encrypted sync of chats, personas and settings across machines." },
+    { id: "vault", e: "🗝️", n: "Shared Key Vault", d: "Team API keys with per-seat quotas plus shared personas." },
+    { id: "audit", e: "🧾", n: "Admin Audit Log",  d: "Who ran what, when, with which model — and what it cost." },
+    { id: "sdk",   e: "🧩", n: "Plugin SDK",       d: "Drop custom JS tools into the agent runtime; marketplace later." },
+  ]},
+  { id: "ultra", name: "Ultra & Enterprise", price: "$29 – $99", hint: "the expensive stuff", features: [
+    { id: "localgpu",   e: "⚡", n: "Local GPU Bridge",        d: "Run local models via Ollama / TensorRT right next to your cloud models.", t: "$29" },
+    { id: "autoagents", e: "🕐", n: "Autonomous Agents",       d: "Background agents on schedules (cron) with desktop notifications.", t: "$29" },
+    { id: "finetune",   e: "🧬", n: "Private Fine-Tunes",      d: "Train and host your own model variants from your chat data.", t: "$49" },
+    { id: "sla",        e: "🛰️", n: "Dedicated Routing Lane",  d: "Priority inference lane with a 99.9% SLA.", t: "$49" },
+    { id: "whitelabel", e: "🏷️", n: "White-Label Mode",        d: "Your own name, icon and branding on the entire shell.", t: "$99" },
+    { id: "sso",        e: "🛡️", n: "SSO / SAML + Compliance", d: "Enterprise auth, retention policies, DPA paperwork.", t: "$99/seat" },
+    { id: "onprem",     e: "🏰", n: "On-Prem License Server",  d: "Fully air-gapped deployment for locked-down orgs.", t: "$99+" },
+  ]},
+  { id: "uilab", name: "UI Lab", price: "free updates", hint: "interface upgrades — better than before", features: [
+    { id: "palette", e: "⌨️", n: "Command Palette 2.0",   d: "Fuzzy actions + ask-AI inline from anywhere in the app." },
+    { id: "glass",   e: "🫧", n: "Theme Creator",          d: "A token editor to build & share your own themes on top of the 20 built-in design languages." },
+    { id: "canvas",  e: "🪟", n: "Chat Canvas Split View", d: "Code / preview panes docked beside the conversation." },
+    { id: "diff",    e: "📝", n: "Inline Diff Viewer",     d: "See AI edits as red/green diffs inside chat bubbles." },
+    { id: "hud",     e: "⛽", n: "Live Token/Cost HUD",    d: "A running meter while responses stream in." },
+    { id: "dataviz", e: "💠", n: "Animated Dashboard",     d: "Rings, sparklines and count-ups on the home screen." },
+    { id: "sound",   e: "🔊", n: "Micro Sound Design",     d: "Soft, optional ticks for send / receive / task complete." },
+    { id: "density", e: "📐", n: "Adaptive Density",       d: "Compact / cozy layout switch for small screens." },
+    { id: "tour",    e: "🧭", n: "Guided Onboarding",      d: "A rebuilt first-run walkthrough with spotlights." },
+  ]},
+];
+const BUDGETS = ["$0 — free only", "$8/mo", "$15/mo", "$29/mo", "$99+/mo"];
+
+/* 20 design languages — [bg, surface, accent, text] per mode */
+const DESIGNS = [
+  { id: "neumorphism",   n: "Neumorphism",    vibe: "Soft & tactile",   ms: "soft",  r: 14, d: ["#16181d","#1b1e24","#ffb454","#eef0f4"], l: ["#e3e7ee","#e8ecf3","#f0921f","#22252c"] },
+  { id: "minimalism",    n: "Minimalism",     vibe: "Fast & silent",    ms: "line",  r: 5,  d: ["#111113","#17171a","#e8e8ea","#f2f2f3"], l: ["#fafafa","#ffffff","#18181b","#17171a"] },
+  { id: "maximalism",    n: "Maximalism",     vibe: "Big & bouncy",     ms: "glow",  r: 16, d: ["#1c0f2e","#2a1745","#ff3d8b","#fff6ff"], l: ["#ffe9f3","#ffffff","#e6007e","#33062b"] },
+  { id: "brutalism",     n: "Brutalism",      vibe: "Instant snap",     ms: "brut",  r: 0,  d: ["#000000","#0a0a0a","#ffe600","#ffffff"], l: ["#ffffff","#ffffff","#0000ee","#000000"] },
+  { id: "neobrutalism",  n: "Neobrutalism",   vibe: "Punchy snap",      ms: "hard",  r: 8,  d: ["#17151f","#221f2e","#ffd23f","#f5f3ff"], l: ["#f7f2e7","#ffffff","#ffd23f","#111111"] },
+  { id: "glassmorphism", n: "Glassmorphism",  vibe: "Slow & smooth",    ms: "glass", r: 13, d: ["#0f1226","#262a4a","#7dd3fc","#f4f6ff"], l: ["#e8edfb","#ffffff","#2563eb","#1e2a4a"] },
+  { id: "claymorphism",  n: "Claymorphism",   vibe: "Squish & spring",  ms: "clay",  r: 15, d: ["#241d3d","#322a52","#a78bfa","#f1ecff"], l: ["#f2ecff","#ffffff","#8b5cf6","#3a2d5c"] },
+  { id: "skeuomorphism", n: "Skeuomorphism",  vibe: "Mechanical",       ms: "bevel", r: 8,  d: ["#22201c","#2c2925","#d29b3f","#f0e9db"], l: ["#d9d2c5","#ece6da","#a8681f","#2e261a"] },
+  { id: "flat",          n: "Flat Design",    vibe: "Crisp & quick",    ms: "flat",  r: 5,  d: ["#22303f","#2c3e50","#1abc9c","#ecf0f1"], l: ["#ecf0f1","#ffffff","#3498db","#2d3436"] },
+  { id: "material",      n: "Material",       vibe: "Emphasized ease",  ms: "elev",  r: 10, d: ["#141218","#1d1b22","#d0bcff","#e6e0e9"], l: ["#fef7ff","#ffffff","#6750a4","#1d1b20"] },
+  { id: "swiss",         n: "Swiss Style",    vibe: "Precise & flat",   ms: "line",  r: 2,  d: ["#101010","#161616","#ff2d3a","#f5f5f5"], l: ["#ffffff","#ffffff","#e30613","#0a0a0a"] },
+  { id: "bauhaus",       n: "Bauhaus",        vibe: "Geometric glide",  ms: "hard",  r: 0,  d: ["#191714","#221f1b","#e04a41","#f4efe6"], l: ["#f4efe6","#ffffff","#d02e26","#141414"] },
+  { id: "memphis",       n: "Memphis",        vibe: "Wobble & play",    ms: "hard",  r: 7,  d: ["#201a26","#2b2333","#ff5ea8","#ffeef8"], l: ["#fdf6ee","#ffffff","#ff4d97","#181818"] },
+  { id: "y2k",           n: "Y2K",            vibe: "Elastic pop",      ms: "gloss", r: 13, d: ["#0d1526","#14203a","#4da3ff","#eaf2ff"], l: ["#dfe6ef","#f2f6fb","#1f7cff","#16233a"] },
+  { id: "frutiger-aero", n: "Frutiger Aero",  vibe: "Airy float",       ms: "gloss", r: 12, d: ["#06222f","#0b3345","#35c1f1","#e3f6ff"], l: ["#dff2fb","#ffffff","#0f9ee8","#0d3c55"] },
+  { id: "cyberpunk",     n: "Cyberpunk",      vibe: "Glitch-fast",      ms: "glow",  r: 3,  d: ["#0a0a12","#12121d","#fcee0a","#eafcff"], l: ["#e8f0f2","#f5fafb","#0098b8","#041f26"] },
+  { id: "vaporwave",     n: "Vaporwave",      vibe: "Dreamy drift",     ms: "glow",  r: 12, d: ["#190f2e","#241543","#ff71ce","#ffeaff"], l: ["#ffe6f7","#fff6fc","#e6399b","#47184f"] },
+  { id: "synthwave",     n: "Synthwave",      vibe: "Pulse & glow",     ms: "glow",  r: 9,  d: ["#120b26","#1c1138","#ff2975","#fdeaff"], l: ["#fdeef4","#fffafd","#e0116b","#3c0a33"] },
+  { id: "retrofuturism", n: "Retrofuturism",  vibe: "Sweeping arc",     ms: "soft",  r: 10, d: ["#14201f","#1c2b2a","#ff8a3c","#f2ece0"], l: ["#f3e9d8","#fdf8ee","#e85d26","#2c1f14"] },
+  { id: "liquid-glass",  n: "Liquid Glass",   vibe: "Fluid morph",      ms: "glass", r: 15, d: ["#101318","#232830","#6ab8ff","#f5f7fa"], l: ["#eef2f7","#ffffff","#0a84ff","#1a2330"] },
+];
+const DESIGN_BY_ID = Object.fromEntries(DESIGNS.map((t) => [t.id, t]));
+
+/* ═══ glances — hand-built mini mockups per feature ═══ */
+const sk = (w, a) => `<span class="sk${a ? " a" : ""}" style="width:${w}%"></span>`;
+const mw = (inner, cls = "") =>
+  `<div class="mw ${cls}"><div class="row" style="margin-bottom:2px"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>${inner}</div>`;
+
+const GLANCES = {
+  routing: mw(`<div class="row"><span class="pill a">OpenRouter</span><span class="arrow">→</span><span class="pill">NVIDIA</span><span class="arrow">→</span><span class="pill">HF</span></div>${sk(78)}${sk(56)}<div class="row"><span class="dot ok"></span><span class="cap">failover in 120ms · cap $0.20/chat</span></div>`),
+  memory: mw(`${sk(70)}${sk(46)}<div class="row"><span class="pill a">🧠 recall</span><span class="cap">"what gpu did I pick?"</span></div>${sk(62, true)}`),
+  advisorpro: mw(`<div class="pod"><i style="height:18px"></i><i class="g" style="height:30px"></i><i style="height:13px"></i></div><div class="row" style="justify-content:center"><span class="cap">live benchmarks · price-drop alerts</span></div>`),
+  promptlib: mw(`<div class="row"><span class="pill">v3</span>${sk(58)}</div><div class="row"><span class="pill a">v4</span>${sk(66)}</div><div class="row"><span class="pill">A/B</span>${sk(40)}</div>`),
+  backup: mw(`<div class="row" style="justify-content:center;font-size:15px">🔐</div>${sk(84, true)}<div class="row" style="justify-content:center"><span class="cap">AES-256 · backup complete</span></div>`),
+  duel: mw(`<div class="cols2"><div>${sk(90)}${sk(70)}${sk(82)}</div><div>${sk(86)}${sk(64)}${sk(74)}</div></div><span class="vs">VS</span>`),
+  agentpacks: mw(`<span class="ln">$ agent run research</span><span class="ln ok">✓ 12 sources found</span><span class="ln acc">▸ drafting summary…</span>`, "term"),
+  imagestudio: mw(`<div class="img-grid"><i></i><i class="shine"></i><i></i><i></i></div>`),
+  voice: mw(`<div class="eq"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="row" style="justify-content:center"><span class="cap">listening…</span></div>`),
+  analytics: mw(`<div class="bars"><i style="height:30%"></i><i class="a" style="height:55%"></i><i style="height:40%"></i><i class="a" style="height:75%"></i><i style="height:50%"></i><i class="a" style="height:90%"></i></div><div class="row"><span class="cap">$4.20 this week · ▼ 12%</span></div>`),
+  sync: mw(`<div class="row" style="justify-content:center;font-size:13px">💻 <span class="arrow" style="font-size:11px">⇄</span> 💻</div>${sk(70, true)}<div class="row" style="justify-content:center"><span class="cap">3 devices · in sync</span></div>`),
+  vault: mw(`<div class="row"><span class="cap">🗝️ alice</span>${sk(40, true)}</div><div class="row"><span class="cap">🗝️ bob</span>${sk(26, true)}</div><div class="row"><span class="cap">🗝️ carol</span>${sk(33)}</div>`),
+  audit: mw(`<div class="row"><span class="cap">09:12 · alice · gpt-oss · $0.02</span></div><div class="row"><span class="cap">09:40 · bob · kimi-k2 · $0.11</span></div><div class="row"><span class="cap">10:05 · carol · glm-4.6 · $0.04</span></div>`),
+  sdk: mw(`<span class="ln acc">import { tool } from "kp/sdk"</span><span class="ln">export default tool({</span><span class="ln">&nbsp;&nbsp;name: "my-scraper" })</span>`, "term"),
+  localgpu: mw(`<div class="row"><span class="pill a">⚡ RTX 4090</span><span class="pill">Ollama</span></div>${sk(64, true)}<div class="row"><span class="cap">local · 92 tok/s · $0.00</span></div>`),
+  autoagents: mw(`<div class="row"><span class="pill">🕐 02:00</span><span class="cap">scrape news → digest</span></div><div class="row"><span class="pill">🕐 08:00</span><span class="cap">inbox triage</span></div><div class="row"><span class="dot ok"></span><span class="cap">2 agents scheduled</span></div>`),
+  finetune: mw(`<div class="row"><span class="pill a">kp-tune-v2</span><span class="cap">epoch 3/4</span></div>${sk(78, true)}<div class="row"><span class="cap">training… 78%</span></div>`),
+  sla: mw(`<div class="row" style="justify-content:center"><span class="pill a">PRIORITY LANE</span></div><div class="row" style="justify-content:center"><span class="cap">p50 140ms · uptime 99.97%</span></div>${sk(88, true)}`),
+  whitelabel: mw(`<div class="row"><span class="pill a">K</span><span class="arrow">→</span><span class="pill">🦊 YourBrand</span></div>${sk(60)}<div class="row"><span class="cap">icon · name · colors — yours</span></div>`),
+  sso: mw(`<div class="row" style="justify-content:center;font-size:13px">🛡️</div>${sk(70)}<div class="row" style="justify-content:center"><span class="pill a">Sign in with SSO</span></div>`),
+  onprem: mw(`<div class="row"><span class="dot ok"></span>${sk(72)}</div><div class="row"><span class="dot ok"></span>${sk(72)}</div><div class="row"><span class="dot"></span>${sk(72)}</div><div class="row"><span class="cap">air-gapped rack · licensed</span></div>`),
+  palette: mw(`<div class="row"><span class="pill a">⌘K</span>${sk(58)}</div><div class="row">${sk(44)}</div><div class="row">${sk(52, true)}</div><div class="row">${sk(38)}</div>`),
+  glass: mw(`<div class="sw-row"><i class="sw" style="background:#f4f2ec;color:#666">min·L</i><i class="sw" style="background:#101114;color:#888">min·D</i><i class="sw" style="background:linear-gradient(135deg,rgba(120,140,255,.4),rgba(255,150,90,.35));color:#fff">glass</i><i class="sw" style="background:linear-gradient(135deg,#2a1c10,#101114);color:#c96">amber</i></div><div class="row" style="justify-content:center"><span class="cap">your tokens · light + dark</span></div>`),
+  canvas: mw(`<div class="cols2"><div>${sk(85)}${sk(60)}${sk(72)}</div><div class="term" style="gap:3px"><span class="ln acc">&lt;div&gt;</span><span class="ln">&nbsp;&nbsp;hello</span><span class="ln acc">&lt;/div&gt;</span></div></div>`),
+  diff: mw(`<span class="diffline" style="background:rgba(230,90,90,.16);color:#e88">- const old = slow()</span><span class="diffline" style="background:rgba(127,208,143,.14);color:var(--ok)">+ const fast = memo()</span><span class="diffline" style="background:rgba(127,208,143,.14);color:var(--ok)">+ cache.warm()</span>`),
+  hud: mw(`${sk(76)}${sk(58)}<div class="row" style="justify-content:flex-end"><span class="pill a">1.2k tok · $0.004</span></div>`),
+  dataviz: mw(`<div class="row" style="justify-content:center;gap:12px"><span class="ring"></span><span class="ring r2"></span></div><div class="row" style="justify-content:center"><span class="cap">+38% · 12 chats today</span></div>`),
+  sound: mw(`<div class="rippler">🔊</div><div class="row" style="justify-content:center"><span class="cap">tick · whoosh · chime</span></div>`),
+  density: mw(`<div class="cols2"><div>${sk(90)}${sk(90)}${sk(90)}${sk(90)}</div><div style="gap:10px">${sk(90)}${sk(90)}</div></div><div class="row" style="justify-content:center"><span class="cap">compact ↔ cozy</span></div>`),
+  tour: mw(`<div class="row"><span class="pill a" style="box-shadow:0 0 0 3px rgba(255,170,90,.25)">New chat</span>${sk(40)}</div>${sk(66)}<div class="row"><span class="cap">Step 2 / 5 — create your first chat</span></div>`),
+};
+
+/* ═══ state ═══ */
+const KEY = "kp-feature-lab-v1";
+let state = { budget: null, answers: {}, custom: [], design: null, designMode: "dark" };
+try { state = Object.assign(state, JSON.parse(localStorage.getItem(KEY) || "{}")); } catch {}
+const save = () => localStorage.setItem(KEY, JSON.stringify(state));
+const $ = (id) => document.getElementById(id);
+const featById = {};
+GROUPS.forEach((g) => g.features.forEach((f) => { featById[f.id] = { ...f, group: g }; }));
+const TOTAL = Object.keys(featById).length;
+let activeTab = "all";
+
+/* ═══ budget ═══ */
+BUDGETS.forEach((b) => {
+  const btn = document.createElement("button");
+  btn.className = "budget-btn" + (state.budget === b ? " on" : "");
+  btn.textContent = b;
+  btn.onclick = () => {
+    state.budget = b; save();
+    document.querySelectorAll(".budget-btn").forEach((x) => x.classList.toggle("on", x === btn));
+    renderSummary();
+  };
+  $("budget").appendChild(btn);
+});
+
+/* ═══ design gallery ═══ */
+function miniHTML(t, mode, h) {
+  const [bg, srf, acc, tx] = mode === "light" ? t.l : t.d;
+  return `<div class="mini" data-ms="${t.ms}" data-id="${t.id}" style="--mb:${bg};--ms:${srf};--ma:${acc};--mt:${tx};--mr:${t.r}px${h ? `;height:${h}px` : ""}">
+    <div class="m-side"><i></i><i></i><i></i></div>
+    <div class="m-body">
+      <div class="m-top"><span class="m-dot"></span><span class="m-line" style="width:36%"></span></div>
+      <div class="m-bub" style="width:58%"></div>
+      <div class="m-bub r"></div>
+      <div class="m-cta"></div>
+    </div>
+    <div class="m-fx"></div>
+  </div>`;
+}
+function openTheme(t) {
+  $("tmTitle").textContent = `${t.n} — ${t.vibe}`;
+  $("tmBody").innerHTML =
+    `<div><div class="cap" style="margin-bottom:6px">DARK</div>${miniHTML(t, "dark", 210)}</div>` +
+    `<div><div class="cap" style="margin-bottom:6px">LIGHT</div>${miniHTML(t, "light", 210)}</div>`;
+  $("tmodal").classList.add("show");
+}
+function renderDesigns() {
+  const grid = $("designs");
+  grid.innerHTML = "";
+  DESIGNS.forEach((t) => {
+    const el = document.createElement("div");
+    el.className = "theme-card" + (state.design === t.id ? " on" : "");
+    el.innerHTML = miniHTML(t, state.designMode) + `
+      <div class="t-meta">
+        <div class="t-name">${t.n}${state.design === t.id ? ' <span class="t-check">✓ chosen</span>' : ""}<button class="t-zoom" title="Big preview — dark & light">⤢</button></div>
+        <div class="t-vibe">${t.vibe}</div>
+      </div>`;
+    el.onclick = () => {
+      state.design = state.design === t.id ? null : t.id;
+      save(); renderDesigns(); renderSummary();
+    };
+    el.querySelector(".t-zoom").onclick = (e) => { e.stopPropagation(); openTheme(t); };
+    grid.appendChild(el);
+  });
+  $("dmDark").classList.toggle("on", state.designMode !== "light");
+  $("dmLight").classList.toggle("on", state.designMode === "light");
+}
+$("dmDark").onclick = () => { state.designMode = "dark"; save(); renderDesigns(); renderSummary(); };
+$("dmLight").onclick = () => { state.designMode = "light"; save(); renderDesigns(); renderSummary(); };
+
+/* ═══ tabs ═══ */
+const TABS = [{ id: "all", name: "All" }, ...GROUPS.map((g) => ({ id: g.id, name: g.name }))];
+TABS.forEach((t) => {
+  const btn = document.createElement("button");
+  btn.className = "tab" + (t.id === activeTab ? " on" : "");
+  btn.innerHTML = t.name + (t.id !== "all" ? `<span class="n">${GROUPS.find((g) => g.id === t.id).features.length}</span>` : "");
+  btn.onclick = () => {
+    activeTab = t.id;
+    document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("on", x === btn));
+    renderGroups();
+  };
+  $("tabs").appendChild(btn);
+});
+
+/* ═══ glance zoom ═══ */
+function openGlance(f) {
+  $("gmTitle").textContent = `${f.e} ${f.n} — glance`;
+  $("gmBody").innerHTML = GLANCES[f.id] || "";
+  $("gmDesc").textContent = f.d;
+  $("gmodal").classList.add("show");
+}
+["modal", "gmodal", "tmodal"].forEach((id) => {
+  $(id).addEventListener("click", (e) => { if (e.target === $(id)) $(id).classList.remove("show"); });
+});
+
+/* ═══ roadmap ═══ */
+const ROAD = [
+  { s: "done", t: "Shipped", items: [
+    "20-theme design engine — dark + light each",
+    "Theme personality layer (shape, motion, texture per school)",
+    "Liquid Glass optical rewrite — real lensing, not frosted glass",
+    "Model Advisor rebuild + live rankings",
+    "Agents workspace", "Neumorphic core UI + onboarding", "Feature Lab v3",
+  ]},
+  { s: "now", t: "In progress", items: [
+    "Chat visual overhaul — avatars, grouping, timestamps, better errors",
+    "Chat management fixes — delete / rename / pin",
+    "Skin styling applied to every component",
+  ]},
+  { s: "next", t: "Next up · free", items: [
+    "Command Palette 2.0", "Inline diff viewer", "Live token/cost HUD",
+    "Animated dashboard", "Adaptive density", "Micro sound design",
+    "Guided onboarding tour", "Chat canvas split view", "Theme creator",
+  ]},
+  { s: "later", t: "Later · pro tiers", items: [
+    "Pro model routing + cost caps", "Permanent Memory+", "Advisor Pro",
+    "Prompt library", "Encrypted backup", "Multi-model duel", "Agent packs",
+    "Image studio", "Voice mode", "Usage analytics", "Team sync & key vault",
+    "Local GPU bridge", "Autonomous scheduled agents",
+  ]},
+];
+function renderRoad() {
+  $("road").innerHTML = ROAD.map((c) => `
+    <div class="road-col ${c.s}">
+      <h4><span class="road-dot"></span>${c.t}</h4>
+      <ul>${c.items.map((i) => `<li>${i}</li>`).join("")}</ul>
+    </div>`).join("");
+}
+
+/* ═══ groups ═══ */
+function renderGroups() {
+  const root = $("groups");
+  root.innerHTML = "";
+  GROUPS.filter((g) => activeTab === "all" || g.id === activeTab).forEach((g) => {
+    const sec = document.createElement("section");
+    sec.className = "group";
+    sec.innerHTML = `<div class="group-head"><h2>${g.name}</h2><span class="price">${g.price}</span><span class="hint">· ${g.hint}</span></div>`;
+    const grid = document.createElement("div");
+    grid.className = "cards";
+    g.features.forEach((f, i) => {
+      const a = state.answers[f.id];
+      const card = document.createElement("div");
+      card.className = "card" + (a === "need" ? " is-need" : a === "skip" ? " is-skip" : "");
+      card.style.animationDelay = (i * 0.04) + "s";
+      card.innerHTML = `
+        <div class="glance" title="Click to zoom">${GLANCES[f.id] || ""}</div>
+        <div class="card-top">
+          <span class="emoji">${f.e}</span>
+          <div style="min-width:0"><h3>${f.n}</h3><div class="desc">${f.d}</div></div>
+          <span class="tier-chip">${f.t || g.price}</span>
+        </div>
+        <div class="tri">
+          <button data-v="need" class="${a === "need" ? "on-need" : ""}">Need</button>
+          <button data-v="want" class="${a === "want" ? "on-want" : ""}">Want</button>
+          <button data-v="skip" class="${a === "skip" ? "on-skip" : ""}">Skip</button>
+        </div>`;
+      card.querySelector(".glance").onclick = () => openGlance(f);
+      card.querySelectorAll(".tri button").forEach((btn) => {
+        btn.onclick = () => {
+          const v = btn.dataset.v;
+          state.answers[f.id] = state.answers[f.id] === v ? undefined : v;
+          save(); renderGroups(); renderSummary();
+        };
+      });
+      grid.appendChild(card);
+    });
+    sec.appendChild(grid);
+    root.appendChild(sec);
+  });
+}
+
+/* ═══ custom chips ═══ */
+function renderChips() {
+  const box = $("customChips");
+  box.innerHTML = "";
+  state.custom.forEach((c, i) => {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.innerHTML = `💡 ${c} <button aria-label="remove">✕</button>`;
+    chip.querySelector("button").onclick = () => { state.custom.splice(i, 1); save(); renderChips(); };
+    box.appendChild(chip);
+  });
+}
+$("customAdd").onclick = () => {
+  const v = $("customInput").value.trim();
+  if (!v) return;
+  state.custom.push(v); $("customInput").value = ""; save(); renderChips();
+};
+$("customInput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("customAdd").click(); });
+
+/* ═══ summary ═══ */
+function pickPlan(needIds) {
+  const inGroup = (gid) => needIds.some((id) => featById[id].group.id === gid);
+  if (inGroup("ultra")) return ["Ultra $29+ /mo", "you flagged Ultra/Enterprise features"];
+  if (inGroup("team")) return ["Team $15/seat", "team features are in your Needs"];
+  if (inGroup("signature")) return ["Pro+ $15/mo", "signature features are in your Needs"];
+  if (inGroup("core")) return ["Pro $8/mo", "core Pro covers everything you need"];
+  if (needIds.length) return ["Free update", "your picks are all UI Lab items"];
+  return ["—", "pick some Needs to get a suggestion"];
+}
+function renderSummary() {
+  const entries = Object.entries(state.answers).filter(([, v]) => v);
+  const need = entries.filter(([, v]) => v === "need").map(([k]) => k);
+  const want = entries.filter(([, v]) => v === "want").map(([k]) => k);
+  const skip = entries.filter(([, v]) => v === "skip").map(([k]) => k);
+
+  $("answered").textContent = entries.length;
+  $("total").textContent = TOTAL;
+  $("cNeed").textContent = need.length;
+  $("cWant").textContent = want.length;
+  $("cSkip").textContent = skip.length;
+
+  const pct = Math.round((entries.length / TOTAL) * 100);
+  $("gaugePct").textContent = pct + "%";
+  $("gaugeArc").style.strokeDashoffset = 226.2 * (1 - pct / 100);
+
+  const [plan, why] = pickPlan(need);
+  $("plan").textContent = plan;
+  $("planWhy").textContent = why;
+
+  const dp = state.design ? DESIGN_BY_ID[state.design] : null;
+  $("designPick").textContent = dp ? dp.n : "—";
+  $("designPickWhy").textContent = dp
+    ? `${state.designMode === "light" ? "light" : "dark"} mode · ${dp.vibe}`
+    : "choose one in the gallery";
+
+  const list = $("sumList");
+  if (!need.length && !want.length) { list.textContent = "Nothing picked yet."; return; }
+  let html = "";
+  if (need.length) html += `<div class="h">🔥 Need</div>` + need.map((id) => `• ${featById[id].n}`).join("<br>");
+  if (want.length) html += `<div class="h">✨ Want</div>` + want.map((id) => `• ${featById[id].n}`).join("<br>");
+  list.innerHTML = html;
+}
+
+/* ═══ copy ═══ */
+function buildMarkdown() {
+  const lab = (v) => Object.entries(state.answers).filter(([, x]) => x === v).map(([k]) => `- ${featById[k].n} (${featById[k].t || featById[k].group.price})`);
+  const need = lab("need"), want = lab("want"), skip = lab("skip");
+  const [plan] = pickPlan(Object.entries(state.answers).filter(([, v]) => v === "need").map(([k]) => k));
+  const dp = state.design ? DESIGN_BY_ID[state.design] : null;
+  return [
+    "# KritakaPrajna — Feature Lab answers (v3)",
+    `Budget: ${state.budget || "not set"}`,
+    `Suggested plan: ${plan}`,
+    `Design choice: ${dp ? `${dp.n} — ${state.designMode === "light" ? "light" : "dark"} mode (${dp.vibe})` : "not set"}`,
+    "", "## Need", ...(need.length ? need : ["- (none)"]),
+    "", "## Want", ...(want.length ? want : ["- (none)"]),
+    "", "## Skip", ...(skip.length ? skip : ["- (none)"]),
+    "", "## Custom ideas", ...(state.custom.length ? state.custom.map((c) => `- ${c}`) : ["- (none)"]),
+  ].join("\n");
+}
+$("copyBtn").onclick = async () => {
+  const md = buildMarkdown();
+  try {
+    await navigator.clipboard.writeText(md);
+    $("copyBtn").textContent = "Copied ✓ — paste it in chat";
+    setTimeout(() => ($("copyBtn").textContent = "Copy my answers ↗"), 2200);
+  } catch {
+    $("modalText").value = md;
+    $("modal").classList.add("show");
+    $("modalText").select();
+  }
+};
+$("resetBtn").onclick = () => {
+  if (!confirm("Clear all answers?")) return;
+  state = { budget: null, answers: {}, custom: [], design: null, designMode: "dark" }; save();
+  document.querySelectorAll(".budget-btn").forEach((x) => x.classList.remove("on"));
+  renderGroups(); renderChips(); renderSummary(); renderDesigns();
+};
+
+renderDesigns(); renderGroups(); renderChips(); renderSummary(); renderRoad();
+</script>
+</body>
+</html>

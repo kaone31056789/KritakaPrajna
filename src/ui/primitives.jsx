@@ -292,7 +292,7 @@ export function NeuModal({ open, onClose, title, children, width = 480, footer }
 }
 
 /* ═══ NeuPopover — origin-aware scale from trigger ═══ */
-export function NeuPopover({ open, onClose, anchor = "bottom-start", children, className = "", width }) {
+export function NeuPopover({ open, onClose, anchor = "bottom-start", children, className = "", width, portal = false, anchorRef }) {
   const ref = useRef(null);
   useEffect(() => {
     if (!open) return;
@@ -300,13 +300,18 @@ export function NeuPopover({ open, onClose, anchor = "bottom-start", children, c
       if (ref.current && !ref.current.contains(e.target)) onClose?.();
     };
     const onKey = (e) => e.key === "Escape" && onClose?.();
+    const onScroll = (e) => {
+      if (portal && ref.current && !ref.current.contains(e.target)) onClose?.();
+    };
     document.addEventListener("mousedown", onDown);
     window.addEventListener("keydown", onKey);
+    if (portal) window.addEventListener("scroll", onScroll, true);
     return () => {
       document.removeEventListener("mousedown", onDown);
       window.removeEventListener("keydown", onKey);
+      if (portal) window.removeEventListener("scroll", onScroll, true);
     };
-  }, [open, onClose]);
+  }, [open, onClose, portal]);
 
   const placements = {
     "bottom-start": { pos: "top-full left-0 mt-2", origin: "top left" },
@@ -317,13 +322,33 @@ export function NeuPopover({ open, onClose, anchor = "bottom-start", children, c
   };
   const p = placements[anchor] || placements["bottom-start"];
 
-  return (
+  /* Portal mode — fixed position measured from the trigger, so overflow/scroll
+     containers (like the chat sidebar) can never clip the menu. */
+  let fixedStyle = null;
+  let origin = p.origin;
+  if (portal && anchorRef?.current) {
+    const r = anchorRef.current.getBoundingClientRect();
+    const gap = 6;
+    const estH = 280;
+    const openUp = r.bottom + estH > window.innerHeight && r.top > estH;
+    const end = anchor.endsWith("end");
+    fixedStyle = {
+      position: "fixed",
+      top: openUp ? "auto" : r.bottom + gap,
+      bottom: openUp ? window.innerHeight - r.top + gap : "auto",
+      left: end ? "auto" : r.left,
+      right: end ? window.innerWidth - r.right : "auto",
+    };
+    origin = `${openUp ? "bottom" : "top"} ${end ? "right" : "left"}`;
+  }
+
+  const node = (
     <AnimatePresence>
       {open && (
         <motion.div
           ref={ref}
-          className={`absolute ${p.pos} neu-raised-lg p-1.5 ${className}`}
-          style={{ zIndex: "var(--z-popover)", transformOrigin: p.origin, width }}
+          className={`${portal ? "" : `absolute ${p.pos}`} neu-raised-lg p-1.5 ${className}`}
+          style={{ zIndex: "var(--z-popover)", transformOrigin: origin, width, ...(fixedStyle || {}) }}
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.97, transition: { duration: T_FAST, ease: EASE_OUT } }}
@@ -334,6 +359,7 @@ export function NeuPopover({ open, onClose, anchor = "bottom-start", children, c
       )}
     </AnimatePresence>
   );
+  return portal ? createPortal(node, document.body) : node;
 }
 
 /* Menu item for popovers */

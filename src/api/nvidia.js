@@ -39,6 +39,8 @@ const STATIC_NVIDIA_MODELS = [
   { id: "meta/llama-3.2-1b-instruct", name: "Llama 3.2 1B Instruct",    context_length: 128000 },
   { id: "meta/llama-3.2-3b-instruct", name: "Llama 3.2 3B Instruct",    context_length: 128000 },
   { id: "meta/llama-3.3-70b-instruct",name: "Llama 3.3 70B Instruct",   context_length: 128000 },
+  { id: "meta/llama-4-scout-17b-16e-instruct",    name: "Llama 4 Scout 17B 16E",       context_length: 1048576 },
+  { id: "meta/llama-4-maverick-17b-128e-instruct",name: "Llama 4 Maverick 17B 128E",   context_length: 1048576 },
   { id: "meta/codellama-70b",         name: "CodeLlama 70B",             context_length: 16384  },
 
   // ── Microsoft Phi ─────────────────────────────────────────────────────────
@@ -94,6 +96,8 @@ const STATIC_NVIDIA_MODELS = [
   { id: "qwen/qwen2.5-7b-instruct",            name: "Qwen2.5 7B Instruct",        context_length: 32768  },
   { id: "qwen/qwen2.5-coder-7b-instruct",      name: "Qwen2.5 Coder 7B",           context_length: 32768  },
   { id: "qwen/qwen2.5-coder-32b-instruct",     name: "Qwen2.5 Coder 32B",          context_length: 32768  },
+  { id: "qwen/qwen3-32b",                      name: "Qwen3 32B",                  context_length: 131072 },
+  { id: "qwen/qwen3-235b-a22b",                name: "Qwen3 235B A22B",            context_length: 131072 },
   { id: "qwen/qwen3-5-122b-a10b",              name: "Qwen3.5 122B",               context_length: 131072 },
   { id: "qwen/qwen3-coder-480b-a35b-instruct", name: "Qwen3 Coder 480B",           context_length: 131072 },
   { id: "qwen/qwen3-next-80b-a3b-instruct",    name: "Qwen3 Next 80B Instruct",    context_length: 131072 },
@@ -133,6 +137,7 @@ const STATIC_NVIDIA_MODELS = [
   { id: "igenius/italia_10b_instruct_16k",      name: "Italia 10B 16K",      context_length: 16384 },
 
   // ── Z-AI / GLM ────────────────────────────────────────────────────────────
+  { id: "z-ai/glm-4.6", name: "GLM 4.6",  context_length: 128000 },
   { id: "z-ai/glm4.7",  name: "GLM 4.7",  context_length: 128000 },
   { id: "z-ai/glm5",    name: "GLM 5",    context_length: 128000 },
 

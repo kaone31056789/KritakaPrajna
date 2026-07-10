@@ -12,8 +12,10 @@ import { SPRING_ISLAND, EASE_OUT } from "../design/motion";
 import Icon from "../ui/icons";
 import { NeuTooltip, Spinner, Kbd } from "../ui/primitives";
 import BrandIcon from "../ui/BrandIcon";
+import { LogoMark } from "../ui/Logo";
 import CommandPalette from "../ui/CommandPalette";
 import { Toaster } from "../ui/Toaster";
+import ErrorBoundary from "../ui/ErrorBoundary";
 
 const ChatScreen = lazy(() => import("./Chat"));
 const AgentScreen = lazy(() => import("./Agent"));
@@ -158,7 +160,7 @@ const NAV_ITEMS = [
 function NavRail() {
   const { view } = useStore(navStore, (s) => ({ view: s.view }));
   return (
-    <nav className="w-[64px] shrink-0 flex flex-col items-center py-4 gap-2.5 relative z-10">
+    <nav className="app-nav w-[64px] shrink-0 flex flex-col items-center py-4 gap-2.5 relative z-10">
       {NAV_ITEMS.map((item) => {
         const active = view === item.id;
         return (
@@ -235,17 +237,15 @@ export default function Shell() {
         style={{ WebkitAppRegion: "drag" }}
       >
         <div className="flex items-center gap-2.5 w-[200px]">
-          <span
-            className="w-6 h-6 rounded-[8px] flex items-center justify-center"
-            style={{
-              background: "linear-gradient(135deg, var(--accent), var(--accent-2))",
-              boxShadow: "var(--neu-raised-sm)",
-            }}
-          >
-            <Icon name="spark" size={13} className="text-accent-ink" strokeWidth={2} />
-          </span>
-          <span className="font-display font-semibold text-[13px] text-hi tracking-wide">
-            KritakaPrajna
+          <LogoMark size={26} />
+          <span className="font-display font-semibold text-[13px] tracking-wide">
+            <span className="text-hi">Kritaka</span>
+            <span
+              className="bg-clip-text text-transparent"
+              style={{ backgroundImage: "linear-gradient(90deg, var(--accent), var(--accent-2))" }}
+            >
+              Prajna
+            </span>
           </span>
         </div>
         <Island />
@@ -266,18 +266,20 @@ export default function Shell() {
                   </div>
                 }
               >
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={view}
-                    className="h-full"
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
-                    transition={{ duration: 0.16, ease: EASE_OUT }}
-                  >
+                {/* No AnimatePresence exit here on purpose: interrupted "wait"
+                    transitions could drop the incoming view and leave the pane
+                    permanently empty. Keyed mount animation is enough. */}
+                <motion.div
+                  key={view}
+                  className="h-full"
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.16, ease: EASE_OUT }}
+                >
+                  <ErrorBoundary scope={view}>
                     <View />
-                  </motion.div>
-                </AnimatePresence>
+                  </ErrorBoundary>
+                </motion.div>
               </Suspense>
             </div>
           </div>

@@ -1,11 +1,12 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useStore } from "../../core/store";
-import { chatsStore, setActivePersona } from "../../core/chats";
+import { chatsStore, setActivePersona, newChat } from "../../core/chats";
 import { modelsStore, getSelectedModel, modelDisplayName } from "../../core/models";
 import { settingsStore, setSetting } from "../../core/settings";
 import { sendMessage, sendStore, stopStreaming } from "../../core/send";
 import { estimateTokensFromText } from "../../utils/tokenOptimizer";
+import { REASONING_MODES, supportsReasoningModel } from "../../utils/reasoningControls";
 import { EASE_OUT } from "../../design/motion";
 import Icon from "../../ui/icons";
 import { NeuPopover, MenuItem, NeuTooltip } from "../../ui/primitives";
@@ -20,6 +21,26 @@ const WEB_META = {
   always: { label: "Web: always", cls: "text-info" },
   off: { label: "Web: off", cls: "text-faint" },
 };
+
+/* Thinking-effort chip meta (reasoning models only). */
+const DEPTH_META = {
+  fast: { label: "Think", cls: "text-dim" },
+  balanced: { label: "Think+", cls: "text-info" },
+  deep: { label: "Ultra", cls: "text-accent" },
+};
+
+/* Claude Code-style slash commands — type "/" at the start of the composer. */
+const SLASH_COMMANDS = [
+  { cmd: "model", icon: "cpu", hint: "Switch model", run: (c) => c.openModel() },
+  { cmd: "persona", icon: "brain", hint: "Choose persona", run: (c) => c.openPersona() },
+  { cmd: "web", icon: "globe", hint: "Cycle web search: auto → always → off", run: (c) => c.cycleWeb() },
+  { cmd: "think", icon: "zap", hint: "Fast thinking — quick, light reasoning", run: (c) => c.setDepth("fast") },
+  { cmd: "megathink", icon: "gauge", hint: "Balanced thinking", run: (c) => c.setDepth("balanced") },
+  { cmd: "ultrathink", icon: "spark", hint: "Deep thinking — max reasoning effort", run: (c) => c.setDepth("deep") },
+  { cmd: "new", icon: "plus", hint: "Start a new chat", run: (c) => c.newChat() },
+  { cmd: "clear", icon: "refresh", hint: "Clear — start a fresh chat", run: (c) => c.newChat() },
+  { cmd: "help", icon: "command", hint: "List slash commands", run: (c) => c.help() },
+];
 
 async function fileToUpload(file) {
   const ext = file.name.split(".").pop()?.toLowerCase() || "";
@@ -47,6 +68,8 @@ export default function Composer() {
   const [modelOpen, setModelOpen] = useState(false);
   const [personaOpen, setPersonaOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [slashIdx, setSlashIdx] = useState(0);
+  const [slashDismissed, setSlashDismissed] = useState(false);
   const taRef = useRef(null);
   const fileRef = useRef(null);
 
@@ -58,11 +81,62 @@ export default function Composer() {
   const runs = useStore(sendStore, (s) => s.runs);
   const busy = !!runs[activeChatId];
   const { models, selectedId } = useStore(modelsStore, (s) => ({ models: s.models, selectedId: s.selectedId }));
-  const { webMode, sendKey } = useStore(settingsStore, (s) => ({ webMode: s.webMode, sendKey: s.sendKey }));
+  const { webMode, sendKey, reasoningDepth } = useStore(settingsStore, (s) => ({
+    webMode: s.webMode,
+    sendKey: s.sendKey,
+    reasoningDepth: s.reasoningDepth,
+  }));
 
   const model = getSelectedModel({ models, selectedId });
   const persona = personas.find((p) => p.id === activePersonaId);
   const tokens = estimateTokensFromText(text);
+  const webMeta = WEB_META[webMode] || WEB_META.auto;
+  const depth = reasoningDepth || "balanced";
+  const depthMeta = DEPTH_META[depth] || DEPTH_META.balanced;
+  const canThink = supportsReasoningModel(model || {});
+
+  // Slash menu: active while composer text is exactly "/command-prefix" (no spaces).
+  const slashItems = useMemo(() => {
+    if (slashDismissed || !text.startsWith("/") || /[\s\n]/.test(text)) return [];
+    const q = text.slice(1).toLowerCase();
+    return SLASH_COMMANDS.filter((c) => c.cmd.startsWith(q));
+  }, [text, slashDismissed]);
+  const slashHi = Math.max(0, Math.min(slashIdx, slashItems.length - 1));
+
+  const cycleWeb = useCallback(() => {
+    const cur = settingsStore.get().webMode;
+    const next = WEB_MODES[(WEB_MODES.indexOf(cur) + 1 + WEB_MODES.length) % WEB_MODES.length];
+    setSetting("webMode", next);
+    toast.info(WEB_META[next].label);
+  }, []);
+
+  const setDepth = useCallback((d) => {
+    setSetting("reasoningDepth", d);
+    const m = REASONING_MODES.find((x) => x.id === d);
+    toast.info(`Thinking: ${m ? m.label : d}`);
+  }, []);
+
+  const runSlash = useCallback(
+    (c) => {
+      setText("");
+      setSlashIdx(0);
+      requestAnimationFrame(() => {
+        if (taRef.current) taRef.current.style.height = "auto";
+      });
+      c.run({
+        openModel: () => setModelOpen(true),
+        openPersona: () => setPersonaOpen(true),
+        cycleWeb,
+        setDepth,
+        newChat: () => {
+          newChat({ personaId: activePersonaId });
+          toast.info("New chat");
+        },
+        help: () => toast.info(`Commands: ${SLASH_COMMANDS.map((x) => `/${x.cmd}`).join("  ")}`),
+      });
+    },
+    [cycleWeb, setDepth, activePersonaId]
+  );
 
   const autoGrow = useCallback(() => {
     const ta = taRef.current;
@@ -98,6 +172,28 @@ export default function Composer() {
   }, [text, uploads, busy, activeChatId]);
 
   const onKeyDown = (e) => {
+    if (slashItems.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSlashIdx((i) => (i + 1) % slashItems.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSlashIdx((i) => (i - 1 + slashItems.length) % slashItems.length);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        runSlash(slashItems[slashHi]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setSlashDismissed(true);
+        return;
+      }
+    }
     const modEnter = (e.ctrlKey || e.metaKey) && e.key === "Enter";
     const plainEnter = e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey;
     if ((sendKey === "enter" && plainEnter) || modEnter) {
@@ -110,7 +206,7 @@ export default function Composer() {
     <div className="px-6 pb-5 pt-2">
       <ModelAdvice />
       <div
-        className={`max-w-[880px] mx-auto rounded-lg bg-surface [box-shadow:var(--neu-raised)] ${
+        className={`app-composer max-w-[880px] mx-auto rounded-lg bg-surface [box-shadow:var(--neu-raised)] ${
           dragOver ? "[box-shadow:var(--neu-raised),0_0_0_2px_var(--accent)]" : ""
         }`}
         style={{ transition: "box-shadow 180ms var(--ease-out)" }}
@@ -160,14 +256,46 @@ export default function Composer() {
         </AnimatePresence>
 
         {/* Input */}
-        <div className="px-4 pt-3">
+        <div className="px-4 pt-3 relative">
+          <AnimatePresence>
+            {slashItems.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 6, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 6, scale: 0.98 }}
+                transition={{ duration: 0.14, ease: EASE_OUT }}
+                className="absolute bottom-full left-3 mb-2 w-[340px] rounded-md bg-surface [box-shadow:var(--neu-raised)] p-1.5 z-30"
+              >
+                <p className="px-2.5 pt-1 pb-1.5 text-[10px] font-mono uppercase tracking-wider text-faint">
+                  Commands — ↑↓ · Enter · Esc
+                </p>
+                {slashItems.map((c, i) => (
+                  <button
+                    key={c.cmd}
+                    type="button"
+                    onMouseEnter={() => setSlashIdx(i)}
+                    onClick={() => runSlash(c)}
+                    className={`w-full flex items-center gap-2.5 px-2.5 h-9 rounded-xs text-left ${
+                      i === slashHi ? "bg-deep [box-shadow:var(--neu-inset-sm)]" : ""
+                    }`}
+                  >
+                    <Icon name={c.icon} size={13} className={i === slashHi ? "text-accent" : "text-dim"} />
+                    <span className="text-[12.5px] font-mono text-hi">/{c.cmd}</span>
+                    <span className="flex-1 truncate text-[11px] text-faint text-right">{c.hint}</span>
+                  </button>
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
           <textarea
             ref={taRef}
             value={text}
             rows={1}
-            placeholder={persona ? `Message as ${persona.name}…` : "Message KritakaPrajna…"}
+            placeholder={persona ? `Message as ${persona.name}…` : "Message KritakaPrajna — type / for commands…"}
             onChange={(e) => {
               setText(e.target.value);
+              setSlashDismissed(false);
+              setSlashIdx(0);
               autoGrow();
             }}
             onKeyDown={onKeyDown}
@@ -233,20 +361,34 @@ export default function Composer() {
           </div>
 
           {/* Web mode */}
-          <NeuTooltip label={WEB_META[webMode].label}>
+          <NeuTooltip label={webMeta.label}>
             <button
               type="button"
               aria-label="Web search mode"
-              onClick={() => {
-                const next = WEB_MODES[(WEB_MODES.indexOf(webMode) + 1) % WEB_MODES.length];
-                setSetting("webMode", next);
-                toast.info(WEB_META[next].label);
-              }}
-              className={`pressable w-8 h-8 rounded-full flex items-center justify-center hover:bg-surface-2 ${WEB_META[webMode].cls}`}
+              onClick={cycleWeb}
+              className={`pressable w-8 h-8 rounded-full flex items-center justify-center hover:bg-surface-2 ${webMeta.cls}`}
             >
               <Icon name="globe" size={15} />
             </button>
           </NeuTooltip>
+
+          {/* Thinking effort — reasoning-capable models only */}
+          {canThink && (
+            <NeuTooltip label={`Thinking effort: ${REASONING_MODES.find((m) => m.id === depth)?.label || depth} — click to cycle`}>
+              <button
+                type="button"
+                aria-label="Thinking effort"
+                onClick={() => {
+                  const ids = REASONING_MODES.map((m) => m.id);
+                  setDepth(ids[(ids.indexOf(depth) + 1) % ids.length]);
+                }}
+                className={`pressable flex items-center gap-1.5 h-8 px-3 rounded-full text-[11.5px] hover:bg-surface-2 ${depthMeta.cls}`}
+              >
+                <Icon name="gauge" size={13} />
+                <span>{depthMeta.label}</span>
+              </button>
+            </NeuTooltip>
+          )}
 
           {/* Attach */}
           <NeuTooltip label="Attach files">

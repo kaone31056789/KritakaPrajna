@@ -10,6 +10,19 @@ const BLOCKED_MODEL_IDS = new Set([
 // Only small/medium models reliably supported on HuggingFace's free Serverless Inference tier.
 const FALLBACK_MODELS = [
   "deepseek-ai/DeepSeek-V3.2-Exp",
+  "openai/gpt-oss-20b",
+  "openai/gpt-oss-120b",
+  "moonshotai/Kimi-K2-Instruct-0905",
+  "moonshotai/Kimi-K2-Thinking",
+  "zai-org/GLM-4.6",
+  "zai-org/GLM-4.5-Air",
+  "Qwen/Qwen3-235B-A22B-Instruct-2507",
+  "Qwen/Qwen3-Next-80B-A3B-Instruct",
+  "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+  "Qwen/Qwen3-32B",
+  "meta-llama/Llama-4-Scout-17B-16E-Instruct",
+  "meta-llama/Llama-4-Maverick-17B-128E-Instruct",
+  "google/gemma-3-27b-it",
   "HuggingFaceTB/SmolLM3-3B",
   "HuggingFaceTB/SmolLM2-1.7B-Instruct",
   "Qwen/Qwen2.5-7B-Instruct",
@@ -103,7 +116,7 @@ function isLikelyChatModel(modelId) {
   const hints = [
     "instruct", "chat", "-it", "_it", "assistant", "zephyr", "hermes",
     "openhermes", "command-r", "smollm", "phi", "deepseek-r1-distill",
-    "deepseek-r1", "deepseek-v3", "thinking", "aya", "1m",
+    "deepseek-r1", "deepseek-v3", "thinking", "aya", "1m", "qwen3",
     "gemma-4", "gemma-3", "gemma-2", "coder", "reasoner", "kimi", "gpt-oss",
     "glm-4", "llama-4", "llama-3.3", "sonoma", "magistral", "mistral-small",
   ];

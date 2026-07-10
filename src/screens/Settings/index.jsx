@@ -11,6 +11,8 @@ import { PROVIDER_META } from "../../api/providerRouter";
 import { modelsStore, modelDisplayName } from "../../core/models";
 import { loadModels } from "../../core/models";
 import { EASE_OUT } from "../../design/motion";
+import { themeStore, setTheme, switchSkin } from "../../core/theme";
+import { THEMES } from "../../design/themes";
 import Icon from "../../ui/icons";
 import {
   Segmented,
@@ -31,6 +33,7 @@ import { toast } from "../../ui/Toaster";
 
 const TABS = [
   { value: "providers", label: "Providers", icon: "key" },
+  { value: "appearance", label: "Appearance", icon: "wand" },
   { value: "behavior", label: "Behavior", icon: "settings" },
   { value: "personas", label: "Personas", icon: "brain" },
   { value: "memory", label: "Memory", icon: "bookmark" },
@@ -241,6 +244,93 @@ function MemoryTab() {
   );
 }
 
+/* ── Appearance ── */
+
+function ThemeCard({ t, active, mode, onPick }) {
+  const sw = mode === "light" ? t.light : t.dark;
+  return (
+    <button
+      type="button"
+      onClick={onPick}
+      title={t.tag}
+      aria-pressed={active}
+      className="pressable text-left p-3.5"
+      style={{
+        background: "var(--surface)",
+        borderRadius: "var(--r-sm)",
+        boxShadow: active ? "var(--neu-raised-sm), 0 0 0 2px var(--accent)" : "var(--neu-raised-sm)",
+        transition: "box-shadow var(--t) var(--ease-out)",
+      }}
+    >
+      <div
+        className="flex items-stretch gap-1 mb-2.5 h-7 overflow-hidden"
+        style={{ borderRadius: "calc(var(--r-xs) / 1.5)" }}
+      >
+        {sw.map((c, i) => (
+          <span
+            key={i}
+            className="flex-1"
+            style={{ background: c, boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.12)" }}
+          />
+        ))}
+      </div>
+      <div className="flex items-center gap-1.5">
+        <p className="text-[12.5px] font-semibold text-hi leading-tight flex-1 min-w-0 truncate">{t.name}</p>
+        {active && <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "var(--accent)" }} />}
+      </div>
+      <p className="text-[10.5px] text-faint mt-0.5 truncate">{t.motion}</p>
+    </button>
+  );
+}
+
+function AppearanceTab() {
+  const { theme, skin } = useStore(themeStore);
+  const current = THEMES.find((t) => t.id === skin);
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="neu-raised-sm rounded-sm p-4 flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <p className="text-[12.5px] font-semibold text-hi">Mode</p>
+          <p className="text-[11px] text-faint">Every theme ships a dark and a light variant.</p>
+        </div>
+        <Segmented
+          size="sm"
+          value={theme}
+          onChange={(v) => setTheme(v)}
+          options={[
+            { value: "dark", label: "Dark", icon: "moon" },
+            { value: "light", label: "Light", icon: "sun" },
+          ]}
+        />
+      </div>
+
+      <div>
+        <div className="flex items-baseline justify-between gap-3 mb-3 flex-wrap">
+          <div>
+            <p className="text-[12.5px] font-semibold text-hi">Theme</p>
+            <p className="text-[11px] text-faint">
+              20 design languages — each with its own color, shape and motion personality.
+            </p>
+          </div>
+          {current && (
+            <p className="text-[10.5px] font-mono text-dim">
+              {current.name} · <span className="text-accent">{current.motion}</span>
+            </p>
+          )}
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          {THEMES.map((t) => (
+            <ThemeCard key={t.id} t={t} mode={theme} active={skin === t.id} onPick={() => switchSkin(t.id)} />
+          ))}
+        </div>
+        {current && (
+          <p className="mt-3 text-[11px] text-faint italic">“{current.tag}”</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ── Behavior ── */
 
 function BehaviorTab() {
@@ -409,6 +499,7 @@ export default function SettingsScreen() {
             ))}
           </div>
         )}
+        {tab === "appearance" && <AppearanceTab />}
         {tab === "behavior" && <BehaviorTab />}
         {tab === "personas" && <PersonasTab />}
         {tab === "memory" && <MemoryTab />}

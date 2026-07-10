@@ -44,9 +44,16 @@ export default function ModelPicker({ open, onClose, anchor = "top-start", onSel
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase().trim();
-    const list = q
-      ? models.filter((m) => `${modelDisplayName(m)} ${m.id} ${m._provider}`.toLowerCase().includes(q))
-      : models;
+    if (!q) return models.slice(0, 120);
+    // Keyword-aware haystack: "free", "image", provider label ("Hugging Face") all match.
+    const tokens = q.split(/\s+/);
+    const list = models.filter((m) => {
+      const parts = [modelDisplayName(m), m.id, m._provider, providerLabel(m._provider) || ""];
+      if (isFreeModel(m)) parts.push("free");
+      if (m._isImageGen) parts.push("image imagegen");
+      const hay = parts.join(" ").toLowerCase();
+      return tokens.every((t) => hay.includes(t));
+    });
     return list.slice(0, 120);
   }, [models, query]);
 

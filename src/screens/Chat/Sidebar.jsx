@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useStore } from "../../core/store";
 import {
@@ -23,6 +23,14 @@ function ChatRow({ chat, active, folders }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(chat.title || "");
+  const [confirmDel, setConfirmDel] = useState(false);
+  const menuBtnRef = useRef(null);
+
+  useEffect(() => {
+    if (!confirmDel) return undefined;
+    const t = setTimeout(() => setConfirmDel(false), 2400);
+    return () => clearTimeout(t);
+  }, [confirmDel]);
 
   const commitRename = () => {
     renameChat(chat.id, draft);
@@ -70,6 +78,32 @@ function ChatRow({ chat, active, folders }) {
       </button>
       <button
         type="button"
+        aria-label={confirmDel ? "Click again to confirm delete" : "Delete chat"}
+        title={confirmDel ? "Click again to confirm" : "Delete chat"}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (confirmDel) {
+            deleteChat(chat.id);
+            toast.success("Chat deleted");
+          } else {
+            setConfirmDel(true);
+          }
+        }}
+        className={`absolute right-8 top-1/2 -translate-y-1/2 w-6 h-6 rounded-xs flex items-center justify-center ${
+          confirmDel ? "opacity-100 text-err" : "opacity-0 group-hover:opacity-100 text-faint hover:text-err"
+        }`}
+        style={{
+          transition: "opacity 120ms var(--ease-out), color 120ms var(--ease-out)",
+          ...(confirmDel
+            ? { background: "var(--err-soft)", boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--err) 35%, transparent)" }
+            : {}),
+        }}
+      >
+        <Icon name="trash" size={12} />
+      </button>
+      <button
+        type="button"
+        ref={menuBtnRef}
         aria-label="Chat menu"
         onClick={(e) => {
           e.stopPropagation();
@@ -82,7 +116,7 @@ function ChatRow({ chat, active, folders }) {
       >
         <Icon name="dots" size={14} />
       </button>
-      <NeuPopover open={menuOpen} onClose={() => setMenuOpen(false)} anchor="bottom-end" width={190}>
+      <NeuPopover portal anchorRef={menuBtnRef} open={menuOpen} onClose={() => setMenuOpen(false)} anchor="bottom-end" width={190}>
         <MenuItem icon="pin" onClick={() => { togglePinChat(chat.id); setMenuOpen(false); }}>
           {chat.pinned ? "Unpin" : "Pin"}
         </MenuItem>
@@ -106,7 +140,7 @@ function ChatRow({ chat, active, folders }) {
           </div>
         )}
         <div className="my-1 border-t border-line pt-1">
-          <MenuItem icon="trash" danger onClick={() => { deleteChat(chat.id); setMenuOpen(false); }}>
+          <MenuItem icon="trash" danger onClick={() => { deleteChat(chat.id); toast.success("Chat deleted"); setMenuOpen(false); }}>
             Delete
           </MenuItem>
         </div>
@@ -136,7 +170,7 @@ export default function Sidebar() {
   }, [filtered, state.folders]);
 
   return (
-    <aside className="w-[248px] shrink-0 h-full flex flex-col border-r border-line">
+    <aside className="app-sidebar w-[248px] shrink-0 h-full flex flex-col border-r border-line">
       <div className="p-3 pb-2 flex flex-col gap-2.5">
         <NeuButton variant="accent" icon="plus" className="w-full" onClick={() => newChat()}>
           New chat

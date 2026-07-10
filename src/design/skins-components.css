@@ -1,0 +1,288 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   COMPONENT SKIN LAYER — semantic hooks styled per skin.
+   Hooks: .app-nav, .app-sidebar, .app-composer, .msg-user, .msg-assistant
+   Base (skin-neutral) defaults first; skins override via the cascade.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.msg-user {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent) 16%, var(--surface)),
+    color-mix(in srgb, var(--accent-2) 9%, var(--surface))
+  );
+  box-shadow: var(--neu-raised-sm), inset 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.msg-assistant {
+  background: var(--surface);
+  box-shadow: var(--neu-raised);
+}
+
+/* ── Minimalism — chrome disappears: hairlines, no depth ── */
+[data-skin="minimalism"] .app-composer,
+[data-skin="minimalism"] .msg-assistant {
+  box-shadow: inset 0 0 0 1px var(--line);
+  background: var(--surface);
+}
+[data-skin="minimalism"] .msg-user {
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* ── Maximalism — gradient-washed surfaces ── */
+[data-skin="maximalism"] .app-composer {
+  background: linear-gradient(
+    120deg,
+    color-mix(in srgb, var(--accent) 10%, var(--surface)),
+    var(--surface) 45%,
+    color-mix(in srgb, var(--accent-2) 12%, var(--surface))
+  );
+}
+[data-skin="maximalism"] .msg-user {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent) 30%, var(--surface)),
+    color-mix(in srgb, var(--accent-2) 22%, var(--surface))
+  );
+  box-shadow: var(--neu-raised-sm), inset 0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent);
+}
+[data-skin="maximalism"] .app-sidebar {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, transparent), transparent 30%);
+}
+
+/* ── Brutalism — RAW: hard borders, hard offsets, zero softness ── */
+[data-skin="brutalism"] .app-sidebar { border-right: 2px solid var(--line-strong); }
+[data-skin="brutalism"] .app-composer {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 2px var(--line-strong), 5px 5px 0 0 var(--line-strong);
+}
+[data-skin="brutalism"] .msg-assistant {
+  box-shadow: inset 0 0 0 2px var(--line-strong), 4px 4px 0 0 var(--line-strong);
+}
+[data-skin="brutalism"] .msg-user {
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: inset 0 0 0 2px var(--line-strong), 4px 4px 0 0 var(--line-strong);
+}
+
+/* ── Neobrutalism — sticker energy: color borders + accent offsets ── */
+[data-skin="neobrutalism"] .app-composer {
+  box-shadow: inset 0 0 0 2px var(--line-strong), 4px 4px 0 0 var(--accent);
+}
+[data-skin="neobrutalism"] .msg-assistant {
+  box-shadow: inset 0 0 0 2px var(--line-strong), 3px 3px 0 0 color-mix(in srgb, var(--accent-2) 70%, transparent);
+}
+[data-skin="neobrutalism"] .msg-user {
+  background: color-mix(in srgb, var(--accent) 26%, var(--surface));
+  box-shadow: inset 0 0 0 2px var(--line-strong), 3px 3px 0 0 var(--accent);
+}
+
+/* ── Glassmorphism — frosted panes ── */
+[data-skin="glassmorphism"] .app-sidebar,
+[data-skin="glassmorphism"] .app-composer {
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+}
+[data-skin="glassmorphism"] .msg-assistant,
+[data-skin="glassmorphism"] .msg-user {
+  background: color-mix(in srgb, var(--surface) 62%, transparent);
+  backdrop-filter: blur(14px) saturate(135%);
+  -webkit-backdrop-filter: blur(14px) saturate(135%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), inset 0 0 0 1px rgba(255, 255, 255, 0.07),
+    0 8px 24px rgba(0, 0, 0, 0.18);
+}
+[data-skin="glassmorphism"] .msg-user {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+/* ── Claymorphism — puffy dough ── */
+[data-skin="claymorphism"] .app-composer,
+[data-skin="claymorphism"] .msg-assistant {
+  border-radius: 22px;
+  box-shadow: var(--neu-raised), inset 0 -6px 10px rgba(0, 0, 0, 0.08), inset 0 6px 10px rgba(255, 255, 255, 0.1);
+}
+[data-skin="claymorphism"] .msg-user {
+  border-radius: 22px 22px 8px 22px;
+  background: color-mix(in srgb, var(--accent) 24%, var(--surface));
+  box-shadow: var(--neu-raised-sm), inset 0 -5px 8px rgba(0, 0, 0, 0.1), inset 0 5px 8px rgba(255, 255, 255, 0.12);
+}
+
+/* ── Skeuomorphism — machined panels, top sheen ── */
+[data-skin="skeuomorphism"] .app-composer {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, #ffffff 7%, var(--surface)),
+    color-mix(in srgb, #000000 6%, var(--surface))
+  );
+  box-shadow: var(--neu-raised), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+[data-skin="skeuomorphism"] .msg-assistant,
+[data-skin="skeuomorphism"] .msg-user {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, #ffffff 5%, var(--surface)),
+    color-mix(in srgb, #000000 4%, var(--surface))
+  );
+  box-shadow: var(--neu-raised-sm), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+[data-skin="skeuomorphism"] .app-sidebar {
+  background: linear-gradient(90deg, color-mix(in srgb, #000000 5%, transparent), transparent);
+}
+
+/* ── Material — clean elevation, no neu insets ── */
+[data-skin="material"] .app-composer {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.22), 0 8px 24px rgba(0, 0, 0, 0.14);
+}
+[data-skin="material"] .msg-assistant {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 3px 10px rgba(0, 0, 0, 0.1);
+}
+[data-skin="material"] .msg-user {
+  background: color-mix(in srgb, var(--accent) 20%, var(--surface));
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* ── Flat — solid fills, zero depth ── */
+[data-skin="flat"] .app-composer,
+[data-skin="flat"] .msg-assistant {
+  background: var(--surface-2, var(--surface));
+  box-shadow: none;
+}
+[data-skin="flat"] .msg-user {
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: none;
+}
+
+/* ── Swiss — typographic rules, precise lines ── */
+[data-skin="swiss"] .app-sidebar { border-right: 1px solid var(--line-strong); }
+[data-skin="swiss"] .app-composer {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+[data-skin="swiss"] .msg-assistant {
+  background: transparent;
+  box-shadow: inset 2px 0 0 0 var(--line-strong);
+  border-radius: 0;
+}
+[data-skin="swiss"] .msg-user {
+  background: transparent;
+  box-shadow: inset -2px 0 0 0 var(--accent);
+  border-radius: 0;
+}
+
+/* ── Bauhaus — geometric color blocks ── */
+[data-skin="bauhaus"] .msg-user {
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: none;
+  border-radius: 2px;
+}
+[data-skin="bauhaus"] .msg-assistant {
+  box-shadow: inset 4px 0 0 0 var(--accent-2), inset 0 0 0 1px var(--line-strong);
+  border-radius: 2px;
+}
+[data-skin="bauhaus"] .app-composer {
+  box-shadow: inset 0 0 0 2px var(--line-strong), inset 0 -4px 0 0 var(--accent);
+}
+
+/* ── Memphis — party borders, mismatched pops ── */
+[data-skin="memphis"] .app-composer {
+  box-shadow: inset 0 0 0 2px var(--line-strong), 4px 4px 0 0 var(--accent-2);
+}
+[data-skin="memphis"] .msg-assistant {
+  box-shadow: inset 0 0 0 2px var(--line-strong), -3px 3px 0 0 color-mix(in srgb, var(--accent) 80%, transparent);
+}
+[data-skin="memphis"] .msg-user {
+  background: color-mix(in srgb, var(--accent-2) 30%, var(--surface));
+  box-shadow: inset 0 0 0 2px var(--line-strong), 3px 3px 0 0 var(--accent);
+}
+
+/* ── Y2K — glossy bubble plastic ── */
+[data-skin="y2k"] .app-composer,
+[data-skin="y2k"] .msg-assistant,
+[data-skin="y2k"] .msg-user {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.02) 46%, transparent 52%),
+    color-mix(in srgb, var(--accent) 8%, var(--surface));
+  box-shadow: var(--neu-raised-sm), inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+[data-skin="y2k"] .msg-user {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.03) 48%, transparent 54%),
+    color-mix(in srgb, var(--accent) 26%, var(--surface));
+}
+
+/* ── Frutiger Aero — airy gloss & sky sheen ── */
+[data-skin="frutiger-aero"] .app-composer,
+[data-skin="frutiger-aero"] .msg-assistant {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), transparent 55%),
+    color-mix(in srgb, var(--surface) 88%, var(--accent));
+  box-shadow: var(--neu-raised-sm), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+[data-skin="frutiger-aero"] .msg-user {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent 58%),
+    color-mix(in srgb, var(--accent) 22%, var(--surface));
+  box-shadow: var(--neu-raised-sm), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+/* ── Cyberpunk — neon edges & glow ── */
+[data-skin="cyberpunk"] .app-sidebar {
+  border-right: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+}
+[data-skin="cyberpunk"] .app-composer {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent),
+    0 0 18px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+[data-skin="cyberpunk"] .msg-assistant {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-2) 35%, transparent),
+    0 0 12px color-mix(in srgb, var(--accent-2) 10%, transparent);
+}
+[data-skin="cyberpunk"] .msg-user {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent),
+    0 0 14px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+/* ── Vaporwave — pastel dream gradients ── */
+[data-skin="vaporwave"] .msg-user {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent) 24%, var(--surface)),
+    color-mix(in srgb, var(--accent-2) 24%, var(--surface))
+  );
+}
+[data-skin="vaporwave"] .app-composer {
+  background: linear-gradient(
+    120deg,
+    color-mix(in srgb, var(--accent) 8%, var(--surface)),
+    color-mix(in srgb, var(--accent-2) 10%, var(--surface))
+  );
+}
+
+/* ── Synthwave — horizon glow ── */
+[data-skin="synthwave"] .app-composer {
+  box-shadow: var(--neu-raised), 0 6px 22px color-mix(in srgb, var(--accent) 16%, transparent),
+    inset 0 -2px 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+}
+[data-skin="synthwave"] .msg-user {
+  box-shadow: var(--neu-raised-sm), 0 0 16px color-mix(in srgb, var(--accent) 14%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* ── Retrofuturism — swept arcs ── */
+[data-skin="retrofuturism"] .app-composer { border-radius: 26px; }
+[data-skin="retrofuturism"] .msg-assistant { border-radius: 4px 22px 22px 22px; }
+[data-skin="retrofuturism"] .msg-user { border-radius: 22px 4px 22px 22px; }
+
+/* ── Liquid Glass — optical lenses over living liquid ── */
+[data-skin="liquid-glass"] .app-sidebar,
+[data-skin="liquid-glass"] .app-composer,
+[data-skin="liquid-glass"] .msg-assistant,
+[data-skin="liquid-glass"] .msg-user {
+  background: color-mix(in srgb, var(--surface) 38%, transparent);
+  backdrop-filter: blur(22px) saturate(170%) brightness(1.08);
+  -webkit-backdrop-filter: blur(22px) saturate(170%) brightness(1.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 10px 30px rgba(0, 0, 0, 0.16);
+}
+[data-skin="liquid-glass"] .msg-user {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}

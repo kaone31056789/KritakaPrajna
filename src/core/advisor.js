@@ -24,21 +24,37 @@ export async function refreshSignals(models) {
   }
 }
 
-const KNOWN_STRONG = [
-  /claude|fable|opus|sonnet/i,
-  /gpt-5|gpt-4|o[34]\b/i,
-  /gemini.*(pro|ultra|2)/i,
-  /deepseek.*(v3|r1)/i,
-  /llama.*(70b|405b|4)/i,
-  /qwen.*(72b|max|2\.5)/i,
-  /mistral.*(large|medium)/i,
-  /grok/i,
+/* Ability tiers — newer / stronger families rank higher so scores actually
+   differentiate instead of collapsing into one flat number. First match wins. */
+const ABILITY_TIERS = [
+  [/gpt-5|opus|fable|gemini[- ]?3[.\d]*[- ]?pro|grok[- ]?4/i, 62],
+  [/sonnet|gpt-4\.5|gemini[- ]?2\.5[- ]?pro|deepseek[- ]?v3\.2|kimi[- ]?k2|glm[- ]?4\.[6-9]|qwen3[- ]?(235b|coder)|llama[- ]?4[- ]?maverick|minimax[- ]?m[12]/i, 54],
+  [/gpt-4o|\bo[34]\b|gemini[- ]?[\d.]*[- ]?flash|deepseek[- ]?(v3\.1|r1[- ]?0528)|qwen3|command[- ]?a|mistral[- ]?(large|medium)|llama[- ]?4|gpt[- ]?oss[- ]?120b|grok/i, 47],
+  [/deepseek[- ]?(v3|r1)|llama[- ]?3\.[13]|qwen[- ]?2\.5|gemma[- ]?3|glm[- ]?4\.5|gpt[- ]?oss|hermes|nemotron|command/i, 41],
 ];
 
+/* Small/distilled checkpoints get capped — big context can't rescue a 3B. */
+const SMALL_HINTS =
+  /distill|[- ](mini|small|nano|lite|tiny)\b|smollm|zephyr|tinyllama|\b[1-9](\.\d)?b\b|\b1[0-4]b\b/i;
+
+function abilityBase(name) {
+  for (const [re, pts] of ABILITY_TIERS) if (re.test(name)) return pts;
+  return 33;
+}
+
+// Deterministic per-model jitter (0–5) so same-family checkpoints don't tie.
+function tieBreak(id) {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return h % 6;
+}
+
 function capabilityScore(model, task) {
-  let score = 30;
   const name = `${model.id} ${model.name || ""}`;
-  if (KNOWN_STRONG.some((re) => re.test(name))) score += 35;
+  let score = abilityBase(name);
+  if (SMALL_HINTS.test(name)) score = Math.min(score, 29);
+  // Newer revisions of the same family get a nudge.
+  if (/0528|0324|terminus|exp\b|latest|preview|2507|1120/i.test(name)) score += 3;
 
   const ctx = Number(model.context_length || model.top_provider?.context_length || 0);
   if (ctx >= 1_000_000) score += 20;
@@ -48,7 +64,7 @@ function capabilityScore(model, task) {
   else if (ctx >= 8_000) score += 4;
 
   if (task && task !== "general" && supportsTask(model, task)) score += 15;
-  return Math.min(100, score);
+  return Math.min(100, score + tieBreak(String(model.id || "")));
 }
 
 function priceScore(model) {

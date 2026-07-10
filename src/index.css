@@ -1,5 +1,7 @@
 @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
 @import "./design/tokens.css";
+@import "./design/themes.css";
+@import "./design/skins-components.css";
 
 @tailwind base;
 @tailwind components;

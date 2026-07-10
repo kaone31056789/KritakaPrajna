@@ -34,3 +34,4 @@ graphify-out/
 
 # Agent config (local rules/workflows)
 .agent/
+.gstack/

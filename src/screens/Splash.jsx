@@ -1,7 +1,7 @@
 import React, { useEffect } from "react";
 import { motion } from "framer-motion";
 import { EASE_OUT } from "../design/motion";
-import Icon from "../ui/icons";
+import { LogoMark } from "../ui/Logo";
 
 /* First-boot splash — a rare moment, so it earns a little delight. ~1.3s total. */
 
@@ -23,22 +23,24 @@ export default function Splash({ onDone }) {
           initial={{ opacity: 0, scale: 0.7 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.4, delay: 0.15, ease: EASE_OUT }}
-          className="w-11 h-11 rounded-[14px] flex items-center justify-center"
-          style={{
-            background: "linear-gradient(135deg, var(--accent), var(--accent-2))",
-            boxShadow: "0 4px 20px var(--accent-glow)",
-          }}
+          className="flex"
         >
-          <Icon name="spark" size={22} className="text-accent-ink" strokeWidth={2} />
+          <LogoMark size={46} />
         </motion.span>
       </motion.div>
       <motion.p
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35, delay: 0.3, ease: EASE_OUT }}
-        className="mt-5 font-display font-semibold text-[17px] text-hi tracking-wide"
+        className="mt-5 font-display font-semibold text-[17px] tracking-wide"
       >
-        KritakaPrajna
+        <span className="text-hi">Kritaka</span>
+        <span
+          className="bg-clip-text text-transparent"
+          style={{ backgroundImage: "linear-gradient(90deg, var(--accent), var(--accent-2))" }}
+        >
+          Prajna
+        </span>
       </motion.p>
       <motion.p
         initial={{ opacity: 0 }}
