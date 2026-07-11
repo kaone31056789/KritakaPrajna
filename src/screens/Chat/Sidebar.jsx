@@ -48,6 +48,27 @@ function ChatRow({ chat, active, folders }) {
     }
   };
 
+  const downloadFile = (content, ext, mime) => {
+    try {
+      const name = `${(chat.title || "chat").replace(/[^\w\- ]+/g, "").trim().slice(0, 40) || "chat"}.${ext}`;
+      const url = URL.createObjectURL(new Blob([content], { type: mime }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast.success(`Exported ${name}`);
+    } catch {
+      toast.error("Export failed");
+    }
+  };
+
+  const exportMarkdownFile = () => downloadFile(chatToMarkdown(chat), "md", "text/markdown");
+  const exportJsonFile = () =>
+    downloadFile(JSON.stringify(chat, null, 2), "json", "application/json");
+
   return (
     <div className="relative group">
       <button
@@ -75,6 +96,24 @@ function ChatRow({ chat, active, folders }) {
         ) : (
           <span className="flex-1 truncate text-[12.5px]">{chat.title || "New chat"}</span>
         )}
+      </button>
+      <button
+        type="button"
+        aria-label={chat.pinned ? "Unpin chat" : "Pin chat"}
+        title={chat.pinned ? "Unpin chat" : "Pin chat"}
+        onClick={(e) => {
+          e.stopPropagation();
+          togglePinChat(chat.id);
+          toast.success(chat.pinned ? "Chat unpinned" : "Chat pinned");
+        }}
+        className={`absolute right-[58px] top-1/2 -translate-y-1/2 w-6 h-6 rounded-xs flex items-center justify-center ${
+          chat.pinned
+            ? "opacity-0 group-hover:opacity-100 text-accent"
+            : "opacity-0 group-hover:opacity-100 text-faint hover:text-accent"
+        }`}
+        style={{ transition: "opacity 120ms var(--ease-out), color 120ms var(--ease-out)" }}
+      >
+        <Icon name="pin" size={12} />
       </button>
       <button
         type="button"
@@ -123,7 +162,13 @@ function ChatRow({ chat, active, folders }) {
         <MenuItem icon="edit" onClick={() => { setDraft(chat.title || ""); setRenaming(true); setMenuOpen(false); }}>
           Rename
         </MenuItem>
-        <MenuItem icon="download" onClick={() => { exportChat(); setMenuOpen(false); }}>
+        <MenuItem icon="download" onClick={() => { exportMarkdownFile(); setMenuOpen(false); }}>
+          Export as Markdown
+        </MenuItem>
+        <MenuItem icon="file" onClick={() => { exportJsonFile(); setMenuOpen(false); }}>
+          Export as JSON
+        </MenuItem>
+        <MenuItem icon="copy" onClick={() => { exportChat(); setMenuOpen(false); }}>
           Copy as Markdown
         </MenuItem>
         {folders.length > 0 && (

@@ -1,6 +1,6 @@
 import { createStore } from "./store";
 import { getModelHealth } from "../utils/rateLimiter";
-import { supportsTask } from "../utils/smartModelSelect";
+import { supportsTask, detectTaskType } from "../utils/smartModelSelect";
 import { loadLiveRankingSignals } from "../utils/advisorRanking";
 import { rankInfoFor, usageScore } from "./rankings";
 import { isFreeModel } from "./models";
@@ -129,6 +129,43 @@ export const PRIORITY_OPTIONS = [
  * Rank models for a task + priority. Pure and synchronous — always works offline.
  * Returns [{ model, score, parts: {cap, price, speed, rel, usage?}, live, rankInfo }]
  */
+/* ── Advisor Pro ──────────────────────────────────────────────────────────── */
+
+/** Map a free-text description of what the user wants to do → advisor task. */
+export function detectAdvisorTask(text = "") {
+  const lower = text.toLowerCase();
+  if (/(generate|create|make|draw|design).*(image|logo|poster|art|photo|picture|icon|illustration)|text[- ]to[- ]image/.test(lower))
+    return "text-to-image";
+  if (/(look at|read|describe|analyze|extract from).*(image|photo|screenshot|picture|diagram)|\bocr\b|vision/.test(lower))
+    return "vision";
+  if (/\b(prove|theorem|math|solve|equation|logic|puzzle|step[- ]by[- ]step|chain of thought|reason|analy[sz]e deeply|research plan|strategy)\b/.test(lower))
+    return "reasoning";
+  if (detectTaskType(text) === "coding") return "coding";
+  return "general";
+}
+
+/** Human-readable "why this pick" bullets for a ranked entry. */
+export function adviceReasons(entry, task = "general") {
+  if (!entry) return [];
+  const { model, parts, rankInfo, live } = entry;
+  const reasons = [];
+  if (parts.cap >= 75) reasons.push("Top ability tier for this task");
+  else if (parts.cap >= 55) reasons.push("Strong general ability");
+  if (isFreeModel(model)) reasons.push("Completely free to run");
+  else if (parts.price >= 80) reasons.push("Very low cost per token");
+  const ctx = Number(model.context_length || model.top_provider?.context_length || 0);
+  if (ctx >= 1_000_000) reasons.push("Huge 1M+ context window");
+  else if (ctx >= 200_000) reasons.push("Large 200K+ context window");
+  if (parts.speed >= 80) reasons.push("Fast measured response times");
+  if (parts.rel >= 85) reasons.push("No recent failures on your account");
+  if (rankInfo?.rank && rankInfo.rank <= 10) reasons.push(`#${rankInfo.rank} on OpenRouter this week`);
+  else if (rankInfo?.trendPct > 0) reasons.push(`Usage trending up ${rankInfo.trendPct}% this week`);
+  if (live > 0) reasons.push("Boosted by live community signals");
+  if (task === "coding" && supportsTask(entry.model, "coding")) reasons.push("Tuned for code generation");
+  if (task === "vision" && supportsTask(entry.model, "vision")) reasons.push("Accepts image input");
+  return reasons.slice(0, 4);
+}
+
 export function rankModels(models, { task = "general", priority = "balanced", limit = 12 } = {}) {
   const w = WEIGHTS[priority] || WEIGHTS.balanced;
   const signals = advisorStore.get().signals;

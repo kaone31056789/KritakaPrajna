@@ -2,13 +2,13 @@ import React, { useEffect, useMemo, useState, useId } from "react";
 import { motion, animate } from "framer-motion";
 import { useStore } from "../../core/store";
 import { modelsStore, selectModel, modelDisplayName, isFreeModel, formatPrice, contextLabel } from "../../core/models";
-import { advisorStore, refreshSignals, rankModels, PRIORITY_OPTIONS } from "../../core/advisor";
+import { advisorStore, refreshSignals, rankModels, PRIORITY_OPTIONS, detectAdvisorTask, adviceReasons } from "../../core/advisor";
 import { settingsStore, setSetting } from "../../core/settings";
 import { providerLabel } from "../../api/providerRouter";
 import { setView } from "../../core/nav";
 import { EASE_OUT } from "../../design/motion";
 import Icon from "../../ui/icons";
-import { Segmented, NeuBadge, NeuButton, SectionLabel, Spinner, EmptyState } from "../../ui/primitives";
+import { Segmented, NeuBadge, NeuButton, NeuInput, IconButton, SectionLabel, Spinner, EmptyState } from "../../ui/primitives";
 import { toast } from "../../ui/Toaster";
 import BrandIcon from "../../ui/BrandIcon";
 import { rankingsStore, refreshRankings, initRankings, formatTokens, timeAgo } from "../../core/rankings";
@@ -107,7 +107,7 @@ function ScoreBar({ label, value }) {
   );
 }
 
-function RankCard({ entry, rank, selected }) {
+function RankCard({ entry, rank, selected, comparing, onCompare }) {
   const { model, score, parts, live, rankInfo } = entry;
   const medal = rank === 0 ? "gold" : rank === 1 ? "silver" : rank === 2 ? "bronze" : null;
 
@@ -177,6 +177,13 @@ function RankCard({ entry, rank, selected }) {
         )}
         {live > 0 && <NeuBadge tone="accent">+{live} live</NeuBadge>}
         <div className="flex-1" />
+        <IconButton
+          name="layers"
+          size={13}
+          label={comparing ? "Remove from compare" : "Add to compare"}
+          active={comparing}
+          onClick={() => onCompare?.(model._selectionId)}
+        />
         <NeuButton
           size="sm"
           variant={selected ? "raised" : "accent"}
@@ -201,7 +208,7 @@ const MEDAL_META = [
 ];
 
 /** Large podium card for the top-3 ranked models. */
-function PodiumCard({ entry, rank, selected }) {
+function PodiumCard({ entry, rank, selected, comparing, onCompare }) {
   const { model, score, parts, live, rankInfo } = entry;
   const isWinner = rank === 0;
   const medal = MEDAL_META[rank];
@@ -223,6 +230,15 @@ function PodiumCard({ entry, rank, selected }) {
       >
         #{rank + 1} · {medal.label}
       </span>
+
+      <IconButton
+        name="layers"
+        size={12}
+        label={comparing ? "Remove from compare" : "Add to compare"}
+        active={comparing}
+        className="absolute top-2.5 right-2.5"
+        onClick={() => onCompare?.(model._selectionId)}
+      />
 
       <RingGauge
         score={score}
@@ -275,6 +291,123 @@ function PodiumCard({ entry, rank, selected }) {
   );
 }
 
+/** Side-by-side comparison of 2–3 ranked models with per-row winner highlight. */
+function ComparePanel({ entries, selectedId, onRemove }) {
+  if (entries.length < 2) return null;
+
+  const rows = [
+    { label: "Score", get: (e) => e.score },
+    { label: "Ability", get: (e) => e.parts.cap },
+    { label: "Price fit", get: (e) => e.parts.price },
+    { label: "Speed", get: (e) => e.parts.speed },
+    { label: "Uptime", get: (e) => e.parts.rel },
+    {
+      label: "Prompt $/1M",
+      get: (e) => (isFreeModel(e.model) ? 0 : Number(e.model.pricing?.prompt || 0) * 1_000_000),
+      fmt: (v) => (v === 0 ? "free" : `$${v.toFixed(2)}`),
+      lowerBetter: true,
+    },
+    {
+      label: "Context",
+      get: (e) => Number(e.model.context_length || e.model.top_provider?.context_length || 0),
+      fmt: (v, e) => contextLabel(e.model) || "—",
+    },
+    {
+      label: "Week rank",
+      get: (e) => e.rankInfo?.rank ?? null,
+      fmt: (v) => (v == null ? "—" : `#${v}`),
+      lowerBetter: true,
+    },
+  ];
+
+  const bestIdx = (row) => {
+    const vals = entries.map((e) => row.get(e));
+    let best = -1;
+    vals.forEach((v, i) => {
+      if (v == null) return;
+      if (best === -1 || (row.lowerBetter ? v < vals[best] : v > vals[best])) best = i;
+    });
+    return best;
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease: EASE_OUT }}
+      className="neu-raised rounded-lg p-5 mb-8 overflow-x-auto"
+    >
+      <div className="mb-4">
+        <SectionLabel>Head-to-head</SectionLabel>
+      </div>
+      <div
+        className="grid gap-x-4 gap-y-2 items-center min-w-[520px]"
+        style={{ gridTemplateColumns: `88px repeat(${entries.length}, minmax(0, 1fr))` }}
+      >
+        <div />
+        {entries.map((e) => (
+          <div key={e.model._selectionId} className="flex items-center gap-2 min-w-0">
+            <BrandIcon model={e.model} seed={e.model._selectionId} size={24} />
+            <div className="min-w-0 flex-1">
+              <p className="font-display font-semibold text-[12.5px] text-hi truncate">
+                {modelDisplayName(e.model)}
+              </p>
+              <p className="text-[9.5px] text-faint truncate">{providerLabel(e.model._provider)}</p>
+            </div>
+            <IconButton
+              name="close"
+              size={10}
+              label="Remove from compare"
+              onClick={() => onRemove(e.model._selectionId)}
+            />
+          </div>
+        ))}
+
+        {rows.map((row) => {
+          const best = bestIdx(row);
+          return (
+            <React.Fragment key={row.label}>
+              <span className="text-[9.5px] uppercase tracking-[0.12em] text-faint">{row.label}</span>
+              {entries.map((e, i) => {
+                const v = row.get(e);
+                const txt = row.fmt ? row.fmt(v, e) : v == null ? "—" : Math.round(v);
+                return (
+                  <span
+                    key={e.model._selectionId}
+                    className={`text-[12.5px] font-mono ${
+                      i === best ? "text-accent font-semibold" : "text-dim"
+                    }`}
+                  >
+                    {txt}
+                  </span>
+                );
+              })}
+            </React.Fragment>
+          );
+        })}
+
+        <div />
+        {entries.map((e) => (
+          <div key={e.model._selectionId}>
+            <NeuButton
+              size="sm"
+              variant={e.model._selectionId === selectedId ? "raised" : "accent"}
+              icon={e.model._selectionId === selectedId ? "check" : "zap"}
+              onClick={() => {
+                selectModel(e.model._selectionId);
+                toast.success(`Switched to ${modelDisplayName(e.model)}`);
+                setView("chat");
+              }}
+            >
+              {e.model._selectionId === selectedId ? "Selected" : "Use"}
+            </NeuButton>
+          </div>
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
 export default function AdvisorScreen() {
   const { models, selectedId } = useStore(modelsStore, (s) => ({ models: s.models, selectedId: s.selectedId }));
   const { signals, signalsLoading } = useStore(advisorStore);
@@ -285,7 +418,34 @@ export default function AdvisorScreen() {
     count: s.items.length,
   }));
   const [task, setTask] = useState("general");
+  const [query, setQuery] = useState("");
+  const [advice, setAdvice] = useState(null);
+  const [compareIds, setCompareIds] = useState([]);
   const priority = advisorPrefs?.priority || "balanced";
+
+  const runAdvise = () => {
+    const text = query.trim();
+    if (!text) return;
+    const detected = detectAdvisorTask(text);
+    setTask(detected);
+    const top = rankModels(models, { task: detected, priority, limit: 1 })[0];
+    if (!top) {
+      toast.error("No models available for that task");
+      return;
+    }
+    setAdvice({ task: detected, entry: top, reasons: adviceReasons(top, detected) });
+  };
+
+  const toggleCompare = (id) => {
+    setCompareIds((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= 3) {
+        toast.info("Compare up to 3 models");
+        return prev;
+      }
+      return [...prev, id];
+    });
+  };
 
   useEffect(() => {
     initRankings();
@@ -301,6 +461,11 @@ export default function AdvisorScreen() {
   );
 
   const liveActive = !!(signals?.sources?.hf || signals?.sources?.or || signals?.sources?.leaderboard);
+
+  const compareEntries = useMemo(
+    () => compareIds.map((id) => ranked.find((e) => e.model._selectionId === id)).filter(Boolean),
+    [compareIds, ranked]
+  );
 
   // Podium needs a full top-3; otherwise fall back to the plain grid.
   const podium = ranked.length >= 3 ? ranked.slice(0, 3) : [];
@@ -348,6 +513,71 @@ export default function AdvisorScreen() {
           </div>
         </div>
 
+        <div className="flex items-center gap-2.5 mb-5">
+          <div className="flex-1">
+            <NeuInput
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") runAdvise();
+              }}
+              placeholder={'Describe what you\'re working on — e.g. "refactor a React app" or "solve a math proof"'}
+            />
+          </div>
+          <NeuButton variant="accent" icon="wand" onClick={runAdvise}>
+            Advise me
+          </NeuButton>
+        </div>
+
+        {advice && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.28, ease: EASE_OUT }}
+            className="neu-raised rounded-lg p-5 mb-7 flex items-start gap-4 relative"
+          >
+            <BrandIcon model={advice.entry.model} seed={advice.entry.model._selectionId} size={40} glow />
+            <div className="min-w-0 flex-1">
+              <SectionLabel>Top pick · {advice.task}</SectionLabel>
+              <p className="font-display font-semibold text-[16px] text-hi mt-0.5 truncate">
+                {modelDisplayName(advice.entry.model)}
+              </p>
+              <ul className="mt-2 flex flex-col gap-1">
+                {advice.reasons.map((r) => (
+                  <li key={r} className="flex items-center gap-1.5 text-[12px] text-dim">
+                    <span className="text-ok shrink-0 flex">
+                      <Icon name="check" size={11} />
+                    </span>
+                    {r}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="flex flex-col items-end gap-2 mt-3">
+              <RingGauge score={advice.entry.score} size={64} stroke={6} glow />
+              <NeuButton
+                size="sm"
+                variant="accent"
+                icon="zap"
+                onClick={() => {
+                  selectModel(advice.entry.model._selectionId);
+                  toast.success(`Switched to ${modelDisplayName(advice.entry.model)}`);
+                  setView("chat");
+                }}
+              >
+                Use model
+              </NeuButton>
+            </div>
+            <IconButton
+              name="close"
+              size={11}
+              label="Dismiss"
+              className="absolute top-2.5 right-2.5"
+              onClick={() => setAdvice(null)}
+            />
+          </motion.div>
+        )}
+
         <div className="flex items-center gap-3 flex-wrap mb-7">
           <Segmented value={task} onChange={setTask} options={TASK_OPTIONS} />
           <div className="flex-1" />
@@ -358,6 +588,8 @@ export default function AdvisorScreen() {
             size="sm"
           />
         </div>
+
+        <ComparePanel entries={compareEntries} selectedId={selectedId} onRemove={toggleCompare} />
 
         <motion.div
           key={`${task}-${priority}`}
@@ -373,6 +605,8 @@ export default function AdvisorScreen() {
                   entry={entry}
                   rank={i}
                   selected={entry.model._selectionId === selectedId}
+                  comparing={compareIds.includes(entry.model._selectionId)}
+                  onCompare={toggleCompare}
                 />
               ))}
             </div>
@@ -392,6 +626,8 @@ export default function AdvisorScreen() {
                     entry={entry}
                     rank={i + podium.length}
                     selected={entry.model._selectionId === selectedId}
+                    comparing={compareIds.includes(entry.model._selectionId)}
+                    onCompare={toggleCompare}
                   />
                 ))}
               </div>
