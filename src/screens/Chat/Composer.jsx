@@ -14,6 +14,7 @@ import { NeuPopover, MenuItem, NeuTooltip } from "../../ui/primitives";
 import BrandIcon from "../../ui/BrandIcon";
 import { toast } from "../../ui/Toaster";
 import ModelPicker from "./ModelPicker";
+import PromptLibrary from "./PromptLibrary";
 import ModelAdvice from "./ModelAdvice";
 
 const WEB_MODES = ["auto", "always", "off"];
@@ -73,6 +74,7 @@ export default function Composer() {
   const [dragOver, setDragOver] = useState(false);
   const [slashIdx, setSlashIdx] = useState(0);
   const [slashDismissed, setSlashDismissed] = useState(false);
+  const [promptLibOpen, setPromptLibOpen] = useState(false);
   const taRef = useRef(null);
   const fileRef = useRef(null);
 
@@ -414,6 +416,18 @@ export default function Composer() {
             </NeuTooltip>
           )}
 
+          {/* Prompt library */}
+          <NeuTooltip label="Prompt library">
+            <button
+              type="button"
+              aria-label="Prompt library"
+              onClick={() => setPromptLibOpen(true)}
+              className="pressable w-8 h-8 rounded-full flex items-center justify-center text-dim hover:text-body hover:bg-surface-2"
+            >
+              <Icon name="bookmark" size={15} />
+            </button>
+          </NeuTooltip>
+
           {/* Attach */}
           <NeuTooltip label="Attach files">
             <button
@@ -469,6 +483,23 @@ export default function Composer() {
           )}
         </div>
       </div>
+
+      <PromptLibrary
+        open={promptLibOpen}
+        onClose={() => setPromptLibOpen(false)}
+        draft={text}
+        onInsert={(body) => {
+          setText((t) => (t.trim() ? `${t.replace(/\s+$/, "")}\n\n${body}` : body));
+          requestAnimationFrame(() => {
+            const ta = taRef.current;
+            if (ta) {
+              ta.focus();
+              ta.style.height = "auto";
+              ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+            }
+          });
+        }}
+      />
     </div>
   );
 }
