@@ -1,7 +1,7 @@
 import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { useStore } from "../../core/store";
-import { chatsStore, getActiveChat } from "../../core/chats";
+import { chatsStore, getActiveChat, setActiveChat } from "../../core/chats";
 import { sendStore, regenerateMessage, editAndResend, extractText, sendMessage } from "../../core/send";
 import { modelsStore, selectModel } from "../../core/models";
 import { formatCost } from "../../utils/costTracker";
@@ -281,9 +281,32 @@ function greeting() {
   return "Good evening";
 }
 
+const riseIn = {
+  initial: { opacity: 0, y: 10 },
+  animate: { opacity: 1, y: 0, transition: { duration: 0.22, ease: EASE_OUT } },
+};
+
 function Empty({ onPick }) {
+  const { chats, activeId } = useStore(chatsStore, (s) => ({ chats: s.chats, activeId: s.activeChatId }));
+  const stats = useMemo(() => {
+    const msgs = chats.reduce((n, c) => n + (c.messages?.length || 0), 0);
+    return [
+      { icon: "chat", label: "Chats", value: chats.length },
+      { icon: "layers", label: "Messages", value: msgs },
+      { icon: "pin", label: "Pinned", value: chats.filter((c) => c.pinned).length },
+    ];
+  }, [chats]);
+  const recent = useMemo(
+    () =>
+      chats
+        .filter((c) => c.id !== activeId && (c.messages?.length || 0) > 0)
+        .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))
+        .slice(0, 3),
+    [chats, activeId]
+  );
+
   return (
-    <div className="h-full flex flex-col items-center justify-center px-8">
+    <div className="h-full flex flex-col items-center justify-center px-8 overflow-y-auto">
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -293,25 +316,55 @@ function Empty({ onPick }) {
         <LogoMark size={38} glow />
       </motion.div>
       <h1 className="font-display font-semibold text-[22px] text-hi mb-1.5">{greeting()} — how can I help?</h1>
-      <p className="text-[13px] text-dim mb-7">Ask anything — or try one of these.</p>
+      <p className="text-[13px] text-dim mb-6">Ask anything — or try one of these.</p>
       <motion.div
-        className="grid grid-cols-2 gap-3 w-full max-w-[560px]"
+        className="w-full max-w-[560px]"
         initial="initial"
         animate="animate"
         variants={{ animate: { transition: { staggerChildren: 0.05, delayChildren: 0.1 } } }}
       >
-        {SUGGESTIONS.map((s) => (
-          <motion.button
-            key={s.text}
-            type="button"
-            variants={{ initial: { opacity: 0, y: 10 }, animate: { opacity: 1, y: 0, transition: { duration: 0.22, ease: EASE_OUT } } }}
-            onClick={() => onPick(s.text)}
-            className="pressable neu-raised-sm rounded-sm px-4 py-3.5 text-left flex items-start gap-3 hover:[box-shadow:var(--neu-raised)]"
-          >
-            <Icon name={s.icon} size={16} className="text-accent mt-0.5 shrink-0" />
-            <span className="text-[12.5px] text-body leading-snug">{s.text}</span>
-          </motion.button>
-        ))}
+        <motion.div variants={riseIn} className="flex items-center justify-center gap-2.5 mb-6">
+          {stats.map((st) => (
+            <div key={st.label} className="neu-inset rounded-full px-3.5 py-1.5 flex items-center gap-2">
+              <Icon name={st.icon} size={12} className="text-accent" />
+              <span className="text-[12px] font-semibold text-hi tabular-nums">{st.value}</span>
+              <span className="text-[11px] text-dim">{st.label}</span>
+            </div>
+          ))}
+        </motion.div>
+        <div className="grid grid-cols-2 gap-3">
+          {SUGGESTIONS.map((s) => (
+            <motion.button
+              key={s.text}
+              type="button"
+              variants={riseIn}
+              onClick={() => onPick(s.text)}
+              className="pressable neu-raised-sm rounded-sm px-4 py-3.5 text-left flex items-start gap-3 hover:[box-shadow:var(--neu-raised)]"
+            >
+              <Icon name={s.icon} size={16} className="text-accent mt-0.5 shrink-0" />
+              <span className="text-[12.5px] text-body leading-snug">{s.text}</span>
+            </motion.button>
+          ))}
+        </div>
+        {recent.length > 0 && (
+          <motion.div variants={riseIn} className="mt-6">
+            <p className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-faint mb-2 px-1">Pick up where you left off</p>
+            <div className="flex flex-col gap-1.5">
+              {recent.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setActiveChat(c.id)}
+                  className="pressable neu-raised-sm rounded-sm px-3.5 py-2.5 flex items-center gap-2.5 text-left hover:[box-shadow:var(--neu-raised)]"
+                >
+                  <Icon name="history" size={13} className="text-dim shrink-0" />
+                  <span className="text-[12.5px] text-body truncate flex-1">{c.title || "Untitled chat"}</span>
+                  <span className="text-[10.5px] text-faint tabular-nums shrink-0">{c.messages?.length || 0} msgs</span>
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        )}
       </motion.div>
     </div>
   );

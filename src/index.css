@@ -28,3 +28,10 @@ body {
   animation: none;
   mix-blend-mode: normal;
 }
+
+/* ─── Adaptive density: compact ───
+   Chromium-only app, so `zoom` gives a crisp uniform scale; message rows and
+   the composer get a further squeeze so chat fits noticeably more content. */
+[data-density="compact"] body { zoom: 0.93; }
+[data-density="compact"] .msg-block { padding-top: 2px; padding-bottom: 2px; }
+[data-density="compact"] .markdown-body { line-height: 1.5; }

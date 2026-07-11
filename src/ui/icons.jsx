@@ -56,6 +56,7 @@ const PATHS = {
   gauge: <><path d="M5 18.5a8.5 8.5 0 1 1 14 0" /><path d="M12 14.5 15.5 9" /><circle cx="12" cy="15" r="1.3" /></>,
   bookmark: <path d="M7 4.5h10a1 1 0 0 1 1 1V20l-6-3.5L6 20V5.5a1 1 0 0 1 1-1Z" />,
   wand: <><path d="m14 6 4 4L7.5 20.5l-4-4L14 6Z" /><path d="m12.5 7.5 4 4" /><path d="M18.5 3.5v2M17.5 6.5l1.5-1.5M20.5 6.5 19 5" /></>,
+  palette: <><path d="M12 3.5a8.5 8.5 0 1 0 0 17h1.5a2 2 0 0 0 1.4-3.4c-.9-.9-.3-2.6 1-2.6h2.6a2.5 2.5 0 0 0 2.5-2.5A8.5 8.5 0 0 0 12 3.5Z" /><path d="M7.5 12h.01M9.5 8h.01M13.5 7h.01M16.5 9.5h.01" /></>,
 };
 
 export default function Icon({ name, size = 16, strokeWidth = 1.5, className = "", style }) {

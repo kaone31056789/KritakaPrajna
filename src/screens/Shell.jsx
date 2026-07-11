@@ -15,6 +15,7 @@ import BrandIcon from "../ui/BrandIcon";
 import { LogoMark } from "../ui/Logo";
 import CommandPalette from "../ui/CommandPalette";
 import { Toaster } from "../ui/Toaster";
+import Tour from "../ui/Tour";
 import ErrorBoundary from "../ui/ErrorBoundary";
 
 const ChatScreen = lazy(() => import("./Chat"));
@@ -288,6 +289,7 @@ export default function Shell() {
 
       <CommandPalette />
       <Toaster />
+      <Tour />
     </div>
   );
 }

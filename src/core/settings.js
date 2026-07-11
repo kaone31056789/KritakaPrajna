@@ -15,6 +15,7 @@ const K = {
   shortcuts: "kp_shortcuts",
   webMode: "kp_web_mode",
   sendKey: "kp_send_key",
+  density: "kp_density",
 };
 
 export const DEFAULT_SYSTEM_PROMPT = `KritakaPrajna assistant rules:
@@ -44,7 +45,16 @@ export const settingsStore = createStore({
   shortcuts: mergeShortcuts(readJSON(K.shortcuts, {}) || {}),
   webMode: readEnum(K.webMode, ["auto", "always", "off"], "auto"),
   sendKey: readEnum(K.sendKey, ["enter", "mod-enter"], "enter"),
+  density: readEnum(K.density, ["comfortable", "compact"], "comfortable"),
 });
+
+/* Adaptive density — reflected as a root attribute so CSS can compact spacing. */
+export function applyDensity(density = settingsStore.get().density) {
+  if (typeof document !== "undefined") {
+    document.documentElement.setAttribute("data-density", density);
+  }
+}
+applyDensity();
 
 const RAW_KEYS = new Set([
   "systemPrompt",
@@ -53,10 +63,12 @@ const RAW_KEYS = new Set([
   "modelPref",
   "webMode",
   "sendKey",
+  "density",
 ]);
 
 export function setSetting(name, value) {
   settingsStore.set({ [name]: value });
+  if (name === "density") applyDensity(value);
   const storageKey = K[name];
   if (!storageKey) return;
   if (RAW_KEYS.has(name)) writeRaw(storageKey, value);

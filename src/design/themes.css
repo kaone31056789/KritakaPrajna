@@ -826,18 +826,21 @@
   --backdrop: rgba(2, 5, 10, 0.35);
 }
 [data-skin="liquid-glass"][data-theme="light"] {
-  --bg: #dfe9f5; --bg-deep: rgba(255, 255, 255, 0.35);
-  --surface: rgba(255, 255, 255, 0.42); --surface-2: rgba(255, 255, 255, 0.58); --surface-3: rgba(255, 255, 255, 0.75);
-  --line: rgba(255, 255, 255, 0.9); --line-strong: rgba(70, 100, 150, 0.35);
-  --text-hi: #0e1a2b; --text: #33455e; --text-dim: #67788f; --text-faint: #9aa9bd;
+  --bg: #d6e2f2; --bg-deep: rgba(255, 255, 255, 0.3);
+  /* near-clear panes — the liquid must show through */
+  --surface: rgba(255, 255, 255, 0.26); --surface-2: rgba(255, 255, 255, 0.4); --surface-3: rgba(255, 255, 255, 0.56);
+  --line: rgba(255, 255, 255, 0.95); --line-strong: rgba(50, 85, 140, 0.42);
+  --text-hi: #0e1a2b; --text: #2e4059; --text-dim: #5f7189; --text-faint: #91a1b6;
   --accent: #0a84ff; --accent-2: #6e5bff; --accent-ink: #ffffff;
   --accent-glow: rgba(10, 132, 255, 0.4); --accent-soft: rgba(10, 132, 255, 0.12);
-  --neu-raised-sm: 0 10px 30px rgba(40, 70, 120, 0.18), inset 0 1.5px 0 #ffffff, inset 0 -1px 0 rgba(160, 200, 255, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.55);
-  --neu-raised: 0 18px 50px rgba(40, 70, 120, 0.22), inset 0 2px 1px #ffffff, inset 0 -1.5px 1px rgba(160, 200, 255, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.6);
-  --neu-raised-lg: 0 30px 90px rgba(40, 70, 120, 0.28), inset 0 2.5px 1px #ffffff, inset 0 -2px 2px rgba(160, 200, 255, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.65);
-  --neu-inset: inset 0 3px 14px rgba(40, 70, 120, 0.18), inset 0 -1px 0 #ffffff;
-  --neu-inset-sm: inset 0 2px 8px rgba(40, 70, 120, 0.14), inset 0 -1px 0 rgba(255, 255, 255, 0.8);
-  --backdrop: rgba(190, 210, 235, 0.4);
+  /* light-mode lens: bright specular top rim + DARK refraction contour (what sells
+     glass on a light bg) + cool caustic drop shadow */
+  --neu-raised-sm: 0 12px 32px rgba(30, 60, 110, 0.22), 0 1px 2px rgba(30, 60, 110, 0.18), inset 0 1.5px 0 rgba(255, 255, 255, 0.95), inset 0 -1px 1px rgba(70, 110, 170, 0.3), inset 1px 0 0 rgba(255, 255, 255, 0.55), inset -1px 0 0 rgba(255, 255, 255, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.4);
+  --neu-raised: 0 20px 55px rgba(30, 60, 110, 0.26), 0 2px 3px rgba(30, 60, 110, 0.2), inset 0 2px 1px rgba(255, 255, 255, 0.98), inset 0 -1.5px 1px rgba(70, 110, 170, 0.34), inset 1.5px 0 1px rgba(255, 255, 255, 0.5), inset -1.5px 0 1px rgba(255, 255, 255, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.45);
+  --neu-raised-lg: 0 34px 90px rgba(30, 60, 110, 0.32), 0 3px 5px rgba(30, 60, 110, 0.22), inset 0 2.5px 1px #ffffff, inset 0 -2px 2px rgba(70, 110, 170, 0.38), inset 2px 0 1px rgba(255, 255, 255, 0.55), inset -2px 0 1px rgba(255, 255, 255, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.5);
+  --neu-inset: inset 0 3px 14px rgba(30, 60, 110, 0.2), inset 0 -1px 0 rgba(255, 255, 255, 0.9), inset 0 0 0 1px rgba(120, 150, 200, 0.18);
+  --neu-inset-sm: inset 0 2px 8px rgba(30, 60, 110, 0.16), inset 0 -1px 0 rgba(255, 255, 255, 0.85);
+  --backdrop: rgba(175, 197, 228, 0.45);
 }
 /* The liquid itself — vivid, saturated, always moving. Glass needs light behind it. */
 [data-skin="liquid-glass"] .aurora {
@@ -849,7 +852,16 @@
   filter: blur(10px) saturate(140%);
   animation: kp-liquid-flow 18s var(--ease-in-out) infinite alternate;
 }
-[data-skin="liquid-glass"][data-theme="light"] .aurora { opacity: 0.55; }
+/* Light mode: DON'T dim the liquid — brighten it. Clear glass over a white void is
+   invisible; over vivid liquid it reads instantly. */
+[data-skin="liquid-glass"][data-theme="light"] .aurora {
+  background:
+    radial-gradient(44rem 34rem at 12% -10%, rgba(50, 135, 255, 0.62), transparent 58%),
+    radial-gradient(40rem 32rem at 110% 22%, rgba(158, 96, 255, 0.52), transparent 60%),
+    radial-gradient(34rem 30rem at 55% 120%, rgba(14, 200, 168, 0.45), transparent 58%),
+    radial-gradient(26rem 22rem at 80% -12%, rgba(255, 105, 190, 0.42), transparent 55%);
+  opacity: 1;
+}
 @keyframes kp-liquid-flow {
   0%   { transform: translate3d(0, 0, 0) scale(1); filter: blur(10px) saturate(140%) hue-rotate(0deg); }
   50%  { transform: translate3d(2%, 3%, 0) scale(1.06); filter: blur(14px) saturate(165%) hue-rotate(16deg); }
@@ -862,6 +874,14 @@
 [data-skin="liquid-glass"] .bezel {
   backdrop-filter: blur(28px) saturate(210%) brightness(1.12);
   -webkit-backdrop-filter: blur(28px) saturate(210%) brightness(1.12);
+}
+/* Light lens: no brightness blowout — saturate what's behind, add a touch of contrast */
+[data-skin="liquid-glass"][data-theme="light"] .neu-raised,
+[data-skin="liquid-glass"][data-theme="light"] .neu-raised-sm,
+[data-skin="liquid-glass"][data-theme="light"] .neu-raised-lg,
+[data-skin="liquid-glass"][data-theme="light"] .bezel {
+  backdrop-filter: blur(24px) saturate(200%) brightness(1.03) contrast(1.02);
+  -webkit-backdrop-filter: blur(24px) saturate(200%) brightness(1.03) contrast(1.02);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -900,6 +920,11 @@
 [data-skin="glassmorphism"] .neu-raised-sm,
 [data-skin="glassmorphism"] .neu-raised-lg {
   background-image: linear-gradient(115deg, rgba(255, 255, 255, 0.09), transparent 38%);
+}
+[data-skin="glassmorphism"][data-theme="light"] .neu-raised,
+[data-skin="glassmorphism"][data-theme="light"] .neu-raised-sm,
+[data-skin="glassmorphism"][data-theme="light"] .neu-raised-lg {
+  background-image: linear-gradient(115deg, rgba(255, 255, 255, 0.65), rgba(255, 255, 255, 0.1) 32%, transparent 46%);
 }
 
 /* Claymorphism — chunky friendly type to match the dough */
@@ -954,6 +979,11 @@
 [data-skin="frutiger-aero"] .neu-raised-lg {
   background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.05) 40%, transparent 62%);
 }
+[data-skin="frutiger-aero"][data-theme="light"] .neu-raised,
+[data-skin="frutiger-aero"][data-theme="light"] .neu-raised-sm,
+[data-skin="frutiger-aero"][data-theme="light"] .neu-raised-lg {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.2) 42%, transparent 64%);
+}
 
 /* Cyberpunk — corner-cut panels, neon-glow uppercase display */
 [data-skin="cyberpunk"] .neu-raised,
@@ -993,6 +1023,15 @@
   background-image:
     radial-gradient(120% 70% at 50% -30%, rgba(255, 255, 255, 0.16), transparent 55%),
     linear-gradient(205deg, rgba(255, 255, 255, 0.1), transparent 28%, transparent 68%, rgba(140, 190, 255, 0.08) 92%);
+}
+/* Light mode: hard diagonal specular streak (the “wet highlight” of real glass) */
+[data-skin="liquid-glass"][data-theme="light"] .neu-raised,
+[data-skin="liquid-glass"][data-theme="light"] .neu-raised-sm,
+[data-skin="liquid-glass"][data-theme="light"] .neu-raised-lg {
+  background-image:
+    linear-gradient(115deg, rgba(255, 255, 255, 0.68) 0%, rgba(255, 255, 255, 0.14) 22%, transparent 40%),
+    radial-gradient(120% 70% at 50% -30%, rgba(255, 255, 255, 0.5), transparent 55%),
+    linear-gradient(205deg, rgba(255, 255, 255, 0.3), transparent 30%, transparent 62%, rgba(110, 160, 235, 0.22) 94%);
 }
 @media (hover: hover) and (pointer: fine) {
   [data-skin="liquid-glass"] .liftable:hover { transform: translateY(-2px) scale(1.012); }

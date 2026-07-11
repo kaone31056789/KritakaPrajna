@@ -173,3 +173,17 @@ export const THEME_IDS = THEMES.map((t) => t.id);
 export function themeById(id) {
   return THEMES.find((t) => t.id === id) || THEMES[0];
 }
+
+/* Accent presets — shared by Settings and the Command Palette. */
+export const ACCENT_PRESETS = [
+  { hex: "#e8674a", name: "Ember" },
+  { hex: "#f0a832", name: "Amber" },
+  { hex: "#e4c65b", name: "Gold" },
+  { hex: "#7bc86c", name: "Fern" },
+  { hex: "#2ec4a6", name: "Teal" },
+  { hex: "#4aa8e8", name: "Sky" },
+  { hex: "#5b6ee8", name: "Indigo" },
+  { hex: "#9b6ce8", name: "Violet" },
+  { hex: "#e86cbf", name: "Orchid" },
+  { hex: "#e8506e", name: "Rose" },
+];

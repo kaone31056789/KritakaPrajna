@@ -11,8 +11,8 @@ import { PROVIDER_META } from "../../api/providerRouter";
 import { modelsStore, modelDisplayName } from "../../core/models";
 import { loadModels } from "../../core/models";
 import { EASE_OUT } from "../../design/motion";
-import { themeStore, setTheme, switchSkin } from "../../core/theme";
-import { THEMES } from "../../design/themes";
+import { themeStore, setTheme, switchSkin, setAccent } from "../../core/theme";
+import { THEMES, ACCENT_PRESETS } from "../../design/themes";
 import Icon from "../../ui/icons";
 import {
   Segmented,
@@ -283,6 +283,71 @@ function ThemeCard({ t, active, mode, onPick }) {
   );
 }
 
+function AccentPanel() {
+  const { accent } = useStore(themeStore);
+  return (
+    <div className="neu-raised-sm rounded-sm p-4">
+      <div className="flex items-center justify-between gap-4 flex-wrap mb-3">
+        <div>
+          <p className="text-[12.5px] font-semibold text-hi">Accent color</p>
+          <p className="text-[11px] text-faint">
+            Overrides the theme's accent everywhere — or leave it on the theme default.
+          </p>
+        </div>
+        {accent && (
+          <NeuButton size="sm" variant="ghost" onClick={() => setAccent("")}>
+            Theme default
+          </NeuButton>
+        )}
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        {ACCENT_PRESETS.map((p) => (
+          <button
+            key={p.hex}
+            type="button"
+            title={p.name}
+            aria-label={`Accent ${p.name}`}
+            onClick={() => setAccent(p.hex)}
+            className="w-7 h-7 rounded-full transition-transform hover:scale-110 focus-visible:outline focus-visible:outline-2"
+            style={{
+              background: p.hex,
+              boxShadow:
+                accent === p.hex
+                  ? `0 0 0 2px var(--bg-primary), 0 0 0 4px ${p.hex}`
+                  : "inset 0 1px 2px rgba(0,0,0,0.25)",
+            }}
+          />
+        ))}
+        <label
+          className="relative w-7 h-7 rounded-full overflow-hidden cursor-pointer transition-transform hover:scale-110 neu-raised-sm"
+          title="Custom color"
+          style={{
+            background:
+              accent && !ACCENT_PRESETS.some((p) => p.hex === accent)
+                ? accent
+                : "conic-gradient(#e8674a, #e4c65b, #7bc86c, #4aa8e8, #9b6ce8, #e8506e, #e8674a)",
+            boxShadow:
+              accent && !ACCENT_PRESETS.some((p) => p.hex === accent)
+                ? `0 0 0 2px var(--bg-primary), 0 0 0 4px ${accent}`
+                : undefined,
+          }}
+        >
+          <input
+            type="color"
+            value={accent || "#e8674a"}
+            onChange={(e) => setAccent(e.target.value)}
+            aria-label="Custom accent color"
+            className="absolute inset-0 opacity-0 cursor-pointer"
+          />
+        </label>
+        {accent && (
+          <span className="text-[10.5px] font-mono text-dim ml-1">{accent}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AppearanceTab() {
   const { theme, skin } = useStore(themeStore);
   const current = THEMES.find((t) => t.id === skin);
@@ -303,6 +368,8 @@ function AppearanceTab() {
           ]}
         />
       </div>
+
+      <AccentPanel />
 
       <div>
         <div className="flex items-baseline justify-between gap-3 mb-3 flex-wrap">
@@ -398,6 +465,18 @@ function BehaviorTab() {
               { value: "auto", label: "Auto" },
               { value: "always", label: "Always" },
               { value: "off", label: "Off" },
+            ]}
+          />
+        </div>
+        <div className="neu-raised-sm rounded-sm p-4">
+          <p className="text-[12.5px] font-semibold text-hi mb-2.5">Density</p>
+          <Segmented
+            size="sm"
+            value={s.density}
+            onChange={(v) => setSetting("density", v)}
+            options={[
+              { value: "comfortable", label: "Comfortable" },
+              { value: "compact", label: "Compact" },
             ]}
           />
         </div>
