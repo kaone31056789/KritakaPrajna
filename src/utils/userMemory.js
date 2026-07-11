@@ -434,6 +434,38 @@ export function removeUserMemoryEntry(memory, category, index) {
   };
 }
 
+/* ── Explicit memory commands ("remember that …" / "forget …") ────────────── */
+
+const REMEMBER_RE = /^(?:please\s+)?remember(?:\s+that)?[:,]?\s+(.{3,240})$/i;
+const FORGET_RE = /^(?:please\s+)?forget(?:\s+about)?[:,]?\s+(.{2,240})$/i;
+
+/** Detect an explicit remember/forget instruction. Returns {action, payload} or null. */
+export function parseExplicitMemoryCommand(text) {
+  const value = cleanEntry(text);
+  if (!value) return null;
+  const rem = value.match(REMEMBER_RE);
+  if (rem) return { action: "remember", payload: cleanEntry(rem[1]) };
+  const fog = value.match(FORGET_RE);
+  if (fog) return { action: "forget", payload: cleanEntry(fog[1]) };
+  return null;
+}
+
+/** Best-fit category for an explicitly remembered fact. */
+export function categorizeExplicitMemory(payload) {
+  const lower = String(payload || "").toLowerCase();
+  if (
+    /\b(code|coding|python|typescript|javascript|java|rust|c\+\+|c#|golang|php|ruby|swift|kotlin|sql|comments?|functions?|class(es)?|indent|tabs?|spaces)\b/.test(
+      lower
+    )
+  ) {
+    return "coding";
+  }
+  if (/\b(answers?|responses?|replies|explain|explanations?|tone|format|language|short|brief|detailed|step)\b/.test(lower)) {
+    return "preferences";
+  }
+  return "context";
+}
+
 export function detectMemoryFromMessage(text) {
   const value = cleanEntry(text);
   if (!value || isSensitiveMemoryText(value)) return normalizeUserMemory(DEFAULT_USER_MEMORY);

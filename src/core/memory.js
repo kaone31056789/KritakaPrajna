@@ -6,6 +6,9 @@ import {
   normalizeUserMemory,
   mergeUserMemory,
   detectMemoryFromExchange,
+  isSensitiveMemoryText,
+  parseExplicitMemoryCommand,
+  categorizeExplicitMemory,
 } from "../utils/userMemory";
 
 /* User memory — synced to electron-store when available, localStorage otherwise. */
@@ -41,8 +44,45 @@ export async function resetMemory() {
   await saveMemory({ ...DEFAULT_USER_MEMORY });
 }
 
-/** Auto-capture memory from a completed exchange (only when autoMode is on). */
+/** Explicitly remember a fact (bypasses autoMode). Returns {category, entry} or null. */
+export function rememberExplicit(text) {
+  const entry = String(text || "").trim();
+  if (!entry || isSensitiveMemoryText(entry)) return null;
+  const { memory } = memoryStore.get();
+  const category = categorizeExplicitMemory(entry);
+  const merged = mergeUserMemory(memory, {
+    ...DEFAULT_USER_MEMORY,
+    [category]: [entry],
+    autoMode: memory.autoMode,
+  });
+  saveMemory(merged);
+  return { category, entry };
+}
+
+/** Remove all memory entries containing `query` (case-insensitive). Returns removed count. */
+export function forgetMatching(query) {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return 0;
+  const { memory } = memoryStore.get();
+  let removed = 0;
+  const next = { ...memory };
+  for (const def of MEMORY_CATEGORY_DEFS) {
+    const before = memory[def.id] || [];
+    const kept = before.filter((e) => !e.toLowerCase().includes(q));
+    removed += before.length - kept.length;
+    next[def.id] = kept;
+  }
+  if (removed > 0) saveMemory(next);
+  return removed;
+}
+
+/** Auto-capture memory from a completed exchange (explicit commands always work). */
 export function captureMemoryFromExchange(userText, aiText) {
+  // "remember that …" / "forget …" work even when autoMode is off
+  const explicit = parseExplicitMemoryCommand(userText);
+  if (explicit?.action === "remember") rememberExplicit(explicit.payload);
+  else if (explicit?.action === "forget") forgetMatching(explicit.payload);
+
   const { memory } = memoryStore.get();
   if (!memory.autoMode) return;
   const additions = detectMemoryFromExchange(userText, aiText);

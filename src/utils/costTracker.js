@@ -106,6 +106,40 @@ export function resetLifetimeCost(value = 0) {
   return value;
 }
 
+/* ── Monthly spend (for the cost cap) ─────────────────────────────────────── */
+
+const MONTHLY_SPEND_KEY = "openrouter_monthly_spend";
+
+function currentMonth() {
+  return new Date().toISOString().slice(0, 7); // "2026-02"
+}
+
+/** Month-to-date spend in dollars; resets automatically when the month rolls over. */
+export function getMonthlySpend() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(MONTHLY_SPEND_KEY) || "null");
+    return raw && raw.month === currentMonth() ? Number(raw.total) || 0 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function addMonthlySpend(amount) {
+  if (!amount || amount <= 0) return getMonthlySpend();
+  const updated = getMonthlySpend() + amount;
+  try {
+    localStorage.setItem(MONTHLY_SPEND_KEY, JSON.stringify({ month: currentMonth(), total: updated }));
+  } catch {}
+  return updated;
+}
+
+export function resetMonthlySpend() {
+  try {
+    localStorage.setItem(MONTHLY_SPEND_KEY, JSON.stringify({ month: currentMonth(), total: 0 }));
+  } catch {}
+  return 0;
+}
+
 /**
  * Calculate session cost from all chat messages that have a cost field.
  */

@@ -16,6 +16,8 @@ const K = {
   webMode: "kp_web_mode",
   sendKey: "kp_send_key",
   density: "kp_density",
+  costCapMonthly: "kp_cost_cap_monthly",
+  autoFailover: "kp_auto_failover",
 };
 
 export const DEFAULT_SYSTEM_PROMPT = `KritakaPrajna assistant rules:
@@ -46,6 +48,8 @@ export const settingsStore = createStore({
   webMode: readEnum(K.webMode, ["auto", "always", "off"], "auto"),
   sendKey: readEnum(K.sendKey, ["enter", "mod-enter"], "enter"),
   density: readEnum(K.density, ["comfortable", "compact"], "comfortable"),
+  costCapMonthly: Number(readRaw(K.costCapMonthly, 0)) || 0,
+  autoFailover: readJSON(K.autoFailover, true) !== false,
 });
 
 /* Adaptive density — reflected as a root attribute so CSS can compact spacing. */

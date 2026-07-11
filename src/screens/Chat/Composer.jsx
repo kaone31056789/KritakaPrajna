@@ -5,6 +5,7 @@ import { chatsStore, setActivePersona, newChat } from "../../core/chats";
 import { modelsStore, getSelectedModel, modelDisplayName } from "../../core/models";
 import { settingsStore, setSetting } from "../../core/settings";
 import { sendMessage, sendStore, stopStreaming } from "../../core/send";
+import { rememberExplicit, forgetMatching } from "../../core/memory";
 import { estimateTokensFromText } from "../../utils/tokenOptimizer";
 import { REASONING_MODES, supportsReasoningModel } from "../../utils/reasoningControls";
 import { EASE_OUT } from "../../design/motion";
@@ -39,6 +40,8 @@ const SLASH_COMMANDS = [
   { cmd: "ultrathink", icon: "spark", hint: "Deep thinking — max reasoning effort", run: (c) => c.setDepth("deep") },
   { cmd: "new", icon: "plus", hint: "Start a new chat", run: (c) => c.newChat() },
   { cmd: "clear", icon: "refresh", hint: "Clear — start a fresh chat", run: (c) => c.newChat() },
+  { cmd: "remember", icon: "bookmark", hint: "Save a fact to memory — /remember <text>", run: (c) => c.insert("/remember ") },
+  { cmd: "forget", icon: "trash", hint: "Remove matching memory — /forget <text>", run: (c) => c.insert("/forget ") },
   { cmd: "help", icon: "command", hint: "List slash commands", run: (c) => c.help() },
 ];
 
@@ -133,6 +136,10 @@ export default function Composer() {
           toast.info("New chat");
         },
         help: () => toast.info(`Commands: ${SLASH_COMMANDS.map((x) => `/${x.cmd}`).join("  ")}`),
+        insert: (s) => {
+          setText(s);
+          requestAnimationFrame(() => taRef.current?.focus());
+        },
       });
     },
     [cycleWeb, setDepth, activePersonaId]
@@ -163,6 +170,23 @@ export default function Composer() {
   const doSend = useCallback(() => {
     const trimmed = text.trim();
     if ((!trimmed && uploads.length === 0) || busy) return;
+    // Argument slash commands — handled locally, never sent to the model
+    const argCmd = trimmed.match(/^\/(remember|forget)\s+(.+)/is);
+    if (argCmd) {
+      const payload = argCmd[2].trim();
+      if (argCmd[1].toLowerCase() === "remember") {
+        const saved = rememberExplicit(payload);
+        toast.info(saved ? `Remembered under ${saved.category}` : "Couldn't save that (empty or sensitive)");
+      } else {
+        const n = forgetMatching(payload);
+        toast.info(n > 0 ? `Forgot ${n} ${n === 1 ? "entry" : "entries"}` : "No matching memory found");
+      }
+      setText("");
+      requestAnimationFrame(() => {
+        if (taRef.current) taRef.current.style.height = "auto";
+      });
+      return;
+    }
     sendMessage({ chatId: activeChatId, text: trimmed, uploads });
     setText("");
     setUploads([]);

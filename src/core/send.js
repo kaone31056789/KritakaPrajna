@@ -17,8 +17,13 @@ import {
   resolveGenerationSettings,
   compressSystemPrompt,
 } from "../utils/tokenOptimizer";
-import { calculateCost } from "../utils/costTracker";
-import { addLifetimeCost } from "../utils/costTracker";
+import {
+  calculateCost,
+  addLifetimeCost,
+  isModelFree,
+  getMonthlySpend,
+  addMonthlySpend,
+} from "../utils/costTracker";
 import { recordProviderUsage } from "../utils/usageTracker";
 import { recordSuccess, recordFailure } from "../utils/rateLimiter";
 import { isWebIntent, isNewsIntent, isDetailedIntent, buildSearchQuery } from "../utils/intentDetector";
@@ -148,6 +153,17 @@ export async function sendMessage({ chatId, text, uploads = [], skipUserAppend =
     return;
   }
 
+  /* ── Monthly cost cap (paid models only — free models always pass) ── */
+  const costCap = Number(settings.costCapMonthly) || 0;
+  if (costCap > 0 && !isModelFree(model.pricing) && getMonthlySpend() >= costCap) {
+    appendMessage(id, {
+      role: "assistant",
+      content: "",
+      error: `Monthly cost cap of $${costCap.toFixed(2)} reached. Switch to a free model or raise the cap in Settings → Behavior.`,
+    });
+    return;
+  }
+
   const normalized = normalizeUserInputForSend(text, { maxChars: settings.maxUserChars });
   const cleanText = normalized?.text ?? String(text || "").trim();
   if (!cleanText && uploads.length === 0) return;
@@ -200,7 +216,10 @@ export async function sendMessage({ chatId, text, uploads = [], skipUserAppend =
         },
       });
       recordProviderUsage(model._provider, usage || {}, cost || 0);
-      if (cost > 0) addLifetimeCost(cost);
+      if (cost > 0) {
+        addLifetimeCost(cost);
+        addMonthlySpend(cost);
+      }
       return;
     }
 
@@ -249,43 +268,63 @@ export async function sendMessage({ chatId, text, uploads = [], skipUserAppend =
     const systemPrompt = buildSystemPrompt({ persona, webContext, hasWeb: sources.length > 0 });
     apiMessages = [{ role: "system", content: systemPrompt }, ...apiMessages];
 
-    /* ── Stream ── */
+    /* ── Stream (auto-failover retries once on another provider/model) ── */
     appendMessage(id, { role: "assistant", content: "", streaming: true, ts: Date.now() });
-    const gen = resolveGenerationSettings(model._provider, settings.responseLength);
 
-    let streamed = "";
-    const { text: finalText, usage } = await routeStream(providers, model, apiMessages, {
-      signal: controller.signal,
-      reasoningDepth: settings.reasoningDepth,
-      maxTokens: gen.maxTokens,
-      temperature: gen.temperature,
-      topP: gen.topP,
-      onChunk: (chunk) => {
-        streamed += chunk;
-        patchMessage(id, -1, { content: streamed });
-      },
-    });
+    const streamOnce = async (mdl, failoverFrom = null) => {
+      const gen = resolveGenerationSettings(mdl._provider, settings.responseLength);
+      let streamed = "";
+      const { text: finalText, usage } = await routeStream(providers, mdl, apiMessages, {
+        signal: controller.signal,
+        reasoningDepth: settings.reasoningDepth,
+        maxTokens: gen.maxTokens,
+        temperature: gen.temperature,
+        topP: gen.topP,
+        onChunk: (chunk) => {
+          streamed += chunk;
+          patchMessage(id, -1, { content: streamed });
+        },
+      });
 
-    const answer = finalText || streamed;
-    const cost = calculateCost(usage, model.pricing);
-    patchMessage(id, -1, {
-      streaming: false,
-      content: answer,
-      _meta: {
-        modelId: model.id,
-        modelName: model.name || model.id,
-        provider: model._provider,
-        elapsedMs: Date.now() - startedAt,
-        usage: usage || null,
-        cost,
-        webSources,
-      },
-    });
+      const answer = finalText || streamed;
+      const cost = calculateCost(usage, mdl.pricing);
+      patchMessage(id, -1, {
+        streaming: false,
+        content: answer,
+        _meta: {
+          modelId: mdl.id,
+          modelName: mdl.name || mdl.id,
+          provider: mdl._provider,
+          elapsedMs: Date.now() - startedAt,
+          usage: usage || null,
+          cost,
+          webSources,
+          ...(failoverFrom ? { failoverFrom } : {}),
+        },
+      });
 
-    recordSuccess(model.id, Date.now() - startedAt);
-    recordProviderUsage(model._provider, usage || {}, cost || 0);
-    if (cost > 0) addLifetimeCost(cost);
-    captureMemoryFromExchange(cleanText, answer);
+      recordSuccess(mdl.id, Date.now() - startedAt);
+      recordProviderUsage(mdl._provider, usage || {}, cost || 0);
+      if (cost > 0) {
+        addLifetimeCost(cost);
+        addMonthlySpend(cost);
+      }
+      captureMemoryFromExchange(cleanText, answer);
+    };
+
+    try {
+      await streamOnce(model);
+    } catch (err) {
+      if (controller.signal.aborted) throw err;
+      recordFailure(model.id, String(err?.message || ""));
+      const fallback = settings.autoFailover
+        ? suggestFallbackAcrossProviders(models, model._selectionId || selectedId, providers)
+        : null;
+      if (!fallback?.model || fallback.model.id === model.id) throw err;
+      // Reset the message slot and retry once on the fallback route
+      patchMessage(id, -1, { content: "", streaming: true, error: undefined });
+      await streamOnce(fallback.model, model.name || model.id);
+    }
   } catch (err) {
     const aborted = controller.signal.aborted || /abort/i.test(String(err?.message || ""));
     recordFailure(model.id, String(err?.message || ""));

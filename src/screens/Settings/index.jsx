@@ -6,7 +6,13 @@ import { chatsStore, savePersona, deletePersona } from "../../core/chats";
 import { memoryStore, saveMemory, resetMemory } from "../../core/memory";
 import { MEMORY_CATEGORY_DEFS } from "../../utils/userMemory";
 import { loadProviderUsage, providerUsageRows } from "../../utils/usageTracker";
-import { loadLifetimeCost, resetLifetimeCost, formatCost } from "../../utils/costTracker";
+import {
+  loadLifetimeCost,
+  resetLifetimeCost,
+  formatCost,
+  getMonthlySpend,
+  resetMonthlySpend,
+} from "../../utils/costTracker";
 import { PROVIDER_META } from "../../api/providerRouter";
 import { modelsStore, modelDisplayName } from "../../core/models";
 import { loadModels } from "../../core/models";
@@ -478,6 +484,45 @@ function BehaviorTab() {
               { value: "comfortable", label: "Comfortable" },
               { value: "compact", label: "Compact" },
             ]}
+          />
+        </div>
+        <div className="neu-raised-sm rounded-sm p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[12.5px] font-semibold text-hi">Auto failover</p>
+              <p className="text-[11px] text-faint mt-0.5">Retry once on another provider when a request fails</p>
+            </div>
+            <NeuToggle checked={s.autoFailover} onChange={(v) => setSetting("autoFailover", v)} />
+          </div>
+        </div>
+      </div>
+
+      <div className="neu-raised-sm rounded-sm p-4">
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <p className="text-[12.5px] font-semibold text-hi">Monthly cost cap</p>
+            <p className="text-[11px] text-faint mt-0.5">
+              Paid models are blocked once month-to-date spend hits the cap. 0 = no cap.
+              {" "}Spent this month: <span className="text-hi font-semibold">{formatCost(getMonthlySpend())}</span>
+            </p>
+          </div>
+          <NeuButton
+            size="sm"
+            variant="ghost"
+            onClick={() => { resetMonthlySpend(); toast.info("Monthly spend counter reset"); }}
+          >
+            Reset counter
+          </NeuButton>
+        </div>
+        <div className="flex items-center gap-2 max-w-[220px]">
+          <span className="text-[13px] text-dim">$</span>
+          <NeuInput
+            type="number"
+            min="0"
+            step="0.5"
+            value={s.costCapMonthly || ""}
+            placeholder="No cap"
+            onChange={(e) => setSetting("costCapMonthly", Math.max(0, Number(e.target.value) || 0))}
           />
         </div>
       </div>
