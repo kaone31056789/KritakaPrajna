@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { useStore, generateId } from "../../core/store";
 import { keysStore, setProviderKey, removeProviderKey } from "../../core/keys";
 import { settingsStore, setSetting, resetSystemPrompt, DEFAULT_SYSTEM_PROMPT } from "../../core/settings";
@@ -36,6 +36,18 @@ import {
 } from "../../ui/primitives";
 import BrandIcon from "../../ui/BrandIcon";
 import { toast } from "../../ui/Toaster";
+import {
+  createBackupFile,
+  decodeBackupFile,
+  restorePayload,
+  downloadTextFile,
+  defaultBackupFilename,
+  backupHasKeys,
+  summarizePayload,
+  passphraseStrength,
+  MIN_PASSPHRASE_LENGTH,
+} from "../../core/backup";
+import { isCryptoAvailable } from "../../core/crypto";
 
 const TABS = [
   { value: "providers", label: "Providers", icon: "key" },
@@ -44,6 +56,7 @@ const TABS = [
   { value: "personas", label: "Personas", icon: "brain" },
   { value: "memory", label: "Memory", icon: "bookmark" },
   { value: "usage", label: "Usage", icon: "gauge" },
+  { value: "backup", label: "Backup", icon: "shield" },
 ];
 
 /* ── Providers ── */
@@ -606,6 +619,370 @@ function UsageTab() {
   );
 }
 
+/* ── Backup ── */
+
+function PassField({ label, value, onChange, show, onToggleShow, placeholder, hint }) {
+  return (
+    <label className="block">
+      <span className="block mb-1.5 text-[12px] font-medium text-dim">{label}</span>
+      <div className="relative">
+        <input
+          type={show ? "text" : "password"}
+          value={value}
+          onChange={onChange}
+          placeholder={placeholder}
+          className="w-full h-10 rounded-sm bg-deep [box-shadow:var(--neu-inset-sm)] border-none outline-none text-[13.5px] text-hi placeholder:text-faint pl-4 pr-10 transition-shadow duration-150 focus:[box-shadow:var(--neu-inset-sm),var(--neu-focus)]"
+        />
+        {onToggleShow && (
+          <button
+            type="button"
+            aria-label="Toggle passphrase visibility"
+            onClick={onToggleShow}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-faint hover:text-body"
+          >
+            <Icon name={show ? "eyeOff" : "eye"} size={14} />
+          </button>
+        )}
+      </div>
+      {hint && <span className="block mt-1 text-[11px] text-err">{hint}</span>}
+    </label>
+  );
+}
+
+function StrengthMeter({ pw }) {
+  const { score, label } = passphraseStrength(pw);
+  if (!pw) return null;
+  const tone = score <= 1 ? "var(--err)" : score === 2 ? "var(--accent-2)" : "var(--ok)";
+  return (
+    <div className="flex items-center gap-2 mt-2">
+      <div className="flex-1 flex gap-1">
+        {[0, 1, 2, 3].map((i) => (
+          <span
+            key={i}
+            className={`h-1 flex-1 rounded-full ${i < score ? "" : "bg-deep"}`}
+            style={
+              i < score
+                ? { background: tone, transition: "background 200ms var(--ease-out)" }
+                : { boxShadow: "var(--neu-inset-sm)" }
+            }
+          />
+        ))}
+      </div>
+      <span className="text-[10.5px] font-medium" style={{ color: tone }}>{label}</span>
+    </div>
+  );
+}
+
+function SummaryRow({ label, value }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-dim">{label}</span>
+      <span className="font-mono font-semibold text-hi">{value}</span>
+    </div>
+  );
+}
+
+function ExportBackupModal({ onClose }) {
+  const [pass, setPass] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [show, setShow] = useState(false);
+  const [includeKeys, setIncludeKeys] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const strength = passphraseStrength(pass);
+  const mismatch = confirm.length > 0 && confirm !== pass;
+  const canCreate = strength.ok && pass === confirm && !busy;
+
+  const create = async () => {
+    if (!canCreate) return;
+    setBusy(true);
+    try {
+      const text = await createBackupFile({ passphrase: pass, includeKeys });
+      downloadTextFile(text, defaultBackupFilename());
+      toast.success("Backup created", {
+        description: includeKeys ? "Encrypted .kpbak saved — includes API keys." : "Encrypted .kpbak saved.",
+      });
+      onClose();
+    } catch (e) {
+      toast.error("Backup failed", { description: e.message });
+      setBusy(false);
+    }
+  };
+
+  return (
+    <NeuModal
+      open
+      onClose={onClose}
+      title="Create encrypted backup"
+      width={480}
+      footer={
+        <>
+          <NeuButton variant="ghost" onClick={onClose}>Cancel</NeuButton>
+          <NeuButton variant="accent" icon="shield" loading={busy} disabled={!canCreate} onClick={create}>
+            Create backup
+          </NeuButton>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <p className="text-[12px] text-dim leading-relaxed">
+          Your data is encrypted with a passphrase using AES-256. The file can't be recovered if you forget it — keep it somewhere safe.
+        </p>
+        <div>
+          <PassField
+            label="Passphrase"
+            value={pass}
+            onChange={(e) => setPass(e.target.value)}
+            show={show}
+            onToggleShow={() => setShow((s) => !s)}
+            placeholder={`At least ${MIN_PASSPHRASE_LENGTH} characters`}
+          />
+          <StrengthMeter pw={pass} />
+        </div>
+        <PassField
+          label="Confirm passphrase"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          show={show}
+          placeholder="Re-enter passphrase"
+          hint={mismatch ? "Passphrases don't match" : undefined}
+        />
+        <div className="neu-raised-sm rounded-sm p-3.5 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[12.5px] font-semibold text-hi">Include API keys</p>
+            <p className="text-[11px] text-faint mt-0.5">Off by default. Only for a private, personal backup.</p>
+          </div>
+          <NeuToggle checked={includeKeys} onChange={setIncludeKeys} />
+        </div>
+        {includeKeys && (
+          <div className="flex items-start gap-2 text-[11.5px] text-err">
+            <Icon name="alert" size={14} className="mt-0.5 shrink-0" />
+            <span>Anyone with this file and the passphrase can use your API keys.</span>
+          </div>
+        )}
+      </div>
+    </NeuModal>
+  );
+}
+
+function ImportBackupModal({ onClose }) {
+  const fileRef = useRef(null);
+  const [fileName, setFileName] = useState("");
+  const [fileText, setFileText] = useState("");
+  const [pass, setPass] = useState("");
+  const [show, setShow] = useState(false);
+  const [payload, setPayload] = useState(null);
+  const [restoreKeys, setRestoreKeys] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const onFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-picking the same file
+    if (!file) return;
+    try {
+      const text = await file.text();
+      setFileName(file.name);
+      setFileText(text);
+      setPayload(null);
+      setConfirmed(false);
+      setRestoreKeys(false);
+    } catch {
+      toast.error("Couldn't read that file");
+    }
+  };
+
+  const decrypt = async () => {
+    if (!fileText || !pass || busy) return;
+    setBusy(true);
+    try {
+      setPayload(await decodeBackupFile(fileText, pass));
+    } catch (err) {
+      toast.error("Couldn't open backup", { description: err.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const restore = async () => {
+    if (!payload || !confirmed || busy) return;
+    setBusy(true);
+    try {
+      await restorePayload(payload, { restoreKeys });
+      toast.success("Backup restored", { description: "Reloading…" });
+      setTimeout(() => window.location.reload(), 650);
+    } catch (err) {
+      toast.error("Restore failed", { description: err.message });
+      setBusy(false);
+    }
+  };
+
+  const sum = payload ? summarizePayload(payload) : null;
+  const hasKeys = payload ? backupHasKeys(payload) : false;
+
+  return (
+    <NeuModal
+      open
+      onClose={onClose}
+      title="Restore from backup"
+      width={480}
+      footer={
+        payload ? (
+          <>
+            <NeuButton variant="ghost" onClick={onClose}>Cancel</NeuButton>
+            <NeuButton variant="accent" icon="refresh" loading={busy} disabled={!confirmed || busy} onClick={restore}>
+              Restore &amp; reload
+            </NeuButton>
+          </>
+        ) : (
+          <>
+            <NeuButton variant="ghost" onClick={onClose}>Cancel</NeuButton>
+            <NeuButton variant="accent" icon="key" loading={busy} disabled={!fileText || !pass || busy} onClick={decrypt}>
+              Decrypt &amp; preview
+            </NeuButton>
+          </>
+        )
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <input ref={fileRef} type="file" accept=".kpbak,application/json" className="hidden" onChange={onFile} />
+        {!payload ? (
+          <>
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className="pressable neu-raised-sm rounded-sm p-4 flex items-center gap-3 text-left w-full"
+            >
+              <span className="w-9 h-9 rounded-sm bg-accent-soft text-accent flex items-center justify-center shrink-0">
+                <Icon name="file" size={17} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[12.5px] font-semibold text-hi truncate">{fileName || "Choose a .kpbak file"}</p>
+                <p className="text-[11px] text-faint">{fileName ? "Tap to choose a different file" : "Select the backup file to restore"}</p>
+              </div>
+            </button>
+            <PassField
+              label="Passphrase"
+              value={pass}
+              onChange={(e) => setPass(e.target.value)}
+              show={show}
+              onToggleShow={() => setShow((s) => !s)}
+              placeholder="Backup passphrase"
+            />
+          </>
+        ) : (
+          <>
+            <div className="neu-raised-sm rounded-sm p-4">
+              <p className="text-[11px] uppercase tracking-[0.15em] text-faint mb-2.5">Backup contents</p>
+              <div className="grid grid-cols-2 gap-x-5 gap-y-1.5 text-[12px]">
+                <SummaryRow label="Chats" value={sum.chats} />
+                <SummaryRow label="Prompts" value={sum.prompts} />
+                <SummaryRow label="Personas" value={sum.personas} />
+                <SummaryRow label="Agent chats" value={sum.agentChats} />
+              </div>
+              {sum.createdAt && (
+                <p className="text-[10.5px] text-faint mt-3">
+                  Created {new Date(sum.createdAt).toLocaleString()}
+                  {sum.appVersion ? ` · v${sum.appVersion}` : ""}
+                </p>
+              )}
+            </div>
+            {hasKeys && (
+              <div className="neu-raised-sm rounded-sm p-3.5 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[12.5px] font-semibold text-hi">Also restore API keys</p>
+                  <p className="text-[11px] text-faint mt-0.5">
+                    Backup holds {sum.providerKeyCount} saved key{sum.providerKeyCount === 1 ? "" : "s"}.
+                  </p>
+                </div>
+                <NeuToggle checked={restoreKeys} onChange={setRestoreKeys} />
+              </div>
+            )}
+            <div className="flex items-start gap-2 text-[11.5px] text-err">
+              <Icon name="alert" size={14} className="mt-0.5 shrink-0" />
+              <span>Restoring replaces all current chats, settings and data in this app. This can't be undone.</span>
+            </div>
+            <button type="button" onClick={() => setConfirmed((c) => !c)} className="flex items-center gap-2.5 text-left">
+              <span
+                className="w-[18px] h-[18px] rounded-[5px] flex items-center justify-center shrink-0"
+                style={
+                  confirmed
+                    ? { background: "linear-gradient(135deg, var(--accent), var(--accent-2))" }
+                    : { background: "var(--surface)", boxShadow: "var(--neu-inset-sm)" }
+                }
+              >
+                {confirmed && <Icon name="check" size={12} className="text-accent-ink" />}
+              </span>
+              <span className="text-[12px] text-body">I understand this will overwrite my current data.</span>
+            </button>
+          </>
+        )}
+      </div>
+    </NeuModal>
+  );
+}
+
+function BackupTab() {
+  const [mode, setMode] = useState(null); // null | "export" | "import"
+
+  if (!isCryptoAvailable()) {
+    return (
+      <EmptyState
+        icon="shield"
+        title="Encryption unavailable"
+        hint="Secure backup needs the Web Crypto API, which isn't available in this environment."
+      />
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="neu-raised-sm rounded-sm p-5">
+        <div className="flex items-center gap-3 mb-2">
+          <span className="w-10 h-10 rounded-sm bg-accent-soft text-accent flex items-center justify-center shrink-0">
+            <Icon name="shield" size={20} />
+          </span>
+          <div>
+            <p className="text-[13.5px] font-semibold text-hi">Encrypted backup</p>
+            <p className="text-[11.5px] text-faint">Chats, prompts, personas and settings — saved to a locked .kpbak file.</p>
+          </div>
+        </div>
+        <p className="text-[11.5px] text-dim leading-relaxed mt-2">
+          Files are encrypted with AES-256 behind your passphrase. API keys are excluded unless you opt in, and refetchable caches are left out to keep files small.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="neu-raised-sm rounded-sm p-4 flex flex-col gap-3">
+          <div>
+            <p className="text-[12.5px] font-semibold text-hi flex items-center gap-1.5">
+              <Icon name="download" size={15} className="text-accent" /> Export
+            </p>
+            <p className="text-[11px] text-faint mt-1">Create an encrypted snapshot to store or move to another machine.</p>
+          </div>
+          <NeuButton variant="accent" size="sm" icon="shield" className="self-start" onClick={() => setMode("export")}>
+            Create backup…
+          </NeuButton>
+        </div>
+        <div className="neu-raised-sm rounded-sm p-4 flex flex-col gap-3">
+          <div>
+            <p className="text-[12.5px] font-semibold text-hi flex items-center gap-1.5">
+              <Icon name="refresh" size={15} className="text-accent" /> Import
+            </p>
+            <p className="text-[11px] text-faint mt-1">Restore from a .kpbak file. This overwrites everything currently in the app.</p>
+          </div>
+          <NeuButton variant="raised" size="sm" icon="file" className="self-start" onClick={() => setMode("import")}>
+            Restore from backup…
+          </NeuButton>
+        </div>
+      </div>
+
+      {mode === "export" && <ExportBackupModal onClose={() => setMode(null)} />}
+      {mode === "import" && <ImportBackupModal onClose={() => setMode(null)} />}
+    </div>
+  );
+}
+
 /* ── Screen ── */
 
 export default function SettingsScreen() {
@@ -628,6 +1005,7 @@ export default function SettingsScreen() {
         {tab === "personas" && <PersonasTab />}
         {tab === "memory" && <MemoryTab />}
         {tab === "usage" && <UsageTab />}
+        {tab === "backup" && <BackupTab />}
       </div>
     </div>
   );
