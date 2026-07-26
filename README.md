@@ -206,7 +206,7 @@ npm run dist         # build a local installer
 npm run release:dry  # installer + latest.yml, without publishing
 ```
 
-Requires Node 20+.
+Requires Node 22.12+ (`@electron/rebuild` and `node-abi` set that floor). CI builds on Node 24.
 
 ### Releasing
 
