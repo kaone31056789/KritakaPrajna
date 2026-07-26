@@ -35,6 +35,31 @@ It runs on your own API keys. Nothing is proxied through a server of ours, becau
 
 ---
 
+## Screenshots
+
+### Education Hub — notes in, practice out
+
+[![Education Hub](Screenshots/v4-education.png)](Screenshots/v4-education.png)
+
+### Appearance — a theme editor with a live preview
+
+[![Appearance](Screenshots/v4-appearance.png)](Screenshots/v4-appearance.png)
+
+### Study Routing — which models run which job
+
+[![Study Routing](Screenshots/v4-study-routing.png)](Screenshots/v4-study-routing.png)
+
+<details>
+<summary>More — Chat and Model Advisor</summary>
+
+[![Chat](Screenshots/v4-chat.png)](Screenshots/v4-chat.png)
+
+[![Model Advisor](Screenshots/v4-advisor.png)](Screenshots/v4-advisor.png)
+
+</details>
+
+---
+
 ## Contents
 
 1. [The five workspaces](#the-five-workspaces)

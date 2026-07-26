@@ -61,3 +61,23 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CI: true
+
+      # electron-builder uploads to a DRAFT release. A draft is invisible on the
+      # releases page and, more importantly, electron-updater cannot see it — so
+      # a "successful" release that is left drafted ships an update nobody gets.
+      - name: Publish the draft
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The update feed is only real if it is fetchable anonymously.
+      - name: Verify the update feed
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          url="https://github.com/${{ github.repository }}/releases/latest/download/latest.yml"
+          echo "fetching $url"
+          curl -fsSL "$url" -o feed.yml
+          cat feed.yml
+          grep -q "version: ${GITHUB_REF_NAME#v}" feed.yml
