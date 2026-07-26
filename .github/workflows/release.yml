@@ -56,11 +56,24 @@ jobs:
           echo "tag=$TAG package.json=$PKG"
           test "$TAG" = "$PKG"
 
+      # `npm run release` is `npm run build && electron-builder --publish always`.
+      # Calling electron-builder on its own packages build/**/* from a fresh
+      # checkout where build/ does not exist — it is gitignored — so the
+      # installer ships with no compiled React app and opens to a blank window.
       - name: Build and publish
-        run: npx electron-builder --publish always
+        run: npm run release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CI: true
+
+      # The renderer has to actually be inside the installer. Catch an empty
+      # build/ here rather than in someone's install.
+      - name: The bundle contains a renderer
+        shell: bash
+        run: |
+          test -f build/index.html
+          test -n "$(ls build/static/js/*.js 2>/dev/null)"
+          echo "renderer present: $(ls build/static/js/main.*.js)"
 
       # electron-builder uploads to a DRAFT release. A draft is invisible on the
       # releases page and, more importantly, electron-updater cannot see it — so
