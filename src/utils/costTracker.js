@@ -7,11 +7,32 @@ const LIFETIME_COST_KEY = "openrouter_lifetime_cost";
  * OpenRouter pricing is per-token (price per 1 token).
  * Returns cost in dollars, or 0 if free / missing data.
  */
+/**
+ * A per-token price the app can actually do arithmetic with, or null.
+ *
+ * OpenRouter ships `-1` for models whose cost it cannot state up front —
+ * `openrouter/fusion` routes a prompt through a panel of models, so its price
+ * is only known after the fact. Multiplied through as a plain number that
+ * sentinel reads as *negative* cost: it undercuts every value cap and
+ * subtracts from the running spend total. An absent price still means free
+ * (NVIDIA and HuggingFace catalogues arrive with no pricing block at all);
+ * a present but unusable one means unknown.
+ *
+ * @returns {number|null} price per token, or null when unstated
+ */
+export function tokenPrice(pricing, side) {
+  const raw = pricing?.[side];
+  if (raw === undefined || raw === null || raw === "") return 0;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 export function calculateCost(usage, modelPricing) {
   if (!usage || !modelPricing) return 0;
 
-  const promptPrice = Number(modelPricing.prompt) || 0;
-  const completionPrice = Number(modelPricing.completion) || 0;
+  // An unstated price contributes nothing rather than a negative correction.
+  const promptPrice = tokenPrice(modelPricing, "prompt") ?? 0;
+  const completionPrice = tokenPrice(modelPricing, "completion") ?? 0;
   const promptTokens = usage.prompt_tokens || 0;
   const completionTokens = usage.completion_tokens || 0;
 

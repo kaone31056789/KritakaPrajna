@@ -23,6 +23,9 @@
 /* ═══════════════════════ MINIMALISM — fast & silent ═══════════════════════ */
 [data-skin="minimalism"] {
   --r-xs: 4px; --r-sm: 6px; --r: 8px; --r-lg: 10px; --r-xl: 12px;
+  /* The platform's own face — nothing imported, nothing announced. */
+  --font-display: system-ui, "Segoe UI Variable Display", "Segoe UI", sans-serif;
+  --font-ui: system-ui, "Segoe UI Variable Text", "Segoe UI", sans-serif;
   --t-fast: 70ms; --t: 130ms; --t-slow: 190ms; --t-modal: 240ms;
   --ease-out: cubic-bezier(0.25, 1, 0.5, 1);
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
@@ -59,6 +62,9 @@
 /* ═══════════════════════ MAXIMALISM — big & bouncy ═══════════════════════ */
 [data-skin="maximalism"] {
   --r-xs: 14px; --r-sm: 18px; --r: 24px; --r-lg: 30px; --r-xl: 36px;
+  /* Condensed headline shouting over a wide, chunky body. More is more. */
+  --font-display: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+  --font-ui: Verdana, Tahoma, sans-serif;
   --t-fast: 160ms; --t: 260ms; --t-slow: 380ms; --t-modal: 460ms;
   --ease-out: cubic-bezier(0.34, 1.56, 0.64, 1);
   --ease-in-out: cubic-bezier(0.68, -0.3, 0.32, 1.3);
@@ -181,6 +187,9 @@
 /* ═══════════════════════ GLASSMORPHISM — slow & smooth ═══════════════════════ */
 [data-skin="glassmorphism"] {
   --r-xs: 12px; --r-sm: 16px; --r: 20px; --r-lg: 24px; --r-xl: 28px;
+  /* Light, airy, optically wide — type that reads like it is floating too. */
+  --font-display: "Segoe UI Variable Display", "Segoe UI Light", Candara, sans-serif;
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   --t-fast: 180ms; --t: 300ms; --t-slow: 420ms; --t-modal: 560ms;
   --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
   --ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
@@ -230,6 +239,9 @@
 /* ═══════════════════════ CLAYMORPHISM — squish & spring ═══════════════════════ */
 [data-skin="claymorphism"] {
   --r-xs: 16px; --r-sm: 20px; --r: 26px; --r-lg: 32px; --r-xl: 38px;
+  /* Soft humanist with open counters — the typographic equivalent of squish. */
+  --font-display: Candara, "Gill Sans", "Gill Sans MT", "Segoe UI", sans-serif;
+  --font-ui: Candara, "Segoe UI", system-ui, sans-serif;
   --t-fast: 140ms; --t: 220ms; --t-slow: 320ms; --t-modal: 420ms;
   --ease-out: cubic-bezier(0.34, 1.7, 0.5, 1);
   --ease-in-out: cubic-bezier(0.6, -0.2, 0.4, 1.2);
@@ -312,6 +324,9 @@
 /* ═══════════════════════ FLAT DESIGN — crisp & quick ═══════════════════════ */
 [data-skin="flat"] {
   --r-xs: 4px; --r-sm: 6px; --r: 8px; --r-lg: 10px; --r-xl: 12px;
+  /* Plain, tight, no personality of its own — that is the point of Flat. */
+  --font-display: "Segoe UI Semibold", "Segoe UI", Tahoma, sans-serif;
+  --font-ui: "Segoe UI", Tahoma, Geneva, sans-serif;
   --t-fast: 60ms; --t: 100ms; --t-slow: 160ms; --t-modal: 220ms;
   --ease-out: cubic-bezier(0.4, 0, 0.6, 1);
   --ease-in-out: cubic-bezier(0.4, 0, 0.6, 1);
@@ -516,8 +531,10 @@
 /* ═══════════════════════ Y2K — elastic pop ═══════════════════════ */
 [data-skin="y2k"] {
   --r-xs: 12px; --r-sm: 16px; --r: 22px; --r-lg: 28px; --r-xl: 34px;
-  --font-display: "Trebuchet MS", Verdana, sans-serif;
-  --font-ui: "Trebuchet MS", Verdana, sans-serif;
+  /* Y2K is chrome and bubble, not Memphis' poster geometry. Tahoma is the
+     literal Windows-2000 UI face, so it dates the skin exactly right. */
+  --font-display: Tahoma, "Trebuchet MS", Verdana, sans-serif;
+  --font-ui: Tahoma, Verdana, sans-serif;
   --t-fast: 150ms; --t: 240ms; --t-slow: 340ms; --t-modal: 460ms;
   --ease-out: cubic-bezier(0.68, -0.55, 0.265, 1.55);
   --ease-in-out: cubic-bezier(0.68, -0.55, 0.265, 1.55);
@@ -612,8 +629,10 @@
 /* ═══════════════════════ CYBERPUNK — glitch-fast ═══════════════════════ */
 [data-skin="cyberpunk"] {
   --r-xs: 2px; --r-sm: 3px; --r: 5px; --r-lg: 7px; --r-xl: 9px; --r-pill: 4px;
-  --font-display: Bahnschrift, "Segoe UI", sans-serif;
-  --font-ui: Bahnschrift, "Segoe UI", sans-serif;
+  /* Cyberpunk is a terminal, not a synth — mono everywhere, including the
+     display face, which is what separates it from Synthwave's neon chrome. */
+  --font-display: Consolas, "Cascadia Mono", "Courier New", monospace;
+  --font-ui: Consolas, "Cascadia Mono", monospace;
   --font-mono: Consolas, "JetBrains Mono", monospace;
   --t-fast: 50ms; --t: 90ms; --t-slow: 150ms; --t-modal: 210ms;
   --ease-out: cubic-bezier(0.9, 0, 0.1, 1);
@@ -805,6 +824,9 @@
    pill-round; motion overshoots like fluid finding its level. */
 [data-skin="liquid-glass"] {
   --r-xs: 18px; --r-sm: 22px; --r: 28px; --r-lg: 36px; --r-xl: 44px;
+  /* Optical-size display face, tracked tight — the Apple register this borrows from. */
+  --font-display: "SF Pro Display", "Segoe UI Variable Display", system-ui, sans-serif;
+  --font-ui: "SF Pro Text", "Segoe UI Variable Text", system-ui, sans-serif;
   --t-fast: 200ms; --t: 340ms; --t-slow: 480ms; --t-modal: 620ms;
   --ease-out: cubic-bezier(0.34, 1.35, 0.35, 1);   /* fluid overshoot */
   --ease-in-out: cubic-bezier(0.6, 0, 0.2, 1.1);
@@ -1038,4 +1060,372 @@
 }
 [data-skin="liquid-glass"] ::-webkit-scrollbar-thumb { border-radius: 999px; }
 [data-skin="liquid-glass"] .font-display { letter-spacing: -0.015em; font-weight: 600;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PRESS SIGNATURES
+   The press is the most-felt interaction in the app, and every skin was
+   sharing one generic scale(0.97) from tokens.css — so a Brutalist button and
+   a Claymorphic one depressed identically. Each skin now presses the way its
+   own motion personality (themes.js) says it should. Brutalism, Neobrutalism,
+   Claymorphism, Memphis and Y2K already declared theirs above and are left
+   alone; :active inherits each skin's --t-fast and --ease-out, so the timing
+   follows automatically.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Soft & tactile — sinks into the surface rather than shrinking. */
+[data-skin="neumorphism"] .pressable:active { transform: scale(0.985); box-shadow: var(--neu-inset-sm); }
+
+/* Fast & silent — barely there, and gone before you notice it. */
+[data-skin="minimalism"] .pressable:active { transform: scale(0.99); }
+
+/* Big & bouncy — a proper squash. */
+[data-skin="maximalism"] .pressable:active { transform: scale(0.9); }
+
+/* Slow & smooth — dims through the glass instead of moving much. */
+[data-skin="glassmorphism"] .pressable:active { transform: scale(0.975); filter: brightness(0.94); }
+
+/* Mechanical — a real button travelling down into its own housing. */
+[data-skin="skeuomorphism"] .pressable:active { transform: translateY(1px) scale(0.995); box-shadow: var(--neu-inset-sm); }
+
+/* Crisp & quick — colour shifts, geometry does not. */
+[data-skin="flat"] .pressable:active { transform: none; filter: brightness(0.92); }
+
+/* Emphasized ease — Material's asymmetric press. */
+[data-skin="material"] .pressable:active { transform: scale(0.96); }
+
+/* Precise & flat — Swiss does not play. Only the ink changes. */
+[data-skin="swiss"] .pressable:active { transform: none; opacity: 0.72; }
+
+/* Geometric glide — slides along the grid rather than scaling. */
+[data-skin="bauhaus"] .pressable:active { transform: translate(1px, 1px) scale(0.985); }
+
+/* Airy float — settles down onto the surface it was hovering above. */
+[data-skin="frutiger-aero"] .pressable:active { transform: translateY(2px) scale(0.985); filter: saturate(1.15); }
+
+/* Glitch-fast — jumps off-register for a frame, like a bad signal. */
+[data-skin="cyberpunk"] .pressable:active { transform: translate(-1px, 1px); filter: hue-rotate(-12deg) contrast(1.2); }
+
+/* Dreamy drift — barely resists, and takes its time about it. */
+[data-skin="vaporwave"] .pressable:active { transform: scale(0.98); filter: saturate(1.25) brightness(1.05); }
+
+/* Pulse & glow — the accent flares on contact. */
+[data-skin="synthwave"] .pressable:active { transform: scale(0.975); box-shadow: 0 0 14px var(--accent-glow); }
+
+/* Sweeping arc — leans rather than shrinks. */
+[data-skin="retrofuturism"] .pressable:active { transform: scale(0.97) rotate(-0.4deg); }
+
+/* Fluid morph — deforms unevenly, like something under a fingertip. */
+[data-skin="liquid-glass"] .pressable:active { transform: scale(0.965); border-radius: var(--r-lg); filter: brightness(1.06); }
+
+/* A press is a state change, not an animation — honour reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  [data-skin] .pressable:active { transform: none; }
+}
+
+/* ═══════════════════════ TERMINAL AMBER — phosphor decay ═══════════════════════ */
+[data-skin="terminal-amber"] {
+  --r-xs: 0; --r-sm: 0; --r: 2px; --r-lg: 2px; --r-xl: 2px; --r-pill: 2px;
+  --font-display: "Cascadia Mono", Consolas, "Courier New", monospace;
+  --font-ui: "Cascadia Mono", Consolas, "Courier New", monospace;
+  --font-mono: "Cascadia Mono", Consolas, "Courier New", monospace;
+  --t-fast: 40ms; --t: 70ms; --t-slow: 110ms; --t-modal: 150ms;
+  --ease-out: steps(3, end);
+  --ease-in-out: steps(3, end);
+  --ease-drawer: cubic-bezier(0.3, 0, 0, 1);
+}
+[data-skin="terminal-amber"]:not([data-theme="light"]) {
+  --bg: #0a0700; --bg-deep: #050300; --surface: #100b02; --surface-2: #171003; --surface-3: #1f1605;
+  --line: rgba(255, 176, 0, 0.22); --line-strong: rgba(255, 176, 0, 0.6);
+  --text-hi: #ffb000; --text: #d99500; --text-dim: #8f6300; --text-faint: #5c4000;
+  --accent: #ffb000; --accent-2: #ff7b00; --accent-ink: #0a0700;
+  --accent-glow: rgba(255, 176, 0, 0.45); --accent-soft: rgba(255, 176, 0, 0.12);
+  --neu-raised-sm: 0 0 0 1px var(--line);
+  --neu-raised: 0 0 0 1px var(--line), 0 0 12px rgba(255, 176, 0, 0.08);
+  --neu-raised-lg: 0 0 0 1px var(--line-strong), 0 0 24px rgba(255, 176, 0, 0.16);
+  --neu-inset: inset 0 0 0 1px var(--line);
+  --neu-inset-sm: inset 0 0 0 1px var(--line);
+  --backdrop: rgba(5, 3, 0, 0.86);
+}
+[data-skin="terminal-amber"][data-theme="light"] {
+  --bg: #f7f2e4; --bg-deep: #efe7d3; --surface: #fffdf6; --surface-2: #f9f3e3; --surface-3: #f2ead6;
+  --line: rgba(120, 78, 0, 0.24); --line-strong: rgba(120, 78, 0, 0.7);
+  --text-hi: #3d2800; --text: #5c3d00; --text-dim: #8a6516; --text-faint: #ab8c4d;
+  --accent: #b26a00; --accent-2: #8a4f00; --accent-ink: #fffdf6;
+  --accent-glow: rgba(178, 106, 0, 0.28); --accent-soft: rgba(178, 106, 0, 0.1);
+  --neu-raised-sm: 0 0 0 1px var(--line);
+  --neu-raised: 0 0 0 1px var(--line);
+  --neu-raised-lg: 0 0 0 1px var(--line-strong), 0 8px 24px rgba(120, 78, 0, 0.14);
+  --neu-inset: inset 0 0 0 1px var(--line);
+  --neu-inset-sm: inset 0 0 0 1px var(--line);
+  --backdrop: rgba(247, 242, 228, 0.86);
+}
+/* Scanlines are the signature — a CRT that never quite resolves. */
+[data-skin="terminal-amber"] .aurora {
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 176, 0, 0.05) 0 1px,
+    transparent 1px 3px
+  );
+  opacity: 1;
+}
+[data-skin="terminal-amber"] .pressable:active { transform: none; filter: brightness(1.5); }
+[data-skin="terminal-amber"] .font-display { text-transform: uppercase; letter-spacing: 0.08em; }
+
+/* ═══════════════════════ PAPER CIRCUIT — letterpress ═══════════════════════ */
+[data-skin="paper-circuit"] {
+  --r-xs: 0; --r-sm: 1px; --r: 2px; --r-lg: 3px; --r-xl: 4px; --r-pill: 3px;
+  --font-display: "Iowan Old Style", Georgia, "Times New Roman", serif;
+  --font-ui: Georgia, "Times New Roman", serif;
+  --font-mono: "Courier New", Courier, monospace;
+  --t-fast: 80ms; --t: 140ms; --t-slow: 210ms; --t-modal: 280ms;
+  --ease-out: cubic-bezier(0.25, 0.8, 0.35, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.3, 1);
+  --ease-drawer: cubic-bezier(0.25, 0.8, 0.35, 1);
+}
+[data-skin="paper-circuit"]:not([data-theme="light"]) {
+  --bg: #14130f; --bg-deep: #0e0d0a; --surface: #1b1a15; --surface-2: #22201a; --surface-3: #2a2721;
+  --line: rgba(226, 214, 187, 0.18); --line-strong: rgba(226, 214, 187, 0.5);
+  --text-hi: #efe6d0; --text: #ccc2ab; --text-dim: #948b76; --text-faint: #635c4e;
+  --accent: #b8563f; --accent-2: #8f3f2c; --accent-ink: #efe6d0;
+  --accent-glow: rgba(184, 86, 63, 0.24); --accent-soft: rgba(184, 86, 63, 0.1);
+  --neu-raised-sm: 0 0 0 1px var(--line);
+  --neu-raised: 0 1px 0 var(--line);
+  --neu-raised-lg: 0 0 0 1px var(--line), 0 10px 28px rgba(0, 0, 0, 0.4);
+  --neu-inset: inset 0 1px 0 rgba(0, 0, 0, 0.4);
+  --neu-inset-sm: inset 0 1px 0 rgba(0, 0, 0, 0.3);
+  --backdrop: rgba(14, 13, 10, 0.8);
+}
+[data-skin="paper-circuit"][data-theme="light"] {
+  --bg: #f6f1e4; --bg-deep: #ece5d3; --surface: #fdfaf1; --surface-2: #f7f2e5; --surface-3: #f0e9d8;
+  --line: rgba(40, 34, 22, 0.16); --line-strong: rgba(40, 34, 22, 0.62);
+  --text-hi: #1f1b12; --text: #3b3427; --text-dim: #6d6353; --text-faint: #9b9182;
+  --accent: #a63f28; --accent-2: #7d2d1b; --accent-ink: #fdfaf1;
+  --accent-glow: rgba(166, 63, 40, 0.2); --accent-soft: rgba(166, 63, 40, 0.08);
+  --neu-raised-sm: 0 0 0 1px var(--line);
+  --neu-raised: 0 1px 0 var(--line);
+  --neu-raised-lg: 0 0 0 1px var(--line), 0 8px 22px rgba(40, 34, 22, 0.1);
+  --neu-inset: inset 0 1px 2px rgba(40, 34, 22, 0.16);
+  --neu-inset-sm: inset 0 1px 1px rgba(40, 34, 22, 0.1);
+  --backdrop: rgba(246, 241, 228, 0.84);
+}
+[data-skin="paper-circuit"] .aurora { background: none; }
+/* Letterpress: the type presses into the page, the box does not move. */
+[data-skin="paper-circuit"] .pressable:active { transform: none; text-shadow: 0 1px 0 var(--line-strong); opacity: 0.85; }
+[data-skin="paper-circuit"] .font-display { letter-spacing: -0.01em; }
+
+/* ═══════════════════════ DEEP OCEAN — slow current ═══════════════════════ */
+[data-skin="deep-ocean"] {
+  --r-xs: 8px; --r-sm: 11px; --r: 14px; --r-lg: 18px; --r-xl: 22px;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --t-fast: 150ms; --t: 250ms; --t-slow: 360ms; --t-modal: 480ms;
+  --ease-out: cubic-bezier(0.25, 0.9, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.45, 0, 0.35, 1);
+  --ease-drawer: cubic-bezier(0.25, 0.9, 0.3, 1);
+}
+[data-skin="deep-ocean"]:not([data-theme="light"]) {
+  --bg: #060d16; --bg-deep: #03080f; --surface: #0b1622; --surface-2: #0f1d2c; --surface-3: #142537;
+  --line: rgba(125, 211, 232, 0.13); --line-strong: rgba(125, 211, 232, 0.34);
+  --text-hi: #dff1f8; --text: #a9c8d6; --text-dim: #6f92a4; --text-faint: #45606f;
+  --accent: #38bdf8; --accent-2: #22d3ee; --accent-ink: #03080f;
+  --accent-glow: rgba(56, 189, 248, 0.3); --accent-soft: rgba(56, 189, 248, 0.11);
+  --neu-raised-sm: 0 2px 8px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(125, 211, 232, 0.08);
+  --neu-raised: 0 6px 20px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(125, 211, 232, 0.1);
+  --neu-raised-lg: 0 16px 44px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(125, 211, 232, 0.14);
+  --neu-inset: inset 0 2px 10px rgba(0, 0, 0, 0.55);
+  --neu-inset-sm: inset 0 1px 5px rgba(0, 0, 0, 0.45);
+  --backdrop: rgba(3, 8, 15, 0.76);
+}
+[data-skin="deep-ocean"][data-theme="light"] {
+  --bg: #e7f2f8; --bg-deep: #d6e8f1; --surface: #f5fbfe; --surface-2: #ebf5fa; --surface-3: #dfeef6;
+  --line: rgba(15, 70, 100, 0.14); --line-strong: rgba(15, 70, 100, 0.38);
+  --text-hi: #0a2733; --text: #234655; --text-dim: #54798a; --text-faint: #8aa9b7;
+  --accent: #0284c7; --accent-2: #0891b2; --accent-ink: #f5fbfe;
+  --accent-glow: rgba(2, 132, 199, 0.26); --accent-soft: rgba(2, 132, 199, 0.09);
+  --neu-raised-sm: 0 2px 8px rgba(15, 70, 100, 0.1), inset 0 1px 0 #ffffff;
+  --neu-raised: 0 6px 20px rgba(15, 70, 100, 0.13), inset 0 1px 0 #ffffff;
+  --neu-raised-lg: 0 16px 44px rgba(15, 70, 100, 0.18), inset 0 1px 0 #ffffff;
+  --neu-inset: inset 0 2px 10px rgba(15, 70, 100, 0.12);
+  --neu-inset-sm: inset 0 1px 5px rgba(15, 70, 100, 0.09);
+  --backdrop: rgba(231, 242, 248, 0.8);
+}
+[data-skin="deep-ocean"] .aurora {
+  background:
+    radial-gradient(60% 45% at 20% 0%, rgba(56, 189, 248, 0.16), transparent 70%),
+    radial-gradient(50% 40% at 85% 20%, rgba(34, 211, 238, 0.1), transparent 70%);
+}
+[data-skin="deep-ocean"] .pressable:active { transform: scale(0.978); filter: brightness(1.08); }
+
+/* ═══════════════════════ SANDSTONE — warm and quiet ═══════════════════════ */
+[data-skin="sandstone"] {
+  --r-xs: 6px; --r-sm: 9px; --r: 12px; --r-lg: 15px; --r-xl: 18px;
+  --font-display: "Gill Sans MT", "Gill Sans", Candara, sans-serif;
+  --font-ui: "Segoe UI", system-ui, sans-serif;
+  --t-fast: 110ms; --t: 180ms; --t-slow: 260ms; --t-modal: 340ms;
+  --ease-out: cubic-bezier(0.3, 0.8, 0.4, 1);
+  --ease-in-out: cubic-bezier(0.45, 0, 0.35, 1);
+  --ease-drawer: cubic-bezier(0.3, 0.8, 0.4, 1);
+}
+[data-skin="sandstone"]:not([data-theme="light"]) {
+  --bg: #1a1613; --bg-deep: #13100e; --surface: #211c18; --surface-2: #29231e; --surface-3: #322b24;
+  --line: rgba(226, 205, 178, 0.14); --line-strong: rgba(226, 205, 178, 0.36);
+  --text-hi: #ece0d1; --text: #c8b8a5; --text-dim: #948676; --text-faint: #675d51;
+  --accent: #c98a52; --accent-2: #a86c3a; --accent-ink: #13100e;
+  --accent-glow: rgba(201, 138, 82, 0.26); --accent-soft: rgba(201, 138, 82, 0.1);
+  --neu-raised-sm: 0 2px 6px rgba(0, 0, 0, 0.32);
+  --neu-raised: 0 5px 16px rgba(0, 0, 0, 0.36);
+  --neu-raised-lg: 0 14px 36px rgba(0, 0, 0, 0.44);
+  --neu-inset: inset 0 2px 8px rgba(0, 0, 0, 0.36);
+  --neu-inset-sm: inset 0 1px 4px rgba(0, 0, 0, 0.3);
+  --backdrop: rgba(19, 16, 14, 0.76);
+}
+[data-skin="sandstone"][data-theme="light"] {
+  --bg: #f2ebe0; --bg-deep: #e7ded0; --surface: #faf6ee; --surface-2: #f4eee3; --surface-3: #ede5d8;
+  --line: rgba(90, 70, 50, 0.14); --line-strong: rgba(90, 70, 50, 0.34);
+  --text-hi: #3a2f24; --text: #55483a; --text-dim: #837360; --text-faint: #ab9c88;
+  --accent: #a86c3a; --accent-2: #85522a; --accent-ink: #faf6ee;
+  --accent-glow: rgba(168, 108, 58, 0.22); --accent-soft: rgba(168, 108, 58, 0.08);
+  --neu-raised-sm: 0 2px 6px rgba(90, 70, 50, 0.09);
+  --neu-raised: 0 5px 16px rgba(90, 70, 50, 0.11);
+  --neu-raised-lg: 0 14px 36px rgba(90, 70, 50, 0.15);
+  --neu-inset: inset 0 2px 8px rgba(90, 70, 50, 0.11);
+  --neu-inset-sm: inset 0 1px 4px rgba(90, 70, 50, 0.08);
+  --backdrop: rgba(242, 235, 224, 0.8);
+}
+[data-skin="sandstone"] .aurora {
+  background: radial-gradient(70% 50% at 50% 0%, rgba(201, 138, 82, 0.08), transparent 72%);
+}
+[data-skin="sandstone"] .pressable:active { transform: scale(0.982); }
+
+/* ═══════════════════════ MONOCHROME PRO — value only ═══════════════════════ */
+[data-skin="monochrome"] {
+  --r-xs: 3px; --r-sm: 5px; --r: 7px; --r-lg: 9px; --r-xl: 11px;
+  --font-display: "Segoe UI Variable Display", Inter, system-ui, sans-serif;
+  --font-ui: "Segoe UI Variable Text", Inter, system-ui, sans-serif;
+  --t-fast: 70ms; --t: 120ms; --t-slow: 180ms; --t-modal: 230ms;
+  --ease-out: cubic-bezier(0.2, 0.9, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-drawer: cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+[data-skin="monochrome"]:not([data-theme="light"]) {
+  --bg: #121212; --bg-deep: #0c0c0c; --surface: #1a1a1a; --surface-2: #212121; --surface-3: #292929;
+  --line: rgba(255, 255, 255, 0.1); --line-strong: rgba(255, 255, 255, 0.4);
+  --text-hi: #fafafa; --text: #cfcfcf; --text-dim: #8f8f8f; --text-faint: #5e5e5e;
+  /* No hue anywhere. Hierarchy is carried by value alone, and the accent is
+     simply the brightest step on the same ramp. */
+  --accent: #fafafa; --accent-2: #b8b8b8; --accent-ink: #0c0c0c;
+  --accent-glow: rgba(255, 255, 255, 0.18); --accent-soft: rgba(255, 255, 255, 0.08);
+  --neu-raised-sm: 0 0 0 1px var(--line);
+  --neu-raised: 0 0 0 1px var(--line), 0 3px 12px rgba(0, 0, 0, 0.4);
+  --neu-raised-lg: 0 0 0 1px var(--line-strong), 0 12px 32px rgba(0, 0, 0, 0.5);
+  --neu-inset: inset 0 0 0 1px var(--line);
+  --neu-inset-sm: inset 0 0 0 1px var(--line);
+  --backdrop: rgba(0, 0, 0, 0.74);
+}
+[data-skin="monochrome"][data-theme="light"] {
+  --bg: #fbfbfb; --bg-deep: #f0f0f0; --surface: #ffffff; --surface-2: #f7f7f7; --surface-3: #efefef;
+  --line: rgba(0, 0, 0, 0.11); --line-strong: rgba(0, 0, 0, 0.46);
+  --text-hi: #0d0d0d; --text: #303030; --text-dim: #6b6b6b; --text-faint: #9c9c9c;
+  --accent: #0d0d0d; --accent-2: #454545; --accent-ink: #ffffff;
+  --accent-glow: rgba(0, 0, 0, 0.14); --accent-soft: rgba(0, 0, 0, 0.06);
+  --neu-raised-sm: 0 0 0 1px var(--line);
+  --neu-raised: 0 0 0 1px var(--line), 0 3px 12px rgba(0, 0, 0, 0.07);
+  --neu-raised-lg: 0 0 0 1px var(--line-strong), 0 12px 32px rgba(0, 0, 0, 0.1);
+  --neu-inset: inset 0 0 0 1px var(--line);
+  --neu-inset-sm: inset 0 0 0 1px var(--line);
+  --backdrop: rgba(255, 255, 255, 0.78);
+}
+[data-skin="monochrome"] .aurora { background: none; }
+[data-skin="monochrome"] .pressable:active { transform: none; opacity: 0.66; }
+
+/* ═══════════════════════ HIGH CONTRAST — accessible by default ═══════════════════════ */
+[data-skin="high-contrast"] {
+  --r-xs: 0; --r-sm: 2px; --r: 4px; --r-lg: 4px; --r-xl: 6px; --r-pill: 4px;
+  --font-display: "Segoe UI Semibold", "Segoe UI", system-ui, sans-serif;
+  --font-ui: "Segoe UI", system-ui, sans-serif;
+  --t-fast: 1ms; --t: 1ms; --t-slow: 1ms; --t-modal: 80ms;
+  --ease-out: linear; --ease-in-out: linear; --ease-drawer: linear;
+  /* A focus ring you cannot miss — the whole point of the skin. */
+  --neu-focus: 0 0 0 3px var(--bg), 0 0 0 6px var(--accent);
+}
+[data-skin="high-contrast"]:not([data-theme="light"]) {
+  --bg: #000000; --bg-deep: #000000; --surface: #000000; --surface-2: #0d0d0d; --surface-3: #1a1a1a;
+  --line: #ffffff; --line-strong: #ffffff;
+  --text-hi: #ffffff; --text: #ffffff; --text-dim: #e0e0e0; --text-faint: #bdbdbd;
+  --accent: #ffff00; --accent-2: #00ffff; --accent-ink: #000000;
+  --accent-glow: rgba(255, 255, 0, 0.4); --accent-soft: rgba(255, 255, 0, 0.16);
+  --neu-raised-sm: 0 0 0 2px var(--line);
+  --neu-raised: 0 0 0 2px var(--line);
+  --neu-raised-lg: 0 0 0 3px var(--line);
+  --neu-inset: inset 0 0 0 2px var(--line);
+  --neu-inset-sm: inset 0 0 0 2px var(--line);
+  --backdrop: rgba(0, 0, 0, 0.92);
+}
+[data-skin="high-contrast"][data-theme="light"] {
+  --bg: #ffffff; --bg-deep: #ffffff; --surface: #ffffff; --surface-2: #f2f2f2; --surface-3: #e6e6e6;
+  --line: #000000; --line-strong: #000000;
+  --text-hi: #000000; --text: #000000; --text-dim: #1f1f1f; --text-faint: #3d3d3d;
+  --accent: #0000cc; --accent-2: #7a0099; --accent-ink: #ffffff;
+  --accent-glow: rgba(0, 0, 204, 0.32); --accent-soft: rgba(0, 0, 204, 0.12);
+  --neu-raised-sm: 0 0 0 2px var(--line);
+  --neu-raised: 0 0 0 2px var(--line);
+  --neu-raised-lg: 0 0 0 3px var(--line);
+  --neu-inset: inset 0 0 0 2px var(--line);
+  --neu-inset-sm: inset 0 0 0 2px var(--line);
+  --backdrop: rgba(255, 255, 255, 0.94);
+}
+[data-skin="high-contrast"] .aurora { background: none; }
+[data-skin="high-contrast"] .pressable:active { transform: none; background: var(--accent); color: var(--accent-ink); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   OG — the shell this app started as.
+
+   A terminal, not a surface: no neumorphic depth at all, only hairline rules.
+   Cyan is the interface colour and green is what money and status are printed
+   in, which is why accent-2 is green rather than a lighter cyan. Mono
+   everywhere, near-zero radius, and cuts instead of eases.
+   ═══════════════════════════════════════════════════════════════════════════ */
+[data-skin="og"] {
+  --r-xs: 2px; --r-sm: 3px; --r: 4px; --r-lg: 6px; --r-xl: 8px; --r-pill: 4px;
+  --font-display: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+  --font-ui: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+  --font-mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+  --t-fast: 60ms; --t: 100ms; --t-slow: 160ms; --t-modal: 200ms;
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-drawer: cubic-bezier(0.2, 0, 0, 1);
+}
+[data-skin="og"]:not([data-theme="light"]) {
+  --bg: #080b10; --bg-deep: #05070a; --surface: #0d1117; --surface-2: #12171f; --surface-3: #171d26;
+  --line: rgba(77, 216, 232, 0.14); --line-strong: rgba(77, 216, 232, 0.38);
+  --text-hi: #d6e3ea; --text: #9fb3c0; --text-dim: #6b8290; --text-faint: #47606e;
+  --accent: #4dd8e8; --accent-2: #4ade80; --accent-ink: #05070a;
+  --accent-glow: rgba(77, 216, 232, 0.34); --accent-soft: rgba(77, 216, 232, 0.1);
+  --neu-raised-sm: 0 0 0 1px var(--line);
+  --neu-raised: 0 0 0 1px var(--line), 0 0 10px rgba(77, 216, 232, 0.06);
+  --neu-raised-lg: 0 0 0 1px var(--line-strong), 0 0 22px rgba(77, 216, 232, 0.12);
+  --neu-inset: inset 0 0 0 1px var(--line);
+  --neu-inset-sm: inset 0 0 0 1px var(--line);
+  --backdrop: rgba(5, 7, 10, 0.88);
+}
+[data-skin="og"][data-theme="light"] {
+  --bg: #f2f5f7; --bg-deep: #e6ebee; --surface: #ffffff; --surface-2: #f6f9fa; --surface-3: #eef3f5;
+  --line: rgba(14, 124, 140, 0.2); --line-strong: rgba(14, 124, 140, 0.5);
+  --text-hi: #10222a; --text: #33505c; --text-dim: #5d7c88; --text-faint: #8ba4ae;
+  --accent: #0e7c8c; --accent-2: #17853f; --accent-ink: #ffffff;
+  --accent-glow: rgba(14, 124, 140, 0.24); --accent-soft: rgba(14, 124, 140, 0.09);
+  --neu-raised-sm: 0 0 0 1px var(--line);
+  --neu-raised: 0 0 0 1px var(--line);
+  --neu-raised-lg: 0 0 0 1px var(--line-strong), 0 6px 20px rgba(14, 124, 140, 0.12);
+  --neu-inset: inset 0 0 0 1px var(--line);
+  --neu-inset-sm: inset 0 0 0 1px var(--line);
+  --backdrop: rgba(242, 245, 247, 0.88);
+}
+/* No ambient glow — the original had a flat black field behind everything. */
+[data-skin="og"] .aurora { background: none; }
+/* Press reads as a cursor landing: the rule lights up, nothing moves. */
+[data-skin="og"] .pressable:active {
+  transform: none;
+  box-shadow: 0 0 0 1px var(--accent), 0 0 10px var(--accent-glow);
 }

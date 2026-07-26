@@ -13,10 +13,10 @@ import {
   deleteFolder,
   searchChats,
 } from "../../core/chats";
-import { chatToMarkdown } from "../../core/send";
-import { EASE_OUT } from "../../design/motion";
+import { chatToMarkdown, regenerateTitle } from "../../core/send";
+import { EASE_OUT, T } from "../../design/motion";
 import Icon from "../../ui/icons";
-import { NeuButton, NeuPopover, MenuItem, SectionLabel } from "../../ui/primitives";
+import { NeuButton, NeuInput, NeuModal, NeuPopover, MenuItem, SectionLabel } from "../../ui/primitives";
 import { toast } from "../../ui/Toaster";
 
 function ChatRow({ chat, active, folders }) {
@@ -74,7 +74,7 @@ function ChatRow({ chat, active, folders }) {
       <button
         type="button"
         onClick={() => setActiveChat(chat.id)}
-        className={`w-full flex items-center gap-2 px-3 h-9 rounded-sm text-left ${
+        className={`w-full flex items-center gap-2 pl-3 pr-9 h-9 rounded-sm text-left ${
           active ? "bg-deep [box-shadow:var(--neu-inset-sm)] text-hi" : "text-body hover:bg-surface-2 hover:text-hi"
         }`}
         style={{ transition: "background 140ms var(--ease-out), color 140ms var(--ease-out)" }}
@@ -94,52 +94,63 @@ function ChatRow({ chat, active, folders }) {
             className="flex-1 bg-transparent border-none outline-none text-[12.5px] text-hi min-w-0"
           />
         ) : (
-          <span className="flex-1 truncate text-[12.5px]">{chat.title || "New chat"}</span>
+          <span className={`flex-1 truncate text-[12.5px] ${chat.special ? "text-accent" : ""}`}>
+            {chat.special && <Icon name="spark" size={11} className="inline-block mr-1 -mt-0.5 text-accent" />}
+            {chat.title || "New chat"}
+          </span>
         )}
       </button>
-      <button
-        type="button"
-        aria-label={chat.pinned ? "Unpin chat" : "Pin chat"}
-        title={chat.pinned ? "Unpin chat" : "Pin chat"}
-        onClick={(e) => {
-          e.stopPropagation();
-          togglePinChat(chat.id);
-          toast.success(chat.pinned ? "Chat unpinned" : "Chat pinned");
-        }}
-        className={`absolute right-[58px] top-1/2 -translate-y-1/2 w-6 h-6 rounded-xs flex items-center justify-center ${
-          chat.pinned
-            ? "opacity-0 group-hover:opacity-100 text-accent"
-            : "opacity-0 group-hover:opacity-100 text-faint hover:text-accent"
+      {/* Quick actions — pin + delete revealed on hover inside a solid floating
+          chip, so the icons read clearly instead of ghosting over the title.
+          confirmDel forces the chip open so the confirm state is always seen. */}
+      <div
+        className={`absolute right-9 top-1/2 -translate-y-1/2 flex items-center gap-0.5 px-1 h-7 rounded-full bg-surface-2 [box-shadow:var(--neu-raised-sm)] ${
+          confirmDel ? "opacity-100" : "opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto"
         }`}
-        style={{ transition: "opacity 120ms var(--ease-out), color 120ms var(--ease-out)" }}
+        style={{ transition: "opacity 120ms var(--ease-out)" }}
       >
-        <Icon name="pin" size={12} />
-      </button>
-      <button
-        type="button"
-        aria-label={confirmDel ? "Click again to confirm delete" : "Delete chat"}
-        title={confirmDel ? "Click again to confirm" : "Delete chat"}
-        onClick={(e) => {
-          e.stopPropagation();
-          if (confirmDel) {
-            deleteChat(chat.id);
-            toast.success("Chat deleted");
-          } else {
-            setConfirmDel(true);
+        <button
+          type="button"
+          aria-label={chat.pinned ? "Unpin chat" : "Pin chat"}
+          title={chat.pinned ? "Unpin chat" : "Pin chat"}
+          onClick={(e) => {
+            e.stopPropagation();
+            togglePinChat(chat.id);
+            toast.success(chat.pinned ? "Chat unpinned" : "Chat pinned");
+          }}
+          className={`pressable w-6 h-6 rounded-xs flex items-center justify-center ${
+            chat.pinned ? "text-accent" : "text-dim hover:text-accent"
+          }`}
+        >
+          <Icon name="pin" size={12} />
+        </button>
+        <button
+          type="button"
+          aria-label={confirmDel ? "Click again to confirm delete" : "Delete chat"}
+          title={confirmDel ? "Click again to confirm" : "Delete chat"}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (confirmDel) {
+              deleteChat(chat.id);
+              toast.success("Chat deleted");
+            } else {
+              setConfirmDel(true);
+            }
+          }}
+          className={`pressable w-6 h-6 rounded-xs flex items-center justify-center ${
+            confirmDel ? "text-err" : "text-dim hover:text-err"
+          }`}
+          style={
+            confirmDel
+              ? { background: "var(--err-soft)", boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--err) 35%, transparent)" }
+              : undefined
           }
-        }}
-        className={`absolute right-8 top-1/2 -translate-y-1/2 w-6 h-6 rounded-xs flex items-center justify-center ${
-          confirmDel ? "opacity-100 text-err" : "opacity-0 group-hover:opacity-100 text-faint hover:text-err"
-        }`}
-        style={{
-          transition: "opacity 120ms var(--ease-out), color 120ms var(--ease-out)",
-          ...(confirmDel
-            ? { background: "var(--err-soft)", boxShadow: "inset 0 0 0 1px color-mix(in srgb, var(--err) 35%, transparent)" }
-            : {}),
-        }}
-      >
-        <Icon name="trash" size={12} />
-      </button>
+        >
+          <Icon name="trash" size={12} />
+        </button>
+      </div>
+      {/* Kebab stays visible at rest so the full action menu (Pin / Delete /
+          Rename / Export) is always discoverable — no hover guessing. */}
       <button
         type="button"
         ref={menuBtnRef}
@@ -148,12 +159,12 @@ function ChatRow({ chat, active, folders }) {
           e.stopPropagation();
           setMenuOpen((o) => !o);
         }}
-        className={`absolute right-1.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-xs flex items-center justify-center text-faint hover:text-hi ${
-          menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+        className={`absolute right-1.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-xs flex items-center justify-center hover:text-hi hover:bg-surface-3 ${
+          menuOpen || active ? "text-hi" : "text-dim"
         }`}
-        style={{ transition: "opacity 120ms var(--ease-out)" }}
+        style={{ opacity: 1, transition: "color 120ms var(--ease-out), background 120ms var(--ease-out)" }}
       >
-        <Icon name="dots" size={14} />
+        <Icon name="dots" size={18} strokeWidth={2.25} />
       </button>
       <NeuPopover portal anchorRef={menuBtnRef} open={menuOpen} onClose={() => setMenuOpen(false)} anchor="bottom-end" width={190}>
         <MenuItem icon="pin" onClick={() => { togglePinChat(chat.id); setMenuOpen(false); }}>
@@ -161,6 +172,9 @@ function ChatRow({ chat, active, folders }) {
         </MenuItem>
         <MenuItem icon="edit" onClick={() => { setDraft(chat.title || ""); setRenaming(true); setMenuOpen(false); }}>
           Rename
+        </MenuItem>
+        <MenuItem icon="wand" onClick={() => { setMenuOpen(false); toast.info("Renaming with AI…"); regenerateTitle(chat.id); }}>
+          Rename with AI
         </MenuItem>
         <MenuItem icon="download" onClick={() => { exportMarkdownFile(); setMenuOpen(false); }}>
           Export as Markdown
@@ -198,6 +212,16 @@ export default function Sidebar() {
   const state = useStore(chatsStore);
   const [query, setQuery] = useState("");
   const [collapsedFolders, setCollapsedFolders] = useState({});
+  const [folderModalOpen, setFolderModalOpen] = useState(false);
+  const [folderName, setFolderName] = useState("");
+
+  const submitFolder = () => {
+    const name = folderName.trim();
+    if (!name) return;
+    createFolder(name);
+    setFolderName("");
+    setFolderModalOpen(false);
+  };
 
   const filtered = useMemo(() => searchChats(state, query), [state, query]);
 
@@ -253,7 +277,7 @@ export default function Sidebar() {
                   onClick={() => setCollapsedFolders((s) => ({ ...s, [f.id]: !s[f.id] }))}
                   className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-faint hover:text-dim"
                 >
-                  <motion.span animate={{ rotate: collapsed ? 0 : 90 }} transition={{ duration: 0.15, ease: EASE_OUT }} className="flex">
+                  <motion.span animate={{ rotate: collapsed ? 0 : 90 }} transition={{ duration: T, ease: EASE_OUT }} className="flex">
                     <Icon name="chevronRight" size={10} />
                   </motion.span>
                   {f.name}
@@ -274,7 +298,7 @@ export default function Sidebar() {
                     initial={{ height: 0, opacity: 0 }}
                     animate={{ height: "auto", opacity: 1 }}
                     exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.18, ease: EASE_OUT }}
+                    transition={{ duration: T, ease: EASE_OUT }}
                     className="overflow-hidden flex flex-col gap-0.5"
                   >
                     {chats.map((c) => (
@@ -306,15 +330,35 @@ export default function Sidebar() {
       <div className="p-3 pt-0">
         <button
           type="button"
-          onClick={() => {
-            const name = window.prompt("Folder name");
-            if (name) createFolder(name);
-          }}
+          onClick={() => { setFolderName(""); setFolderModalOpen(true); }}
           className="pressable w-full h-8 rounded-sm flex items-center justify-center gap-1.5 text-[11.5px] text-faint hover:text-body"
         >
           <Icon name="folder" size={13} /> New folder
         </button>
       </div>
+
+      <NeuModal
+        open={folderModalOpen}
+        onClose={() => setFolderModalOpen(false)}
+        title="New folder"
+        width={360}
+        footer={
+          <>
+            <NeuButton variant="ghost" onClick={() => setFolderModalOpen(false)}>Cancel</NeuButton>
+            <NeuButton variant="accent" onClick={submitFolder} disabled={!folderName.trim()}>Create</NeuButton>
+          </>
+        }
+      >
+        <NeuInput
+          autoFocus
+          value={folderName}
+          onChange={(e) => setFolderName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); submitFolder(); }
+          }}
+          placeholder="Folder name"
+        />
+      </NeuModal>
     </aside>
   );
 }

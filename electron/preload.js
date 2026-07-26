@@ -21,13 +21,25 @@ contextBridge.exposeInMainWorld("electronAPI", {
   exportMemory: (payload) => ipcRenderer.invoke("memory-export", payload),
   // Ollama API proxy (main-process request to avoid renderer CORS issues)
   ollamaApiRequest: (payload) => ipcRenderer.invoke("ollama-api-request", payload),
+  // Local model runtime (bundled Ollama) — lifecycle + model management
+  localStatus: () => ipcRenderer.invoke("local-status"),
+  localServe: (runtimeOptions) => ipcRenderer.invoke("local-serve", runtimeOptions),
+  localStop: () => ipcRenderer.invoke("local-stop"),
+  localList: () => ipcRenderer.invoke("local-list"),
+  localPull: (model) => ipcRenderer.invoke("local-pull", model),
+  localDelete: (model) => ipcRenderer.invoke("local-delete", model),
+  localOpenModelsDir: () => ipcRenderer.invoke("local-open-models-dir"),
+  onLocalPullProgress: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on("local-pull-progress", handler);
+    return () => ipcRenderer.removeListener("local-pull-progress", handler);
+  },
   // File system
   selectFolder: () => ipcRenderer.invoke("select-folder"),
   setWorkspaceBase: (folderPath) => ipcRenderer.invoke("set-workspace-base", folderPath),
   readDir: (dirPath) => ipcRenderer.invoke("read-dir", dirPath),
   readFile: (filePath) => ipcRenderer.invoke("read-file", filePath),
-  extractPdfText: (filePath) => ipcRenderer.invoke("extract-pdf-text", filePath),
-  extractPdfTextFromBuffer: (arrayBuffer) => ipcRenderer.invoke("extract-pdf-text-buffer", arrayBuffer),
+  extractFileText: (arrayBuffer, name, mime) => ipcRenderer.invoke("extract-file-text", arrayBuffer, name, mime),
   writeFile: (filePath, content) => ipcRenderer.invoke("write-file", filePath, content),
   writeClipboardText: (text) => ipcRenderer.invoke("clipboard-write-text", text),
   // Window controls
@@ -35,9 +47,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
   windowMaximize: () => ipcRenderer.invoke("window-maximize"),
   windowClose: () => ipcRenderer.invoke("window-close"),
   getPlatformInfo: () => ipcRenderer.invoke("get-platform-info"),
+  // GPU / hardware capability detection (drives OCR engine policy; never auto-downloads)
+  getGpuInfo: () => ipcRenderer.invoke("get-gpu-info"),
   // Auto-updater
   checkForUpdates: () => ipcRenderer.invoke("check-for-updates"),
   getAppVersion: () => ipcRenderer.invoke("get-app-version"),
+  restartAndInstall: () => ipcRenderer.invoke("restart-and-install"),
   onUpdateStatus: (callback) => {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on("update-status", handler);

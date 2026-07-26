@@ -1,4 +1,5 @@
 import { mapReasoningEffort, supportsReasoningModel } from "../utils/reasoningControls";
+import { parseChatSSE } from "./sse";
 const API_BASE = "https://router.huggingface.co/v1";
 const HUB_API  = "https://huggingface.co/api/models";
 
@@ -581,41 +582,5 @@ export async function streamMessage(
     throw new Error(`HuggingFace ${res.status}: ${detail}`);
   }
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let full = "";
-  let buffer = "";
-  let usage = null;
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || !trimmed.startsWith("data: ")) continue;
-      const payload = trimmed.slice(6);
-      if (payload === "[DONE]") break;
-      try {
-        const json = JSON.parse(payload);
-        const token = json.choices?.[0]?.delta?.content;
-        if (token) {
-          full += token;
-          onChunk?.(full);
-        }
-        if (json.usage) {
-          usage = {
-            prompt_tokens: json.usage.prompt_tokens || 0,
-            completion_tokens: json.usage.completion_tokens || 0,
-            cost: null,
-          };
-        }
-      } catch {}
-    }
-  }
-
-  return { text: full || "(No response)", usage };
+  return parseChatSSE(res, onChunk);
 }

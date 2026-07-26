@@ -1,13 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="a" x1="30" y1="50" x2="48" y2="14" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#ff8a3d"/>
-      <stop offset="1" stop-color="#ffc46b"/>
+    <linearGradient id="kpBg" x1="256" y1="48" x2="256" y2="464" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#26262b"/>
+      <stop offset="1" stop-color="#0b0b0d"/>
+    </linearGradient>
+    <linearGradient id="kpMark" x1="176" y1="150" x2="332" y2="362" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FBBF24"/>
+      <stop offset="1" stop-color="#F97316"/>
     </linearGradient>
   </defs>
-  <rect width="64" height="64" rx="17" fill="#101114"/>
-  <g transform="translate(6.4,6.4) scale(1.6)" fill="none">
-    <path d="M10.6 6.8v18.4" stroke="#ECE7DC" stroke-width="3.5" stroke-linecap="round"/>
-    <path d="M23.2 7 15.4 16l7.8 9" stroke="url(#a)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="48" y="48" width="416" height="416" rx="120" fill="url(#kpBg)"/>
+  <g stroke="url(#kpMark)" stroke-width="48" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M182 156 V356"/>
+    <path d="M182 270 L322 156"/>
+    <path d="M182 242 L332 356"/>
   </g>
 </svg>

@@ -29,29 +29,9 @@ export const TASK_OPTIONS = [
 const TEXT_TO_IMAGE_PATTERNS = [
   "flux", "stable-diffusion", "sdxl", "ideogram", "imagen", "dall-e", "dalle", "recraft", "kandinsky",
 ];
-// Strict patterns — only model IDs that are video *generators*, not VL/multimodal models that accept video input
-const TEXT_TO_VIDEO_PATTERNS = ["veo-", "sora", "hunyuanvideo", "wan-ai/wan", "kling", "seedance", "seed-1.", "seed-2.", "haiper", "pika", "luma"];
 const AUDIO_PATTERNS = ["tts", "text-to-speech", "speech", "voice", "audio", "bark", "kokoro"];
 const IMAGE_EDIT_PATTERNS = ["image-to-image", "img2img", "inpaint", "controlnet", "edit"];
 const MULTIMODAL_PATTERNS = ["omni", "multimodal", "any-to-any", "gpt-4o", "gemini", "qwen-vl", "glm-4.5v", "claude"];
-
-export function taskLabel(taskId) {
-  return TASK_OPTIONS.find((t) => t.id === taskId)?.label || "Text Generation";
-}
-
-export function detectUiTask(text, uploads = [], attachedFiles = []) {
-  const lower = (text || "").toLowerCase();
-
-  if (uploads.some((u) => u.type === "image")) return "image-to-text";
-  if (/(generate|create|make).*(image|logo|poster|art|photo|picture)/.test(lower)) return "text-to-image";
-  if (/(generate|create|make).*(video|clip|animation)/.test(lower)) return "text-generation";
-  if (/(text to speech|tts|voiceover|narrate|read aloud|speak this)/.test(lower)) return "text-to-speech";
-  if (/(edit image|modify image|restyle image|image to image|img2img)/.test(lower)) return "image-to-image";
-  if (/(any to any|multimodal|audio and image|video and text)/.test(lower)) return "text-generation";
-  if (uploads.some((u) => u.type === "pdf") || uploads.some((u) => u.type === "file") || attachedFiles.length > 0) return "text-generation";
-
-  return "text-generation";
-}
 
 /**
  * Detect the task type from the current context.
@@ -88,22 +68,49 @@ export function detectTaskType(text, uploads = [], attachedFiles = []) {
 
 // ── Model capability detection ──────────────────────────────────────────────
 
-const VISION_PATTERNS = [
-  "vision", "gpt-4o", "gpt-4-turbo", "gemini", "claude-3",
-  "claude-3.5", "claude-4", "llava", "pixtral", "qwen-vl",
-  "qwen2-vl", "internvl", "cogvlm", "moondream",
-];
+/* Vision detection.
+ *
+ * OpenRouter reports architecture.modality, but the NVIDIA and HuggingFace
+ * catalogues carry no architecture field at all, so for those providers the id
+ * patterns below are the ONLY signal. Substring matching also missed families
+ * whose names do not spell it out — "qwen2-vl" never matched "qwen2.5-vl", and
+ * natively-multimodal families like Llama 4 and Gemma 3 were absent entirely.
+ *
+ * Only add a family here when it genuinely accepts image input: a false
+ * positive sends a picture to a text-only endpoint and fails the request. */
+const VISION_RE = new RegExp(
+  [
+    "vision", // llama-3.2-*-vision, phi-3.5-vision, aya-vision, grok-2-vision
+    "multimodal", // phi-4-multimodal
+    "[-_.]vl\\b", // qwen2.5-vl, qwen3-vl, nemotron-nano-12b-v2-vl, kimi-vl
+    "llava", "pixtral", "internvl", "cogvlm", "moondream", "molmo",
+    "minicpm-v", "smolvlm", "idefics", "ovis",
+    "glm-4[.0-9]*v", "step-1v",
+    "llama-4", // Scout and Maverick are natively multimodal
+    "gemma-3", // 4b / 12b / 27b / 3n — the 1b is text-only, excluded below
+    "mistral-small-3\\.[12]",
+    "gpt-4o", "gpt-4-turbo", "gpt-4\\.1", "gpt-5",
+    "(^|[^a-z])o[34]([^a-z]|$)",
+    "gemini",
+    "claude-3", "claude-4", "claude-(opus|sonnet|haiku)-4",
+  ].join("|"),
+  "i"
+);
+
+/** Text-only members of families that are otherwise multimodal. */
+const VISION_EXCEPTIONS = /gemma-3-(1b|270m)|gemma-3n?-1b/i;
 
 /**
  * Check if a model likely supports image/vision input.
  * Uses model ID and architecture info from OpenRouter metadata.
  */
 export function supportsVision(model) {
-  const id = model.id.toLowerCase();
+  const id = String(model?.id || "").toLowerCase();
   // OpenRouter models may have an architecture.modality field
-  const modality = model.architecture?.modality || "";
+  const modality = model?.architecture?.modality || "";
   if (modality.includes("image") || modality.includes("multimodal")) return true;
-  return VISION_PATTERNS.some((p) => id.includes(p));
+  if (VISION_EXCEPTIONS.test(id)) return false;
+  return VISION_RE.test(id);
 }
 
 /** All text models support text — this is a convenience check for non-image tasks */
@@ -128,16 +135,6 @@ export function supportsImageEditing(model) {
   const modality = model.architecture?.modality || "";
   if (modality.includes("image->image")) return true;
   return IMAGE_EDIT_PATTERNS.some((p) => id.includes(p));
-}
-
-export function supportsVideo(model) {
-  // Explicit flag set by our provider router (HF video gen models)
-  if (model?._isVideoGen) return true;
-  const id = model.id.toLowerCase();
-  const modality = model.architecture?.modality || "";
-  // Only models that OUTPUT video — "text+video->text" VL models must NOT match
-  if (modality.includes("->video")) return true;
-  return TEXT_TO_VIDEO_PATTERNS.some((p) => id.includes(p));
 }
 
 export function supportsAudio(model) {
@@ -175,16 +172,6 @@ export function supportsTask(model, taskId) {
     default:
       return supportsText(model);
   }
-}
-
-export function filterModelsForTask(models, taskId) {
-  return models.filter((m) => supportsTask(m, taskId));
-}
-
-export function uiTaskToAdvisorTask(taskId, text = "", uploads = [], attachedFiles = []) {
-  if (taskId === "image-to-text" || taskId === "any-to-any") return "vision";
-  if (taskId === "text-generation") return detectTaskType(text, uploads, attachedFiles);
-  return "general";
 }
 
 // ── Cost helpers ────────────────────────────────────────────────────────────
@@ -266,110 +253,3 @@ export function qualityScore(model) {
 }
 
 // ── Main selection logic ────────────────────────────────────────────────────
-
-/**
- * Given models and context, return a recommendation.
- *
- * @param {Array} models - All available OpenRouter models
- * @param {string} taskType - "vision"|"document"|"coding"|"general"
- * @param {string} currentModelId - Currently selected model ID
- * @param {"auto"|"free"|"paid"} preference - "free" = only free, "paid" = only paid, "auto" = free first
- * @returns {{ recommended: object|null, free: object|null, paid: object|null,
- *             currentOk: boolean, reason: string, taskType: string }}
- */
-export function selectSmartModel(models, taskType, currentModelId, preference = "auto") {
-  if (!models.length) {
-    return { recommended: null, free: null, paid: null, currentOk: false, reason: "", taskType };
-  }
-
-  // 1. Filter by capability
-  let capable;
-  if (taskType === "vision") {
-    capable = models.filter(supportsVision);
-  } else if (TASK_OPTIONS.some((t) => t.id === taskType)) {
-    capable = models.filter((m) => supportsTask(m, taskType));
-  } else {
-    capable = [...models]; // all models handle text/document/coding
-  }
-
-  if (capable.length === 0) {
-    return { recommended: null, free: null, paid: null, currentOk: false, reason: "No capable models found", taskType };
-  }
-
-  // 2. Split free / paid, sorted by quality (param-size-aware)
-  const sortByQuality = (a, b) => qualityScore(b) - qualityScore(a);
-  const freeModels = capable.filter(isFreeModel).sort(sortByQuality);
-  const paidModels = capable.filter((m) => !isFreeModel(m)).sort(sortByQuality);
-
-  const bestFree = freeModels[0] || null;
-  const bestPaid = paidModels[0] || null;
-
-  // 3. Check if current model is capable
-  const currentModel = models.find((m) => (m._selectionId || m.id) === currentModelId || m.id === currentModelId);
-  const currentCapable = currentModel
-    ? (taskType === "vision"
-        ? supportsVision(currentModel)
-        : TASK_OPTIONS.some((t) => t.id === taskType)
-          ? supportsTask(currentModel, taskType)
-          : true)
-    : false;
-
-  // 4. Determine recommendation based on preference
-  let recommended = null;
-  let reason = "";
-
-  if (currentCapable) {
-    recommended = currentModel;
-    reason = "";
-  } else if (preference === "free") {
-    // Only suggest free models
-    if (bestFree) {
-      recommended = bestFree;
-      const params = extractParamBillions(bestFree);
-      const paramInfo = params > 0 ? ` (${params}B params)` : "";
-      reason = taskType === "vision"
-        ? `Your current model doesn't support images. Switch to a free vision model${paramInfo}?`
-        : `Switching to a higher-quality free model${paramInfo}.`;
-    } else {
-      reason = "No free models available for this task.";
-    }
-  } else if (preference === "paid") {
-    // Only suggest paid models
-    if (bestPaid) {
-      recommended = bestPaid;
-      const params = extractParamBillions(bestPaid);
-      const paramInfo = params > 0 ? ` (${params}B params)` : "";
-      reason = taskType === "vision"
-        ? `Your current model doesn't support images. Switch to a top paid vision model${paramInfo}?`
-        : `Switch to a top paid model${paramInfo} for best quality.`;
-    } else {
-      reason = "No paid models available for this task.";
-    }
-  } else {
-    // "auto" — prefer free, fallback to paid
-    if (bestFree) {
-      recommended = bestFree;
-      const params = extractParamBillions(bestFree);
-      const paramInfo = params > 0 ? ` (${params}B params)` : "";
-      reason = taskType === "vision"
-        ? `Your current model doesn't support images. Switch to a free vision model${paramInfo}?`
-        : "";
-    } else if (bestPaid) {
-      recommended = bestPaid;
-      const params = extractParamBillions(bestPaid);
-      const paramInfo = params > 0 ? ` (${params}B params)` : "";
-      reason = taskType === "vision"
-        ? `Image support requires a paid model${paramInfo}.`
-        : `This task requires a paid model${paramInfo}.`;
-    }
-  }
-
-  return {
-    recommended,
-    free: bestFree,
-    paid: bestPaid,
-    currentOk: currentCapable,
-    reason,
-    taskType,
-  };
-}

@@ -1,23 +1,45 @@
+import { settingsStore } from "../core/settings";
+
 const CLOUD_OLLAMA_BASE_URL = "https://ollama.com";
 const LEGACY_LOCAL_BASE_URL = "http://127.0.0.1:11434";
-
-/**
- * Curated image-generation model IDs for Ollama.
- * Some require explicit pull/availability in the connected Ollama runtime.
- */
-export const IMAGE_GEN_MODELS = [
-  { id: "x/z-image-turbo", name: "z-image-turbo", _provider: "ollama", _isImageGen: true, pricing: { prompt: "0", completion: "0" }, context_length: 0 },
-  { id: "black-forest-labs/flux.1-schnell", name: "FLUX.1 Schnell", _provider: "ollama", _isImageGen: true, pricing: { prompt: "0", completion: "0" }, context_length: 0 },
-  { id: "black-forest-labs/flux.1-dev", name: "FLUX.1 Dev", _provider: "ollama", _isImageGen: true, pricing: { prompt: "0", completion: "0" }, context_length: 0 },
-  { id: "stabilityai/stable-diffusion-xl", name: "Stable Diffusion XL", _provider: "ollama", _isImageGen: true, pricing: { prompt: "0", completion: "0" }, context_length: 0 },
-  { id: "stabilityai/stable-diffusion-3.5-large", name: "Stable Diffusion 3.5 Large", _provider: "ollama", _isImageGen: true, pricing: { prompt: "0", completion: "0" }, context_length: 0 },
-];
 
 function normalizeBaseUrl(value) {
   const raw = String(value || "").trim();
   if (!raw) return LEGACY_LOCAL_BASE_URL;
   const withScheme = /^https?:\/\//i.test(raw) ? raw : `http://${raw}`;
   return withScheme.replace(/\/+$/, "");
+}
+
+// Advanced runtime knobs (Settings → Local Models → Runtime). Applied only to
+// the local runtime — cloud endpoints ignore/reject these, so we skip them.
+function localRuntimeRequestOptions(baseUrl) {
+  const empty = { options: {}, keep_alive: null };
+  let host = "";
+  try {
+    host = new URL(baseUrl).hostname;
+  } catch {
+    return empty;
+  }
+  const isLocal = host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "[::1]";
+  if (!isLocal) return empty;
+
+  let rt = null;
+  try {
+    rt = settingsStore.get().localRuntime;
+  } catch {
+    /* settings store unavailable (tests) — fall back to runtime defaults */
+  }
+  if (!rt) return empty;
+
+  const options = {};
+  if (Number(rt.contextLength) > 0) options.num_ctx = Math.floor(Number(rt.contextLength));
+  if (rt.numGpu !== null && rt.numGpu !== undefined && rt.numGpu !== "" && Number.isFinite(Number(rt.numGpu))) {
+    options.num_gpu = Math.max(0, Math.floor(Number(rt.numGpu)));
+  }
+  if (Number(rt.numThread) > 0) options.num_thread = Math.floor(Number(rt.numThread));
+
+  const keepAlive = String(rt.keepAlive ?? "").trim();
+  return { options, keep_alive: keepAlive || null };
 }
 
 function resolveConnection(value) {
@@ -141,370 +163,6 @@ function isCloudHost(baseUrl) {
   } catch {
     return false;
   }
-}
-
-function isObjectLike(value) {
-  return !!value && typeof value === "object";
-}
-
-function normalizeUsageKey(value) {
-  return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-function valueToFiniteNumber(value) {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value !== "string") return NaN;
-
-  const cleaned = value.replace(/[,%$]/g, "").trim();
-  if (!cleaned) return NaN;
-
-  const parsed = Number(cleaned);
-  return Number.isFinite(parsed) ? parsed : NaN;
-}
-
-function valueToPercent(value) {
-  const numeric = valueToFiniteNumber(value);
-  if (!Number.isFinite(numeric) || numeric < 0) return null;
-  if (numeric <= 1) return numeric * 100;
-  if (numeric <= 1000) return numeric;
-  return null;
-}
-
-function humanizeDurationSeconds(totalSeconds) {
-  const sec = Math.max(0, Math.round(Number(totalSeconds) || 0));
-  if (!sec) return "";
-  if (sec >= 86400) {
-    const days = Math.round(sec / 86400);
-    return `${days} day${days === 1 ? "" : "s"}`;
-  }
-  if (sec >= 3600) {
-    const hours = Math.round(sec / 3600);
-    return `${hours} hour${hours === 1 ? "" : "s"}`;
-  }
-  if (sec >= 60) {
-    const mins = Math.round(sec / 60);
-    return `${mins} minute${mins === 1 ? "" : "s"}`;
-  }
-  return `${sec} second${sec === 1 ? "" : "s"}`;
-}
-
-function normalizeResetHint(value) {
-  if (value == null) return "";
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    if (value > 1e12) {
-      const deltaSeconds = Math.round((value - Date.now()) / 1000);
-      return deltaSeconds > 0 ? humanizeDurationSeconds(deltaSeconds) : "";
-    }
-    if (value > 1e9) {
-      const deltaSeconds = Math.round(value - Date.now() / 1000);
-      return deltaSeconds > 0 ? humanizeDurationSeconds(deltaSeconds) : "";
-    }
-    return humanizeDurationSeconds(value);
-  }
-
-  if (typeof value !== "string") return "";
-
-  const text = value.trim();
-  if (!text) return "";
-
-  const parsedDate = Date.parse(text);
-  if (Number.isFinite(parsedDate)) {
-    const deltaSeconds = Math.round((parsedDate - Date.now()) / 1000);
-    if (deltaSeconds > 0) return humanizeDurationSeconds(deltaSeconds);
-  }
-
-  return text
-    .replace(/^resets?\s+in\s+/i, "")
-    .replace(/^in\s+/i, "")
-    .trim();
-}
-
-function collectPrimitivesFromMatchedValue(value) {
-  if (typeof value === "string" || typeof value === "number") {
-    return [value];
-  }
-
-  if (!isObjectLike(value)) {
-    return [];
-  }
-
-  if (Array.isArray(value)) {
-    return value.filter((item) => typeof item === "string" || typeof item === "number");
-  }
-
-  const fromObject = [];
-  for (const [key, inner] of Object.entries(value)) {
-    if (typeof inner !== "string" && typeof inner !== "number") continue;
-    const normalized = normalizeUsageKey(key);
-    if (["name", "label", "plan", "tier", "type", "value"].includes(normalized) || fromObject.length < 4) {
-      fromObject.push(inner);
-    }
-  }
-
-  return fromObject;
-}
-
-function collectValuesByKeyHints(root, keyHints = []) {
-  const hints = (keyHints || []).map(normalizeUsageKey).filter(Boolean);
-  if (!isObjectLike(root) || hints.length === 0) return [];
-
-  const values = [];
-  const seen = new Set();
-  const stack = [root];
-
-  while (stack.length) {
-    const current = stack.pop();
-    if (!isObjectLike(current) || seen.has(current)) continue;
-    seen.add(current);
-
-    if (Array.isArray(current)) {
-      for (const entry of current) {
-        if (isObjectLike(entry)) stack.push(entry);
-      }
-      continue;
-    }
-
-    for (const [rawKey, rawValue] of Object.entries(current)) {
-      const key = normalizeUsageKey(rawKey);
-      if (key && hints.some((hint) => key.includes(hint) || hint.includes(key))) {
-        values.push(...collectPrimitivesFromMatchedValue(rawValue));
-      }
-
-      if (isObjectLike(rawValue)) stack.push(rawValue);
-    }
-  }
-
-  return values;
-}
-
-function findSectionObject(root, keyHint) {
-  const hint = normalizeUsageKey(keyHint);
-  if (!isObjectLike(root) || !hint) return null;
-
-  const seen = new Set();
-  const stack = [root];
-
-  while (stack.length) {
-    const current = stack.pop();
-    if (!isObjectLike(current) || seen.has(current)) continue;
-    seen.add(current);
-
-    if (Array.isArray(current)) {
-      for (const entry of current) {
-        if (isObjectLike(entry)) stack.push(entry);
-      }
-      continue;
-    }
-
-    for (const [rawKey, rawValue] of Object.entries(current)) {
-      if (isObjectLike(rawValue)) {
-        if (normalizeUsageKey(rawKey).includes(hint)) {
-          return rawValue;
-        }
-        stack.push(rawValue);
-      }
-    }
-  }
-
-  return null;
-}
-
-function pickFirstFiniteNumber(values = []) {
-  for (const value of values) {
-    const numeric = valueToFiniteNumber(value);
-    if (Number.isFinite(numeric)) return numeric;
-  }
-  return null;
-}
-
-function pickFirstPercent(values = []) {
-  for (const value of values) {
-    const percent = valueToPercent(value);
-    if (percent != null) return percent;
-  }
-  return null;
-}
-
-function pickFirstReset(values = []) {
-  for (const value of values) {
-    const text = normalizeResetHint(value);
-    if (text) return text;
-  }
-  return "";
-}
-
-function extractUsageWindow(payload, windowName) {
-  const normalizedWindow = normalizeUsageKey(windowName);
-  const sectionCandidate = findSectionObject(payload, normalizedWindow);
-  const section = sectionCandidate || payload;
-  const hasWindowSection = !!sectionCandidate;
-
-  const percent = pickFirstPercent([
-    ...collectValuesByKeyHints(section, [
-      `${normalizedWindow}usagepercent`,
-      `${normalizedWindow}percentused`,
-      `${normalizedWindow}percentageused`,
-      `${normalizedWindow}percent`,
-      ...(hasWindowSection
-        ? ["usagepercent", "usedpercent", "percentageused", "percent", "percentage", "ratio"]
-        : []),
-    ]),
-    ...collectValuesByKeyHints(payload, [
-      `${normalizedWindow}usagepercent`,
-      `${normalizedWindow}percentused`,
-      `${normalizedWindow}percentageused`,
-      `${normalizedWindow}percent`,
-      `${normalizedWindow}percentage`,
-      `${normalizedWindow}usedratio`,
-      `${normalizedWindow}usageratio`,
-    ]),
-  ]);
-
-  const used = pickFirstFiniteNumber([
-    ...collectValuesByKeyHints(section, [
-      `${normalizedWindow}used`,
-      `${normalizedWindow}usage`,
-      `${normalizedWindow}consumed`,
-      ...(hasWindowSection ? ["used", "usage", "consumed"] : []),
-    ]),
-    ...collectValuesByKeyHints(payload, [
-      `${normalizedWindow}used`,
-      `${normalizedWindow}usage`,
-      `${normalizedWindow}consumed`,
-      `${normalizedWindow}current`,
-    ]),
-  ]);
-
-  const limit = pickFirstFiniteNumber([
-    ...collectValuesByKeyHints(section, [
-      `${normalizedWindow}limit`,
-      `${normalizedWindow}quota`,
-      `${normalizedWindow}max`,
-      `${normalizedWindow}total`,
-      ...(hasWindowSection ? ["limit", "quota", "max", "total", "capacity"] : []),
-    ]),
-    ...collectValuesByKeyHints(payload, [
-      `${normalizedWindow}limit`,
-      `${normalizedWindow}quota`,
-      `${normalizedWindow}max`,
-      `${normalizedWindow}total`,
-      `${normalizedWindow}capacity`,
-    ]),
-  ]);
-
-  const resetsIn = pickFirstReset([
-    ...collectValuesByKeyHints(section, [
-      `${normalizedWindow}resetsin`,
-      `${normalizedWindow}resetin`,
-      `${normalizedWindow}resetat`,
-      `${normalizedWindow}nextreset`,
-      ...(hasWindowSection ? ["resetsin", "resetin", "resetat", "nextreset", "resetsat", "reset"] : []),
-    ]),
-    ...collectValuesByKeyHints(payload, [
-      `${normalizedWindow}resetsin`,
-      `${normalizedWindow}resetin`,
-      `${normalizedWindow}resetat`,
-      `${normalizedWindow}nextreset`,
-    ]),
-  ]);
-
-  const normalizedUsed = Number.isFinite(used) ? used : null;
-  const normalizedLimit = Number.isFinite(limit) ? limit : null;
-
-  let percentUsed = percent;
-  if (percentUsed == null && normalizedUsed != null && normalizedLimit != null && normalizedLimit > 0) {
-    percentUsed = (normalizedUsed / normalizedLimit) * 100;
-  }
-
-  if (percentUsed != null) {
-    percentUsed = Math.max(0, Math.min(100, percentUsed));
-  }
-
-  return {
-    percentUsed,
-    used: normalizedUsed,
-    limit: normalizedLimit,
-    resetsIn,
-  };
-}
-
-function extractPlanLabel(payload) {
-  const values = collectValuesByKeyHints(payload, ["plan", "tier", "subscription", "accounttype"]);
-  for (const value of values) {
-    const text = String(value || "").trim();
-    if (!text) continue;
-    if (!/[a-z]/i.test(text)) continue;
-    if (text.length > 40) continue;
-    const normalized = normalizeUsageKey(text);
-    if (!normalized || normalized.includes("session") || normalized.includes("weekly")) continue;
-    return text;
-  }
-  return "";
-}
-
-export async function fetchCloudUsage(baseUrlConfig) {
-  const { baseUrl, apiKey } = resolveConnection(baseUrlConfig);
-
-  if (!isCloudHost(baseUrl)) {
-    return {
-      available: false,
-      reason: "not_cloud_host",
-      plan: "",
-      session: { percentUsed: null, used: null, limit: null, resetsIn: "" },
-      weekly: { percentUsed: null, used: null, limit: null, resetsIn: "" },
-      raw: null,
-    };
-  }
-
-  if (!apiKey) {
-    return {
-      available: false,
-      reason: "missing_api_key",
-      plan: "",
-      session: { percentUsed: null, used: null, limit: null, resetsIn: "" },
-      weekly: { percentUsed: null, used: null, limit: null, resetsIn: "" },
-      raw: null,
-    };
-  }
-
-  const raw = await requestText(baseUrl, "/api/me", {
-    method: "POST",
-    headers: withAuthHeaders(
-      {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      apiKey
-    ),
-    body: "{}",
-  });
-
-  let payload;
-  try {
-    payload = JSON.parse(raw || "{}");
-  } catch {
-    throw new Error("Ollama: invalid cloud usage response");
-  }
-
-  const session = extractUsageWindow(payload, "session");
-  const weekly = extractUsageWindow(payload, "weekly");
-  const plan = extractPlanLabel(payload);
-
-  const available =
-    session.percentUsed != null ||
-    weekly.percentUsed != null ||
-    (session.used != null && session.limit != null) ||
-    (weekly.used != null && weekly.limit != null);
-
-  return {
-    available,
-    reason: available ? "" : "usage_fields_missing",
-    plan,
-    session,
-    weekly,
-    raw: payload,
-  };
 }
 
 function parseCloudCatalogModelNames(html) {
@@ -858,15 +516,18 @@ export async function streamMessage(
 ) {
   const { baseUrl, apiKey } = resolveConnection(baseUrlConfig);
   const conversation = buildOllamaConversation(messages);
+  const runtimeOpts = localRuntimeRequestOptions(baseUrl);
   const buildPayload = (candidateModel, stream) => ({
     model: candidateModel,
     messages: conversation,
     stream,
+    ...(runtimeOpts.keep_alive != null ? { keep_alive: runtimeOpts.keep_alive } : {}),
     // TOKEN OPTIMIZATION: keep local/cloud generation bounded.
     options: {
       num_predict: maxTokens ?? 512,
       temperature: temperature ?? 0.7,
       top_p: topP ?? 0.9,
+      ...runtimeOpts.options,
     },
   });
 
@@ -1040,170 +701,4 @@ export async function streamMessage(
     return { text: full || "(No response)", usage };
   });
 }
-
-function toImageDataUrl(candidate, fallbackMime = "image/png") {
-  const value = String(candidate || "").trim();
-  if (!value) return null;
-  if (/^data:image\//i.test(value) || /^https?:\/\//i.test(value)) return value;
-
-  const compact = value.replace(/\s+/g, "");
-  if (/^[A-Za-z0-9+/=]+$/.test(compact) && compact.length > 40) {
-    return `data:${fallbackMime};base64,${compact}`;
-  }
-
-  return null;
-}
-
-function extractImageDataUrlFromOllamaPayload(payload, fallbackMime = "image/png") {
-  const candidates = [];
-  const push = (value) => {
-    if (value == null) return;
-    candidates.push(value);
-  };
-
-  push(payload?.image);
-  push(payload?.b64_json);
-
-  const buckets = [payload?.images, payload?.artifacts, payload?.data, payload?.output];
-  for (const bucket of buckets) {
-    if (!Array.isArray(bucket)) continue;
-    for (const item of bucket) {
-      if (typeof item === "string") {
-        push(item);
-        continue;
-      }
-      if (item && typeof item === "object") {
-        push(item?.image);
-        push(item?.base64);
-        push(item?.b64_json);
-        push(item?.url);
-        push(item?.image_url?.url);
-      }
-    }
-  }
-
-  return candidates
-    .map((candidate) => toImageDataUrl(candidate, fallbackMime))
-    .find(Boolean) || null;
-}
-
-/** Generate an image via Ollama's /api/generate endpoint (image models only). */
-export async function generateImage(baseUrlConfig, modelId, prompt) {
-  const { baseUrl, apiKey } = resolveConnection(baseUrlConfig);
-  const promptText = String(prompt || "").trim();
-  const timeoutMs = 15 * 60 * 1000;
-
-  const runWithModelRetries = async (runner) => {
-    const queue = deriveModelRetryCandidates(modelId);
-    const seen = new Set();
-    let knownNames = null;
-    let lastError = null;
-
-    while (queue.length > 0) {
-      const candidate = queue.shift();
-      if (!candidate || seen.has(candidate)) continue;
-      seen.add(candidate);
-
-      try {
-        return await runner(candidate);
-      } catch (err) {
-        lastError = err;
-
-        if (!isModelNotFoundMessage(err?.message)) {
-          throw err;
-        }
-
-        if (!knownNames) {
-          knownNames = await fetchKnownModelNames(baseUrl, apiKey);
-          const extras = deriveModelRetryCandidates(modelId, knownNames);
-          for (const extra of extras) {
-            if (!seen.has(extra) && !queue.includes(extra)) {
-              queue.push(extra);
-            }
-          }
-        }
-      }
-    }
-
-    if (lastError && knownNames?.length) {
-      const preview = knownNames.slice(0, 8).join(", ");
-      throw new Error(
-        `${lastError.message} Available Ollama models: ${preview}${knownNames.length > 8 ? ", ..." : ""}`
-      );
-    }
-
-    throw lastError || new Error(`Ollama model \"${modelId}\" not found.`);
-  };
-
-  return runWithModelRetries(async (candidateModel) => {
-    const payloads = [
-      {
-        model: candidateModel,
-        prompt: promptText,
-        stream: false,
-        width: 1024,
-        height: 1024,
-        steps: 28,
-      },
-      {
-        model: candidateModel,
-        prompt: promptText,
-        stream: false,
-      },
-    ];
-
-    let lastError = null;
-
-    for (const payload of payloads) {
-      try {
-        const raw = await requestText(baseUrl, "/api/generate", {
-          method: "POST",
-          headers: withAuthHeaders({ "Content-Type": "application/json" }, apiKey),
-          body: JSON.stringify(payload),
-          timeoutMs,
-        });
-
-        let json;
-        try {
-          json = JSON.parse(raw || "{}");
-        } catch {
-          throw new Error("Ollama: invalid image generation response");
-        }
-
-        const modelError = String(json?.error || "").trim();
-        if (modelError) {
-          throw new Error(`Ollama: ${modelError}`);
-        }
-
-        const imageUrl = extractImageDataUrlFromOllamaPayload(json);
-        if (!imageUrl) {
-          continue;
-        }
-
-        const usage = {
-          prompt_tokens: Number(json?.prompt_eval_count) || 0,
-          completion_tokens: Number(json?.eval_count) || 0,
-          image_tokens: 1,
-          cost: 0,
-        };
-
-        return { imageUrl, usage, cost: 0 };
-      } catch (err) {
-        lastError = err;
-        const msg = String(err?.message || "").toLowerCase();
-        const canRetryPayload =
-          msg.includes(" 400") ||
-          msg.includes(" 422") ||
-          msg.includes("validation") ||
-          msg.includes("unknown field") ||
-          msg.includes("unsupported");
-
-        if (!canRetryPayload) {
-          throw err;
-        }
-      }
-    }
-
-    throw new Error(String(lastError?.message || "No image returned by selected Ollama model"));
-  });
-}
+

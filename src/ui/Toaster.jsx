@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { EASE_OUT } from "../design/motion";
+import { EASE_OUT, T } from "../design/motion";
 import Icon from "./icons";
 import { Spinner } from "./primitives";
 
@@ -89,7 +89,7 @@ function Toast({ t }) {
       layout
       initial={{ opacity: 0, y: 14, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.96, transition: { duration: 0.13, ease: EASE_OUT } }}
+      exit={{ opacity: 0, scale: 0.96, transition: { duration: T, ease: EASE_OUT } }}
       transition={{ duration: 0.24, ease: EASE_OUT }}
       drag="x"
       dragConstraints={{ left: 0, right: 0 }}

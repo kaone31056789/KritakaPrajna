@@ -8,7 +8,10 @@ import { sendMessage, sendStore, stopStreaming } from "../../core/send";
 import { rememberExplicit, forgetMatching } from "../../core/memory";
 import { estimateTokensFromText } from "../../utils/tokenOptimizer";
 import { REASONING_MODES, supportsReasoningModel } from "../../utils/reasoningControls";
-import { EASE_OUT } from "../../design/motion";
+import { supportsVision } from "../../utils/smartModelSelect";
+import { isImageGenModel } from "../../api/providerRouter";
+import { runOCR } from "../../core/ocr";
+import { EASE_OUT, T } from "../../design/motion";
 import Icon from "../../ui/icons";
 import { NeuPopover, MenuItem, NeuTooltip } from "../../ui/primitives";
 import BrandIcon from "../../ui/BrandIcon";
@@ -46,24 +49,48 @@ const SLASH_COMMANDS = [
   { cmd: "help", icon: "command", hint: "List slash commands", run: (c) => c.help() },
 ];
 
+const IMAGE_EXTS = new Set([
+  "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif", "heic", "heif", "ico", "tiff", "tif",
+]);
+
 async function fileToUpload(file) {
   const ext = file.name.split(".").pop()?.toLowerCase() || "";
-  if (file.type.startsWith("image/")) {
+  const id = `${Date.now()}-${file.name}`;
+
+  // Images: keep as a viewable, OCR-able image attachment.
+  if (file.type.startsWith("image/") || IMAGE_EXTS.has(ext)) {
     const dataUrl = await new Promise((resolve) => {
       const r = new FileReader();
       r.onload = () => resolve(r.result);
       r.readAsDataURL(file);
     });
-    return { id: `${Date.now()}-${file.name}`, name: file.name, type: "image", dataUrl };
+    return { id, name: file.name, type: "image", dataUrl };
   }
-  if (ext === "pdf" && window.electronAPI?.extractPdfTextFromBuffer) {
-    const buf = await file.arrayBuffer();
-    const res = await window.electronAPI.extractPdfTextFromBuffer(buf);
-    const content = typeof res === "string" ? res : res?.text || "";
-    return { id: `${Date.now()}-${file.name}`, name: file.name, type: "pdf", content };
+
+  // Any other file: extract text in the main process so it actually reaches the
+  // model — PDF, docx/pptx/xlsx, code, markdown, csv, json, plain text, etc.
+  if (window.electronAPI?.extractFileText) {
+    try {
+      const buf = await file.arrayBuffer();
+      const res = await window.electronAPI.extractFileText(buf, file.name, file.type);
+      if (res && !res.error) {
+        const content = (res.text || "") + (res.truncated ? "\n\n[…file truncated]" : "");
+        return {
+          id,
+          name: file.name,
+          type: res.kind === "pdf" ? "pdf" : "text",
+          content,
+          error: content ? null : "No readable text found",
+        };
+      }
+      return { id, name: file.name, type: "text", content: "", error: res?.error || "Could not read file" };
+    } catch {
+      // fall through to browser best-effort text
+    }
   }
-  const content = await file.text();
-  return { id: `${Date.now()}-${file.name}`, name: file.name, type: "text", content };
+
+  const content = await file.text().catch(() => "");
+  return { id, name: file.name, type: "text", content, error: content ? null : "Could not read file" };
 }
 
 export default function Composer() {
@@ -75,6 +102,32 @@ export default function Composer() {
   const [slashIdx, setSlashIdx] = useState(0);
   const [slashDismissed, setSlashDismissed] = useState(false);
   const [promptLibOpen, setPromptLibOpen] = useState(false);
+  const [ocrBusyId, setOcrBusyId] = useState(null);
+
+  // OCR: extract text from an image upload and insert it into the composer.
+  // runOCR honors the configured engine/mode (local model when available, else
+  // Tesseract), so the user's "always use the model after download" toggle is
+  // respected here automatically — no engine choice is duplicated in the UI.
+  const extractTextFromUpload = useCallback(async (u) => {
+    if (!u || u.type !== "image" || !u.dataUrl) return;
+    setOcrBusyId(u.id);
+    toast.info("Extracting text…");
+    try {
+      const { text: extracted, backend, model } = await runOCR({ dataUrl: u.dataUrl });
+      const clean = (extracted || "").trim();
+      if (!clean) {
+        toast.info("No text found in image");
+        return;
+      }
+      setText((prev) => (prev ? `${prev}\n\n${clean}` : clean));
+      const via = backend === "endpoint" ? (model || "local model") : "Tesseract";
+      toast.success(`Extracted ${clean.length} characters via ${via}`);
+    } catch (err) {
+      toast.error(`OCR failed: ${err?.message || err}`);
+    } finally {
+      setOcrBusyId(null);
+    }
+  }, []);
   const taRef = useRef(null);
   const fileRef = useRef(null);
 
@@ -154,20 +207,34 @@ export default function Composer() {
     ta.style.height = `${Math.min(220, ta.scrollHeight)}px`;
   }, []);
 
-  const addFiles = useCallback(async (files) => {
-    for (const file of files) {
-      if (file.size > 20 * 1024 * 1024) {
-        toast.error(`${file.name} is too large (max 20MB)`);
-        continue;
+  const addFiles = useCallback(
+    async (files) => {
+      let warnedVision = false;
+      for (const file of files) {
+        if (file.size > 20 * 1024 * 1024) {
+          toast.error(`${file.name} is too large (max 20MB)`);
+          continue;
+        }
+        try {
+          const upload = await fileToUpload(file);
+          setUploads((prev) => [...prev, upload]);
+          if (
+            upload.type === "image" &&
+            !warnedVision &&
+            model &&
+            !isImageGenModel(model) &&
+            !supportsVision(model)
+          ) {
+            warnedVision = true;
+            toast.info(`${modelDisplayName(model)} can't read images — switch to a vision model before sending`);
+          }
+        } catch {
+          toast.error(`Could not read ${file.name}`);
+        }
       }
-      try {
-        const upload = await fileToUpload(file);
-        setUploads((prev) => [...prev, upload]);
-      } catch {
-        toast.error(`Could not read ${file.name}`);
-      }
-    }
-  }, []);
+    },
+    [model]
+  );
 
   const doSend = useCallback(() => {
     const trimmed = text.trim();
@@ -232,7 +299,7 @@ export default function Composer() {
     <div className="px-6 pb-5 pt-2">
       <ModelAdvice />
       <div
-        className={`app-composer max-w-[880px] mx-auto rounded-lg bg-surface [box-shadow:var(--neu-raised)] ${
+        className={`app-composer chat-col rounded-lg bg-surface [box-shadow:var(--neu-raised)] ${
           dragOver ? "[box-shadow:var(--neu-raised),0_0_0_2px_var(--accent)]" : ""
         }`}
         style={{ transition: "box-shadow 180ms var(--ease-out)" }}
@@ -254,7 +321,7 @@ export default function Composer() {
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: "auto", opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.18, ease: EASE_OUT }}
+              transition={{ duration: T, ease: EASE_OUT }}
               className="overflow-hidden"
             >
               <div className="flex gap-2 flex-wrap px-4 pt-3.5">
@@ -266,6 +333,17 @@ export default function Composer() {
                       <Icon name="file" size={12} className="text-dim" />
                     )}
                     <span className="max-w-[140px] truncate">{u.name}</span>
+                    {u.type === "image" && u.dataUrl && (
+                      <button
+                        type="button"
+                        title="Extract text from image (OCR)"
+                        disabled={ocrBusyId === u.id}
+                        onClick={() => extractTextFromUpload(u)}
+                        className="h-5 px-1.5 rounded-full flex items-center justify-center text-[10px] font-semibold tracking-wide text-dim hover:text-body disabled:opacity-50"
+                      >
+                        {ocrBusyId === u.id ? "…" : "OCR"}
+                      </button>
+                    )}
                     <button
                       type="button"
                       aria-label={`Remove ${u.name}`}
@@ -289,7 +367,7 @@ export default function Composer() {
                 initial={{ opacity: 0, y: 6, scale: 0.98 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 6, scale: 0.98 }}
-                transition={{ duration: 0.14, ease: EASE_OUT }}
+                transition={{ duration: T, ease: EASE_OUT }}
                 className="absolute bottom-full left-3 mb-2 w-[340px] rounded-md bg-surface [box-shadow:var(--neu-raised)] p-1.5 z-30"
               >
                 <p className="px-2.5 pt-1 pb-1.5 text-[10px] font-mono uppercase tracking-wider text-faint">

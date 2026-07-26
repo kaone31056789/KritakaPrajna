@@ -2,6 +2,7 @@
 @import "./design/tokens.css";
 @import "./design/themes.css";
 @import "./design/skins-components.css";
+@import "./design/appearance.css";
 
 @tailwind base;
 @tailwind components;
@@ -35,3 +36,74 @@ body {
 [data-density="compact"] body { zoom: 0.93; }
 [data-density="compact"] .msg-block { padding-top: 2px; padding-bottom: 2px; }
 [data-density="compact"] .markdown-body { line-height: 1.5; }
+
+/* ─── Fluid chat column ───
+   The reading column stays comfy on a small window but widens gracefully as the
+   window is maximized / goes fullscreen, so long answers use the extra space
+   instead of stranding it in the margins. Centered; the composer reuses the
+   same width via .chat-col so message text and the input stay aligned. */
+.chat-col {
+  width: 100%;
+  max-width: 768px;
+  margin-inline: auto;
+}
+@media (min-width: 1360px) { .chat-col { max-width: 840px; } }
+@media (min-width: 1600px) { .chat-col { max-width: 900px; } }
+@media (min-width: 1920px) { .chat-col { max-width: 980px; } }
+
+/* ─── Small-window adaptivity ───
+   Between the 760px window floor and ~1100px the fixed 248px sidebar eats too
+   much of the row: slim it in steps, then apply a gentle uniform zoom near the
+   floor so dialogs, settings grids, and the composer never overflow or clip.
+   (`aside.app-sidebar` out-specifies Tailwind's `w-[248px]` utility; CSS zoom
+   does not affect media-query evaluation in Chromium, so these don't loop.) */
+@media (max-width: 1100px) {
+  aside.app-sidebar { width: 216px; }
+}
+@media (max-width: 920px) {
+  aside.app-sidebar { width: 188px; }
+  body { zoom: 0.95; }
+  [data-density="compact"] body { zoom: 0.88; } /* 0.93 × 0.95 */
+}
+@media (max-width: 800px) {
+  body { zoom: 0.88; }
+  [data-density="compact"] body { zoom: 0.82; } /* 0.93 × 0.88 */
+}
+
+/* ─── Thinking shimmer ───
+   A slow light-sweep across the "Thinking…" label while a model streams its
+   chain of thought. Pure CSS gradient clipped to the text — GPU-cheap, and it
+   respects reduced-motion (the keyframe collapses to a steady dim tone). */
+.reason-shimmer {
+  background: linear-gradient(
+    100deg,
+    var(--text-dim) 0%,
+    var(--text-dim) 38%,
+    var(--accent) 50%,
+    var(--text-dim) 62%,
+    var(--text-dim) 100%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: reason-shimmer 1.9s linear infinite;
+}
+@keyframes reason-shimmer {
+  0% { background-position: 160% 0; }
+  100% { background-position: -60% 0; }
+}
+
+/* Thinking indicator — three pulsing dots while the model has produced no text yet */
+.think-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--accent);
+  animation: think-dot 1.1s ease-in-out infinite;
+}
+@keyframes think-dot {
+  0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}

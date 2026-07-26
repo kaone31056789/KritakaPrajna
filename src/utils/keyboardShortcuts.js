@@ -17,14 +17,6 @@ export const SHORTCUT_ACTIONS = [
 ];
 
 const MODIFIER_ORDER = ["Ctrl", "Shift", "Alt"];
-const VALID_SINGLE_KEYS = new Set([
-  "Enter", ",", "B", "K", "N", "R",
-  ...Array.from({ length: 12 }, (_, i) => `F${i + 1}`),
-]);
-
-export function getShortcutLabel(actionId) {
-  return SHORTCUT_ACTIONS.find((item) => item.id === actionId)?.label || actionId;
-}
 
 export function normalizeShortcutString(shortcut = "") {
   if (!shortcut) return "";
@@ -50,36 +42,6 @@ export function normalizeShortcutString(shortcut = "") {
 
   if (!key) return "";
   return [...MODIFIER_ORDER.filter((item) => modifiers.has(item)), key].join("+");
-}
-
-export function eventToShortcut(event) {
-  const modifiers = [];
-  if (event.ctrlKey || event.metaKey) modifiers.push("Ctrl");
-  if (event.shiftKey) modifiers.push("Shift");
-  if (event.altKey) modifiers.push("Alt");
-
-  let key = event.key;
-  if (!key) return "";
-  if (key === "Control" || key === "Shift" || key === "Alt" || key === "Meta") return "";
-  if (key === " ") key = "Space";
-  else if (key.length === 1) key = key.toUpperCase();
-
-  return normalizeShortcutString([...modifiers, key].join("+"));
-}
-
-export function isValidShortcut(shortcut) {
-  const normalized = normalizeShortcutString(shortcut);
-  if (!normalized) return false;
-  const parts = normalized.split("+");
-  const key = parts[parts.length - 1];
-  const modifiers = parts.slice(0, -1);
-  if (modifiers.length === 0) return false;
-  return VALID_SINGLE_KEYS.has(key) || /^[A-Z0-9]$/.test(key);
-}
-
-export function findShortcutConflict(shortcuts, actionId, shortcut) {
-  const normalized = normalizeShortcutString(shortcut);
-  return Object.entries(shortcuts || {}).find(([id, value]) => id !== actionId && normalizeShortcutString(value) === normalized) || null;
 }
 
 export function mergeShortcuts(shortcuts) {

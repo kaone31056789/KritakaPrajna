@@ -5,37 +5,6 @@
  * terminal hints or perform web fetches before sending to the AI.
  */
 
-// ── Terminal intent ───────────────────────────────────────────────────────────
-
-const TERMINAL_PATTERNS = [
-  /\b(run|execute|check|install|uninstall|start|stop|restart|build|compile|test|deploy)\b/i,
-  /\bin (the )?terminal\b/i,
-  /\bin (the )?command( ?line)?\b/i,
-  /\bshell\b/i,
-  /\bcli\b/i,
-  /\bcmd\b/i,
-  /\bpowershell\b/i,
-  /\bnpm (install|run|start|build|test)\b/i,
-  /\bnpx\b/i,
-  /\bpip install\b/i,
-  /\bpython\b.*\brun\b/i,
-  /\b(is|are) .* installed\b/i,
-  /\bversion\b.*\binstalled\b/i,
-  /\binstalled\b.*\bversion\b/i,
-  /\bcheck .*(version|install|path)\b/i,
-  /\bhow (do i|to) (run|install|check|use)\b/i,
-  /\bwhich command\b/i,
-  /\bwhat command\b/i,
-  /\bgive me (a |the )?command\b/i,
-  /\bshow (me )?(the )?command\b/i,
-];
-
-/** Returns true if the message is asking about running a terminal command. */
-export function isTerminalIntent(text) {
-  if (!text) return false;
-  return TERMINAL_PATTERNS.some((re) => re.test(text));
-}
-
 // ── Web / real-time intent ────────────────────────────────────────────────────
 
 const WEB_PATTERNS = [
@@ -76,19 +45,6 @@ const WEB_PATTERNS = [
 export function isWebIntent(text) {
   if (!text) return false;
   return WEB_PATTERNS.some((re) => re.test(text));
-}
-
-// ── Real-world topic detection (for always-search mode) ───────────────────────
-
-const REAL_WORLD_PATTERNS = [
-  /\b(who|what|when|where|why|how) (is|are|was|were|did|does|do)\b/i,
-  /\b(tell me|explain|describe|give me|show me)\b/i,
-  /\b[A-Z][a-z]+ (war|crisis|conflict|deal|summit|election|agreement)\b/,
-];
-
-export function isRealWorldQuery(text) {
-  if (!text) return false;
-  return REAL_WORLD_PATTERNS.some((re) => re.test(text));
 }
 
 // ── Detailed / deep-dive intent ──────────────────────────────────────────────

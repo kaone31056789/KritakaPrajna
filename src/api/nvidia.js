@@ -1,12 +1,6 @@
 import { mapReasoningEffort, supportsReasoningModel } from "../utils/reasoningControls";
+import { parseChatSSE } from "./sse";
 const API_BASE = "https://integrate.api.nvidia.com/v1";
-const IMAGE_API_BASE = "https://ai.api.nvidia.com/v1/genai";
-
-/**
- * Comprehensive static model list sourced from Nvidia NIM docs.
- * This is the fallback when the live /models endpoint fails or is blocked by CORS.
- * Only chat-completion-capable models are included (no embeddings, rerankers, or safety classifiers).
- */
 const STATIC_NVIDIA_MODELS = [
   // ── DeepSeek ──────────────────────────────────────────────────────────────
   { id: "deepseek-ai/deepseek-r1-distill-llama-8b",  name: "DeepSeek R1 Distill Llama 8B",  context_length: 32768 },
@@ -188,73 +182,7 @@ const STATIC_NVIDIA_MODELS = [
 // Default pricing for Nvidia NIM models (free tier / not exposed in API)
 const DEFAULT_PRICING = { prompt: "0", completion: "0" };
 
-/** Image generation models available via NVIDIA NIM Visual APIs */
-export const IMAGE_GEN_MODELS = [
-  { id: "black-forest-labs/flux_1-schnell", name: "FLUX.1 Schnell", _provider: "nvidia", _isImageGen: true, pricing: DEFAULT_PRICING, context_length: 0 },
-  { id: "black-forest-labs/flux_1-dev", name: "FLUX.1 Dev", _provider: "nvidia", _isImageGen: true, pricing: DEFAULT_PRICING, context_length: 0 },
-  { id: "black-forest-labs/flux.1-kontext-dev", name: "FLUX.1 Kontext Dev", _provider: "nvidia", _isImageGen: true, pricing: DEFAULT_PRICING, context_length: 0 },
-  { id: "black-forest-labs/flux_2-klein-4b", name: "FLUX 2 Klein 4B", _provider: "nvidia", _isImageGen: true, pricing: DEFAULT_PRICING, context_length: 0 },
-  { id: "stabilityai/stable-diffusion-3-medium", name: "Stable Diffusion 3 Medium", _provider: "nvidia", _isImageGen: true, pricing: DEFAULT_PRICING, context_length: 0 },
-  { id: "stabilityai/stable-diffusion-xl", name: "Stable Diffusion XL", _provider: "nvidia", _isImageGen: true, pricing: DEFAULT_PRICING, context_length: 0 },
-];
-
-function normalizeImageModelKey(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "");
-}
-
-function imageModelCatalog() {
-  const out = new Map();
-  for (const model of IMAGE_GEN_MODELS) {
-    const aliases = buildModelAliasCandidates(model.id);
-    for (const alias of aliases) {
-      out.set(normalizeImageModelKey(alias), model);
-    }
-  }
-  return out;
-}
-
-/**
- * Fetch image-generation models that are actually available on the current NVIDIA account/runtime.
- * Falls back to static catalog only when the live /models lookup fails.
- */
-export async function fetchImageModels(apiKey) {
-  try {
-    const res = await fetch(`${API_BASE}/models`, {
-      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
-    });
-    if (!res.ok) throw new Error(`Nvidia NIM models: ${res.status}`);
-
-    const json = await res.json();
-    const raw = Array.isArray(json?.data) ? json.data : [];
-    const catalog = imageModelCatalog();
-    const matches = [];
-    const seen = new Set();
-
-    for (const row of raw) {
-      const id = String(row?.id || "").trim();
-      if (!id) continue;
-
-      const key = normalizeImageModelKey(id);
-      const meta = catalog.get(key);
-      if (!meta || seen.has(id)) continue;
-
-      matches.push({
-        ...meta,
-        id,
-      });
-      seen.add(id);
-    }
-
-    return matches;
-  } catch {
-    return IMAGE_GEN_MODELS;
-  }
-}
-
-// Model IDs that are NOT chat-completion-capable (embeddings, rerankers, safety classifiers, image gen, etc.)
-// These are excluded when fetching from the live /models endpoint
+// Model families the NIM catalogue serves that are not chat completions.
 const NON_CHAT_PREFIXES = [
   "nvidia/embed", "nvidia/nv-embed", "nvidia/nv-rerankqa", "nvidia/rerank",
   "nvidia/llama-3.2-nemoretriever", "nvidia/llama-3.2-nv-embedqa", "nvidia/llama-3.2-nv-rerankqa",
@@ -396,13 +324,6 @@ function prettifyModelId(id) {
     .trim();
 }
 
-function encodeModelPath(modelId) {
-  return String(modelId || "")
-    .split("/")
-    .map((part) => encodeURIComponent(part))
-    .join("/");
-}
-
 function parseNvidiaError(raw) {
   try {
     const parsed = JSON.parse(raw || "{}");
@@ -417,80 +338,6 @@ function parseNvidiaError(raw) {
   } catch {
     return String(raw || "NVIDIA request failed");
   }
-}
-
-function toDataUrl(candidate, fallbackMime = "image/png") {
-  const value = String(candidate || "").trim();
-  if (!value) return null;
-  if (/^data:image\//i.test(value) || /^https?:\/\//i.test(value)) return value;
-
-  const compact = value.replace(/\s+/g, "");
-  if (/^[A-Za-z0-9+/=]+$/.test(compact) && compact.length > 40) {
-    return `data:${fallbackMime};base64,${compact}`;
-  }
-
-  return null;
-}
-
-function collectImageCandidates(payload) {
-  const candidates = [];
-  const push = (value) => {
-    if (value == null) return;
-    candidates.push(value);
-  };
-
-  push(payload?.image);
-  push(payload?.b64_json);
-
-  const listBuckets = [payload?.images, payload?.artifacts, payload?.data, payload?.output];
-  for (const bucket of listBuckets) {
-    if (!Array.isArray(bucket)) continue;
-    for (const item of bucket) {
-      if (typeof item === "string") {
-        push(item);
-        continue;
-      }
-      if (item && typeof item === "object") {
-        push(item?.image);
-        push(item?.base64);
-        push(item?.b64_json);
-        push(item?.url);
-        push(item?.image_url?.url);
-      }
-    }
-  }
-
-  return candidates;
-}
-
-function extractUsage(payload) {
-  const usage = payload?.usage;
-  if (!usage || typeof usage !== "object") return null;
-  return {
-    prompt_tokens: Number(usage.prompt_tokens) || 0,
-    completion_tokens: Number(usage.completion_tokens) || 0,
-    image_tokens: Number(usage.image_tokens) || 0,
-    cost: usage.cost != null ? Number(usage.cost) : null,
-  };
-}
-
-function buildModelAliasCandidates(modelId) {
-  const base = String(modelId || "").trim();
-  if (!base) return [];
-
-  const candidates = [base];
-
-  const underscored = base
-    .replace("flux.1-", "flux_1-")
-    .replace("flux.1", "flux_1");
-  if (underscored !== base) candidates.push(underscored);
-
-  const dotted = base
-    .replace("flux_1-", "flux.1-")
-    .replace("flux_1", "flux.1");
-  if (dotted !== base) candidates.push(dotted);
-
-  return Array.from(new Set(candidates));
 }
 
 const VALID_MESSAGE_ROLES = new Set(["system", "user", "assistant"]);
@@ -605,6 +452,31 @@ function sanitizeMessagesForNvidia(messages) {
   for (const message of messages) {
     if (!message || typeof message !== "object") continue;
 
+    // Native function-calling messages must pass through untouched: a
+    // role:"tool" reply is bound to its tool_call_id, and an assistant turn
+    // carrying tool_calls may legitimately have empty content. Coercing or
+    // merging these breaks the provider's tool-call protocol.
+    if (message.role === "tool" && message.tool_call_id) {
+      sanitized.push({
+        role: "tool",
+        tool_call_id: message.tool_call_id,
+        content: normalizeMessageContent(message.content) || "(empty)",
+      });
+      continue;
+    }
+    if (
+      message.role === "assistant" &&
+      Array.isArray(message.tool_calls) &&
+      message.tool_calls.length > 0
+    ) {
+      sanitized.push({
+        role: "assistant",
+        content: normalizeMessageContent(message.content) || "",
+        tool_calls: message.tool_calls,
+      });
+      continue;
+    }
+
     const role = normalizeMessageRole(message.role);
     const content = normalizeMessageContent(message.content);
     if (!hasNonEmptyContent(content)) continue;
@@ -650,161 +522,11 @@ function preferFallbackModelId(models, failedModelId) {
   return alternate?.id || null;
 }
 
-async function callNvidiaImageEndpoint(apiKey, modelId, payload) {
-  const res = await fetch(`${IMAGE_API_BASE}/${encodeModelPath(modelId)}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      Accept: "application/json, image/*, */*",
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const contentType = (res.headers.get("content-type") || "").toLowerCase();
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Nvidia NIM ${res.status}: ${parseNvidiaError(text)}`);
-  }
-
-  if (contentType.startsWith("image/")) {
-    const buffer = await res.arrayBuffer();
-    const bytes = new Uint8Array(buffer);
-    let binary = "";
-    for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return { imageUrl: `data:${contentType};base64,${btoa(binary)}`, usage: null, cost: null };
-  }
-
-  const raw = await res.text();
-  let parsed = null;
-  try {
-    parsed = JSON.parse(raw || "{}");
-  } catch {
-    parsed = null;
-  }
-
-  if (!parsed) {
-    const fromText = toDataUrl(raw);
-    if (fromText) return { imageUrl: fromText, usage: null, cost: null };
-    throw new Error("NVIDIA image endpoint returned an unsupported response format");
-  }
-
-  const fallbackMime = contentType.startsWith("image/") ? contentType : "image/png";
-  const imageUrl = collectImageCandidates(parsed)
-    .map((candidate) => toDataUrl(candidate, fallbackMime))
-    .find(Boolean);
-
-  if (!imageUrl) {
-    throw new Error("No image returned by selected NVIDIA model");
-  }
-
-  const usage = extractUsage(parsed);
-  return { imageUrl, usage, cost: usage?.cost ?? null };
-}
-
-async function callNvidiaOpenAIImageEndpoint(apiKey, modelId, prompt) {
-  const res = await fetch(`${API_BASE}/images/generations`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: modelId,
-      prompt,
-      n: 1,
-      size: "1024x1024",
-      response_format: "b64_json",
-    }),
-  });
-
-  const raw = await res.text();
-  if (!res.ok) {
-    throw new Error(`Nvidia NIM ${res.status}: ${parseNvidiaError(raw)}`);
-  }
-
-  let parsed;
-  try {
-    parsed = JSON.parse(raw || "{}");
-  } catch {
-    throw new Error("NVIDIA returned invalid JSON for image generation");
-  }
-
-  const candidate =
-    parsed?.data?.[0]?.b64_json ||
-    parsed?.data?.[0]?.url ||
-    parsed?.data?.[0]?.image_url?.url ||
-    parsed?.image ||
-    parsed?.b64_json;
-
-  const imageUrl = toDataUrl(candidate, "image/png");
-  if (!imageUrl) {
-    throw new Error("No image returned by selected NVIDIA model");
-  }
-
-  const usage = extractUsage(parsed);
-  return { imageUrl, usage, cost: usage?.cost ?? null };
-}
-
-/** Generate an image via NVIDIA NIM visual model APIs. */
-export async function generateImage(apiKey, modelId, prompt) {
-  const modelCandidates = buildModelAliasCandidates(modelId);
-  const attempts = [
-    { prompt },
-    { prompt, width: 1024, height: 1024, steps: 30 },
-    { prompt, text_prompts: [{ text: prompt, weight: 1 }] },
-    { text_prompts: [{ text: prompt, weight: 1 }] },
-  ];
-
-  let lastError = null;
-
-  for (const candidateModel of modelCandidates) {
-    for (const payload of attempts) {
-      try {
-        return await callNvidiaImageEndpoint(apiKey, candidateModel, payload);
-      } catch (err) {
-        lastError = err;
-        const msg = String(err?.message || "").toLowerCase();
-        const canRetryWithDifferentPayload =
-          msg.includes(" 400") ||
-          msg.includes(" 422") ||
-          msg.includes("validation") ||
-          msg.includes("text_prompts") ||
-          msg.includes("prompt") ||
-          msg.includes("failed to fetch") ||
-          msg.includes("network");
-
-        if (!canRetryWithDifferentPayload) break;
-      }
-    }
-
-    try {
-      return await callNvidiaOpenAIImageEndpoint(apiKey, candidateModel, prompt);
-    } catch (err) {
-      lastError = err;
-    }
-  }
-
-  const detail = String(lastError?.message || "NVIDIA image generation failed");
-  if (detail.toLowerCase().includes("failed to fetch")) {
-    throw new Error("NVIDIA image request failed. Verify network/CSP access to NVIDIA endpoints and try another model.");
-  }
-
-  throw new Error(detail);
-}
-
-/**
- * Stream a chat completion via Nvidia NIM API.
- * Follows standard OpenAI-compatible shape.
- */
 export async function streamMessage(
   apiKey,
   modelId,
   messages,
-  { onChunk, signal, reasoningDepth, maxTokens, temperature, topP } = {}
+  { onChunk, signal, reasoningDepth, maxTokens, temperature, topP, tools, toolChoice } = {}
 ) {
   const sanitizedMessages = sanitizeMessagesForNvidia(messages);
 
@@ -817,6 +539,11 @@ export async function streamMessage(
       temperature: temperature ?? 0.7,
       top_p: topP ?? 0.9,
     };
+
+    if (Array.isArray(tools) && tools.length) {
+      requestBody.tools = tools;
+      requestBody.tool_choice = toolChoice || "auto";
+    }
 
     if (supportsReasoningModel({ id: effectiveModelId, _provider: "nvidia" })) {
       requestBody.reasoning_effort = mapReasoningEffort(reasoningDepth || "balanced");
@@ -841,43 +568,7 @@ export async function streamMessage(
       throw error;
     }
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let full = "";
-    let buffer = "";
-    let usage = null;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith("data: ")) continue;
-        const payload = trimmed.slice(6);
-        if (payload === "[DONE]") break;
-        try {
-          const json = JSON.parse(payload);
-          const token = json.choices?.[0]?.delta?.content;
-          if (token) {
-            full += token;
-            onChunk?.(full);
-          }
-          if (json.usage) {
-            usage = {
-              prompt_tokens: json.usage.prompt_tokens || 0,
-              completion_tokens: json.usage.completion_tokens || 0,
-              cost: null,
-            };
-          }
-        } catch {}
-      }
-    }
-
-    return { text: full || "(No response)", usage, model: effectiveModelId };
+    return { ...(await parseChatSSE(res, onChunk)), model: effectiveModelId };
   };
 
   try {

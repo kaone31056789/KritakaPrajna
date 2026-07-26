@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { EASE_OUT } from "../design/motion";
+import { EASE_OUT, T_SLOW, T } from "../design/motion";
 import Icon from "./icons";
 import { LogoMark } from "./Logo";
 
@@ -73,7 +73,7 @@ export default function Tour() {
       <motion.div
         initial={{ opacity: 0, scale: 0.96, y: 14 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ duration: 0.28, ease: EASE_OUT }}
+        transition={{ duration: T_SLOW, ease: EASE_OUT }}
         className="neu-raised rounded-md w-[380px] max-w-[calc(100vw-48px)] p-6 relative"
         style={{ background: "var(--surface)" }}
       >
@@ -90,7 +90,7 @@ export default function Tour() {
             initial={{ opacity: 0, x: 16 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -16 }}
-            transition={{ duration: 0.18, ease: EASE_OUT }}
+            transition={{ duration: T, ease: EASE_OUT }}
           >
             <div className="w-12 h-12 rounded-xl neu-raised-sm flex items-center justify-center mb-4">
               {s.icon ? <Icon name={s.icon} size={22} className="text-accent" /> : <LogoMark size={30} glow />}

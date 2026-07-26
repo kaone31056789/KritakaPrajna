@@ -1,4 +1,5 @@
 import { mapReasoningEffort, supportsReasoningModel } from "../utils/reasoningControls";
+import { parseChatSSE } from "./sse";
 const API_BASE = "https://api.openai.com/v1";
 
 // Static curated model list — fetched live below but this is the fallback
@@ -46,7 +47,7 @@ export async function streamMessage(
   apiKey,
   modelId,
   messages,
-  { onChunk, signal, reasoningDepth, maxTokens, temperature, topP } = {}
+  { onChunk, signal, reasoningDepth, maxTokens, temperature, topP, tools, toolChoice } = {}
 ) {
   const requestBody = {
     model: modelId,
@@ -58,6 +59,11 @@ export async function streamMessage(
     temperature: temperature ?? 0.7,
     top_p: topP ?? 0.9,
   };
+
+  if (Array.isArray(tools) && tools.length) {
+    requestBody.tools = tools;
+    requestBody.tool_choice = toolChoice || "auto";
+  }
 
   if (supportsReasoningModel({ id: modelId, _provider: "openai" })) {
     requestBody.reasoning_effort = mapReasoningEffort(reasoningDepth || "balanced");
@@ -80,41 +86,5 @@ export async function streamMessage(
     throw new Error(`OpenAI ${res.status}: ${detail}`);
   }
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let full = "";
-  let buffer = "";
-  let usage = null;
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || !trimmed.startsWith("data: ")) continue;
-      const payload = trimmed.slice(6);
-      if (payload === "[DONE]") break;
-      try {
-        const json = JSON.parse(payload);
-        const token = json.choices?.[0]?.delta?.content;
-        if (token) {
-          full += token;
-          onChunk?.(full);
-        }
-        if (json.usage) {
-          usage = {
-            prompt_tokens: json.usage.prompt_tokens || 0,
-            completion_tokens: json.usage.completion_tokens || 0,
-            cost: null, // OpenAI doesn't return cost in stream
-          };
-        }
-      } catch {}
-    }
-  }
-
-  return { text: full || "(No response)", usage };
+  return parseChatSSE(res, onChunk);
 }

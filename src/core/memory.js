@@ -9,6 +9,7 @@ import {
   isSensitiveMemoryText,
   parseExplicitMemoryCommand,
   categorizeExplicitMemory,
+  selectRelevantMemory,
 } from "../utils/userMemory";
 
 /* User memory — synced to electron-store when available, localStorage otherwise. */
@@ -91,14 +92,77 @@ export function captureMemoryFromExchange(userText, aiText) {
   if (merged !== memory) saveMemory(merged);
 }
 
+/* ── Review queue (LLM-suggested memories) ─────────────────────────────────── */
+
+/**
+ * Queue extracted memory candidates for user review.
+ * Dedupe against saved entries + existing queue happens in normalizeUserMemory.
+ * Returns the number of candidates actually queued.
+ */
+export function queuePendingCandidates(candidates = []) {
+  if (!Array.isArray(candidates) || candidates.length === 0) return 0;
+  const { memory } = memoryStore.get();
+  const before = (memory.pending || []).length;
+  const next = normalizeUserMemory({
+    ...memory,
+    pending: [...(memory.pending || []), ...candidates],
+  });
+  const added = next.pending.length - before;
+  if (added > 0) saveMemory(next);
+  return Math.max(0, added);
+}
+
+/** Approve a pending suggestion — merges it into its category (with dedupe). */
+export function approvePendingEntry(id) {
+  const { memory } = memoryStore.get();
+  const item = (memory.pending || []).find((p) => p.id === id);
+  if (!item) return false;
+  const merged = mergeUserMemory(
+    { ...memory, pending: (memory.pending || []).filter((p) => p.id !== id) },
+    { ...DEFAULT_USER_MEMORY, [item.category]: [item.text], autoMode: memory.autoMode }
+  );
+  saveMemory(merged);
+  return true;
+}
+
+/** Reject (discard) a pending suggestion. */
+export function rejectPendingEntry(id) {
+  const { memory } = memoryStore.get();
+  const pending = memory.pending || [];
+  const next = pending.filter((p) => p.id !== id);
+  if (next.length === pending.length) return false;
+  saveMemory({ ...memory, pending: next });
+  return true;
+}
+
+/** Discard the entire review queue. */
+export function clearPendingEntries() {
+  const { memory } = memoryStore.get();
+  if ((memory.pending || []).length === 0) return;
+  saveMemory({ ...memory, pending: [] });
+}
+
+// Greetings / one-word pings where injecting memory backfires: small local
+// models treat the memory block as the topic and answer it instead of the user
+// ("hi" → an essay about the user's remembered interests).
+const TRIVIAL_MESSAGE_RE =
+  /^(hi+|hey+|hello+|yo|sup|hola|namaste|good\s*(morning|afternoon|evening|night)|thanks?( you)?|thank u|ty|ok(ay)?|k|cool|nice|great|lol|haha+|bye|good\s*bye|test(ing)?|\?+|\.+)[\s!.?]*$/i;
+
 /** Compact [User Memory] block for the system prompt. */
-export function memoryPromptSection(memory = memoryStore.get().memory) {
+export function memoryPromptSection(memory = memoryStore.get().memory, contextText = "") {
+  // Skip memory entirely for trivial openers — nothing in memory is relevant
+  // to "hi", and tiny models will happily recite the whole block otherwise.
+  const ctx = String(contextText || "").trim();
+  if (ctx.length > 0 && (ctx.length < 3 || TRIVIAL_MESSAGE_RE.test(ctx))) return "";
+  // Style categories always inject; context entries are relevance-ranked
+  // against the current message so long-lived memory stays on-topic.
+  const selected = selectRelevantMemory(memory, contextText);
   const lines = [];
   for (const def of MEMORY_CATEGORY_DEFS) {
-    const entries = memory[def.id] || [];
+    const entries = selected[def.id] || [];
     if (entries.length === 0) continue;
-    lines.push(`${def.label}: ${entries.slice(0, 6).join("; ")}`);
+    lines.push(`${def.label}: ${entries.join("; ")}`);
   }
   if (lines.length === 0) return "";
-  return `\n\n[User Memory]\n${lines.join("\n")}`;
+  return `\n\n[User Memory] (quiet background about the user — apply only when relevant; never recite, list, or mention these unprompted)\n${lines.join("\n")}`;
 }

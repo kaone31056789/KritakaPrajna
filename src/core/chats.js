@@ -8,16 +8,53 @@ const PERSONAS_KEY = "kp_chat_personas";
 const ACTIVE_PERSONA_KEY = "kp_active_persona";
 const FOLDERS_KEY = "kp_chat_folders";
 
+/**
+ * The user's actual intent text for a message. Prefers what they typed
+ * (`_displayText`), and strips any inlined "[Attached file: …]```…```" dumps so
+ * titles reflect the message rather than the raw file contents.
+ */
+export function userMessageText(msg) {
+  if (!msg) return "";
+  let text = typeof msg._displayText === "string" ? msg._displayText : "";
+  if (!text) {
+    if (typeof msg.content === "string") text = msg.content;
+    else if (Array.isArray(msg.content)) {
+      text = msg.content
+        .filter((p) => p?.type === "text")
+        .map((p) => p.text || "")
+        .join(" ");
+    }
+  }
+  return text
+    .replace(/\[Attached file:[^\]]*\]\s*```[\s\S]*?```/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** A clean, human label built from a message's attachments (file name, sans extension). */
+export function attachmentLabel(msg) {
+  const atts = Array.isArray(msg?._attachments) ? msg._attachments : [];
+  if (atts.length === 0) return "";
+  const base = String(atts[0]?.name || "file")
+    .replace(/\.[a-z0-9]+$/i, "")
+    .replace(/[._-]+/g, " ")
+    .trim();
+  return atts.length > 1 ? `${base} +${atts.length - 1} more` : base || "file";
+}
+
 export function deriveTitle(messages = []) {
   const firstUser = messages.find((m) => m.role === "user");
   if (!firstUser) return "New chat";
-  let text = "";
-  if (typeof firstUser.content === "string") text = firstUser.content;
-  else if (Array.isArray(firstUser.content)) {
-    const t = firstUser.content.find((p) => p.type === "text");
-    text = t?.text || "Image message";
+  // Name the thread after what the user typed; if they only attached a file,
+  // use the file name instead of the raw "[Attached file: …]" marker.
+  let text = userMessageText(firstUser);
+  if (!text) {
+    text =
+      attachmentLabel(firstUser) ||
+      (Array.isArray(firstUser.content) && firstUser.content.some((p) => p?.type === "image_url")
+        ? "Image message"
+        : "");
   }
-  text = text.replace(/\s+/g, " ").trim();
   return text.length > 44 ? `${text.slice(0, 44)}…` : text || "New chat";
 }
 
@@ -63,7 +100,18 @@ export function patchChat(id, patch) {
 }
 
 export function renameChat(id, title) {
-  patchChat(id, { title: String(title || "").trim() || "New chat" });
+  patchChat(id, { title: String(title || "").trim() || "New chat", titleLocked: true });
+}
+
+/** Set an auto-generated title — but never override a chat the user manually renamed. */
+export function applyAutoTitle(id, title) {
+  const t = String(title || "").trim();
+  if (!t) return;
+  chatsStore.set((s) => ({
+    chats: s.chats.map((c) =>
+      c.id === id && !c.titleLocked ? { ...c, title: t, autoTitled: true } : c
+    ),
+  }));
 }
 
 export function togglePinChat(id) {

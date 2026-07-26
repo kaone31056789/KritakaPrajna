@@ -1,0 +1,59 @@
+name: Release
+
+# The other half of auto-update. electron-updater in the app polls this repo's
+# GitHub Releases (package.json → build.publish); this is what puts a release
+# there. Without it the updater has nothing to find and always reports
+# "you are on the latest release", however many versions ahead the code is.
+#
+# Trigger: push a tag that matches the version in package.json.
+#     npm version 4.0.1 && git push --follow-tags
+# Or run it by hand from the Actions tab.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write # electron-builder needs this to create the release
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Verify
+        run: |
+          npm run lint:undef
+          npx cross-env CI=true react-scripts test --watchAll=false
+        env:
+          CI: true
+
+      # Fails the release if the tag and package.json disagree — electron-updater
+      # compares against package.json's version, so a mismatch ships an update
+      # that clients either never see or install in a loop.
+      - name: Tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(node -p "require('./package.json').version")
+          echo "tag=$TAG package.json=$PKG"
+          test "$TAG" = "$PKG"
+
+      - name: Build and publish
+        run: npx electron-builder --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI: true

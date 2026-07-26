@@ -97,9 +97,15 @@ export async function streamMessage(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let full = "";
+  // Extended thinking streams as `thinking_delta` blocks alongside `text_delta`.
+  // Re-wrapped as <think>…</think> so splitReasoning() in core/send.js shows it
+  // in the Reasoning panel; left unclosed while streaming so it shimmers live.
+  let reason = "";
   let buffer = "";
   let usage = null;
   let currentEvent = "";
+  const compose = (close) =>
+    reason ? (full || close ? `<think>${reason}</think>${full}` : `<think>${reason}`) : full;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -120,10 +126,15 @@ export async function streamMessage(
         try {
           const json = JSON.parse(payload);
           if (currentEvent === "content_block_delta" || json.type === "content_block_delta") {
+            const think = json.delta?.thinking;
+            if (think) {
+              reason += think;
+              onChunk?.(compose(false));
+            }
             const text = json.delta?.text;
             if (text) {
               full += text;
-              onChunk?.(full);
+              onChunk?.(compose(false));
             }
           }
           if (currentEvent === "message_start" || json.type === "message_start") {
@@ -150,5 +161,5 @@ export async function streamMessage(
     }
   }
 
-  return { text: full || "(No response)", usage };
+  return { text: compose(true) || "(No response)", usage };
 }

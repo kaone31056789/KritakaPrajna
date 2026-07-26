@@ -8,7 +8,7 @@ import { islandStore } from "../core/island";
 import { chatsStore } from "../core/chats";
 import { modelsStore, getSelectedModel, modelDisplayName } from "../core/models";
 import { initRankings } from "../core/rankings";
-import { SPRING_ISLAND, EASE_OUT } from "../design/motion";
+import { SPRING_ISLAND, EASE_OUT, T } from "../design/motion";
 import Icon from "../ui/icons";
 import { NeuTooltip, Spinner, Kbd } from "../ui/primitives";
 import BrandIcon from "../ui/BrandIcon";
@@ -17,10 +17,14 @@ import CommandPalette from "../ui/CommandPalette";
 import { Toaster } from "../ui/Toaster";
 import Tour from "../ui/Tour";
 import ErrorBoundary from "../ui/ErrorBoundary";
+import { updatesStore, updateAction, updateLabel } from "../core/updates";
+import { appearanceStore, routeTransition } from "../core/appearance";
 
 const ChatScreen = lazy(() => import("./Chat"));
 const AgentScreen = lazy(() => import("./Agent"));
 const AdvisorScreen = lazy(() => import("./Advisor"));
+const EducationScreen = lazy(() => import("./Education"));
+const ImagesScreen = lazy(() => import("./Images"));
 const SettingsScreen = lazy(() => import("./Settings"));
 
 /* ═══ Dynamic Island — spring-morphing status pill ═══ */
@@ -131,7 +135,7 @@ function ThemeToggle() {
           const r = e.currentTarget.getBoundingClientRect();
           toggleTheme(r.left + r.width / 2, r.top + r.height / 2);
         }}
-        className="pressable w-10 h-10 rounded-sm flex items-center justify-center text-dim hover:text-accent bg-surface [box-shadow:var(--neu-raised-sm)]"
+        className="pressable w-10 h-10 rounded-sm flex items-center justify-center icon-idle bg-surface [box-shadow:var(--neu-raised-sm)]"
       >
         <AnimatePresence mode="wait" initial={false}>
           <motion.span
@@ -139,7 +143,7 @@ function ThemeToggle() {
             initial={{ opacity: 0, rotate: -40, scale: 0.7 }}
             animate={{ opacity: 1, rotate: 0, scale: 1 }}
             exit={{ opacity: 0, rotate: 40, scale: 0.7 }}
-            transition={{ duration: 0.18, ease: EASE_OUT }}
+            transition={{ duration: T, ease: EASE_OUT }}
             className="flex"
           >
             <Icon name={dark ? "moon" : "sun"} size={17} />
@@ -155,6 +159,8 @@ function ThemeToggle() {
 const NAV_ITEMS = [
   { id: "chat", icon: "chat", label: "Chat" },
   { id: "agent", icon: "agent", label: "Agent" },
+  { id: "education", icon: "book", label: "Education Hub" },
+  { id: "images", icon: "image", label: "Image Studio" },
   { id: "advisor", icon: "advisor", label: "Model Advisor" },
 ];
 
@@ -173,7 +179,7 @@ function NavRail() {
               className={`pressable relative w-10 h-10 rounded-sm flex items-center justify-center ${
                 active
                   ? "text-accent bg-deep [box-shadow:var(--neu-inset-sm)]"
-                  : "text-dim hover:text-hi bg-surface [box-shadow:var(--neu-raised-sm)]"
+                  : "icon-idle bg-surface [box-shadow:var(--neu-raised-sm)]"
               }`}
               style={{ transition: "color 150ms var(--ease-out), box-shadow 200ms var(--ease-out)" }}
             >
@@ -200,13 +206,48 @@ function NavRail() {
           className={`pressable w-10 h-10 rounded-sm flex items-center justify-center ${
             view === "settings"
               ? "text-accent bg-deep [box-shadow:var(--neu-inset-sm)]"
-              : "text-dim hover:text-hi bg-surface [box-shadow:var(--neu-raised-sm)]"
+              : "icon-idle bg-surface [box-shadow:var(--neu-raised-sm)]"
           }`}
         >
           <Icon name="settings" size={18} />
         </button>
       </NeuTooltip>
+      <RailFooter />
     </nav>
+  );
+}
+
+/* The version doubles as the update control: it is the thing you look at when
+   you wonder whether you are current, so it is the thing you click to find out. */
+function RailFooter() {
+  const state = useStore(updatesStore);
+  const { text, hint } = updateLabel(state);
+  const act = updateAction(state.status);
+  // "downloaded" is the one state worth pulling the eye — it wants a click.
+  const waiting = state.status === "downloaded";
+
+  return (
+    <div className="mt-2 pt-2.5 w-full flex flex-col items-center gap-1" style={{ borderTop: "1px solid var(--line)" }}>
+      {text && (
+        <NeuTooltip label={hint} side="right">
+          <button
+            type="button"
+            onClick={act}
+            disabled={!state.packaged}
+            aria-label={hint}
+            className="pressable text-[9.5px] font-mono font-semibold leading-none px-1.5 py-1 rounded-xs text-accent disabled:opacity-80"
+            style={waiting ? { background: "var(--accent-soft)" } : undefined}
+          >
+            {text}
+          </button>
+        </NeuTooltip>
+      )}
+      <span className="text-[8.5px] leading-[1.25] text-accent text-center select-none opacity-90">
+        Made by
+        <br />
+        Parikshit
+      </span>
+    </div>
   );
 }
 
@@ -215,6 +256,8 @@ function NavRail() {
 const VIEW_COMPONENTS = {
   chat: ChatScreen,
   agent: AgentScreen,
+  education: EducationScreen,
+  images: ImagesScreen,
   advisor: AdvisorScreen,
   settings: SettingsScreen,
 };
@@ -222,6 +265,10 @@ const VIEW_COMPONENTS = {
 export default function Shell() {
   const { view } = useStore(navStore, (s) => ({ view: s.view }));
   const View = VIEW_COMPONENTS[view] || ChatScreen;
+  // Subscribed so changing the style in Settings takes effect on the next
+  // navigation rather than after a reload.
+  const appearance = useStore(appearanceStore);
+  const routeAnim = useMemo(() => routeTransition(appearance), [appearance]);
 
   // Live model rankings: fetch on launch, auto-refresh every 6h.
   useEffect(() => {
@@ -230,6 +277,7 @@ export default function Shell() {
 
   return (
     <div className="h-screen flex flex-col relative overflow-hidden bg-bg">
+      <div className="kp-bg-layer" />
       <div className="aurora" />
 
       {/* Title bar — draggable frame region */}
@@ -270,13 +318,7 @@ export default function Shell() {
                 {/* No AnimatePresence exit here on purpose: interrupted "wait"
                     transitions could drop the incoming view and leave the pane
                     permanently empty. Keyed mount animation is enough. */}
-                <motion.div
-                  key={view}
-                  className="h-full"
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.16, ease: EASE_OUT }}
-                >
+                <motion.div key={view} className="h-full" {...routeAnim}>
                   <ErrorBoundary scope={view}>
                     <View />
                   </ErrorBoundary>

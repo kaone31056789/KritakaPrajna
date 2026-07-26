@@ -5,7 +5,13 @@ export const DEFAULT_USER_MEMORY = {
   coding: [],
   context: [],
   autoMode: true,
+  pending: [], // LLM-suggested memories awaiting user review: {id, category, text, source, ts}
 };
+
+export const MAX_PENDING_MEMORY = 20;
+// Decay cap per saved category — oldest entries fall off once the cap is hit,
+// so long-lived memory stays fresh without unbounded growth.
+export const MAX_SAVED_MEMORY = 30;
 
 export const MEMORY_CATEGORY_DEFS = [
   {
@@ -319,22 +325,54 @@ function dedupeMemoryCategory(entries, category) {
     deduped.push(canonical);
   }
 
-  return deduped;
+  // Recency-based decay: newest entries live at the end; drop the oldest overflow.
+  return deduped.length > MAX_SAVED_MEMORY ? deduped.slice(-MAX_SAVED_MEMORY) : deduped;
+}
+
+/**
+ * Normalize the pending-review queue: drop empty/sensitive/overlong items,
+ * dedupe against saved categories and within the queue itself, cap the size.
+ */
+function normalizePendingList(rawPending, normalizedCategories) {
+  if (!Array.isArray(rawPending)) return [];
+  const seenKeys = new Set();
+  for (const def of MEMORY_CATEGORY_DEFS) {
+    for (const entry of normalizedCategories[def.id] || []) {
+      seenKeys.add(normalizeEntryKey(entry));
+    }
+  }
+  const out = [];
+  for (const item of rawPending) {
+    const text = cleanEntry(item?.text);
+    if (!text || text.length > 160 || isSensitiveMemoryText(text)) continue;
+    const key = normalizeEntryKey(text);
+    if (seenKeys.has(key)) continue; // already saved or already queued
+    seenKeys.add(key);
+    const category = MEMORY_CATEGORY_DEFS.some((d) => d.id === item?.category)
+      ? item.category
+      : "context";
+    out.push({
+      id: String(item?.id || `pm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`),
+      category,
+      text,
+      source: typeof item?.source === "string" && item.source ? item.source : "auto",
+      ts: Number.isFinite(item?.ts) ? item.ts : Date.now(),
+    });
+    if (out.length >= MAX_PENDING_MEMORY) break;
+  }
+  return out;
 }
 
 export function normalizeUserMemory(memory) {
   const source = memory || {};
-  return {
+  const normalized = {
     preferences: dedupeMemoryCategory(Array.isArray(source.preferences) ? source.preferences : [], "preferences"),
     coding: dedupeMemoryCategory(Array.isArray(source.coding) ? source.coding : [], "coding"),
     context: dedupeMemoryCategory(Array.isArray(source.context) ? source.context : [], "context"),
     autoMode: source.autoMode !== false,
   };
-}
-
-export function hasUserMemory(memory) {
-  const normalized = normalizeUserMemory(memory);
-  return MEMORY_CATEGORY_DEFS.some((category) => normalized[category.id].length > 0);
+  normalized.pending = normalizePendingList(source.pending, normalized);
+  return normalized;
 }
 
 export function isSensitiveMemoryText(text) {
@@ -398,43 +436,16 @@ export function mergeUserMemory(baseMemory, additions) {
       ? additions.autoMode !== false
       : base.autoMode;
 
-  return {
+  const result = {
     preferences: mergeCategoryEntries(base.preferences, incoming.preferences, "preferences"),
     coding: mergeCategoryEntries(base.coding, incoming.coding, "coding"),
     context: mergeCategoryEntries(base.context, incoming.context, "context"),
     autoMode: nextAutoMode,
   };
+  // Keep the base's review queue, minus anything that just became a saved entry
+  result.pending = normalizePendingList(base.pending, result);
+  return result;
 }
-
-export function updateUserMemoryEntry(memory, category, index, nextValue) {
-  const normalized = normalizeUserMemory(memory);
-  if (!normalized[category]) return normalized;
-
-  const nextEntries = normalized[category].filter((_, itemIndex) => itemIndex !== index);
-  return mergeUserMemory(
-    {
-      ...normalized,
-      [category]: nextEntries,
-    },
-    {
-      ...DEFAULT_USER_MEMORY,
-      [category]: [nextValue],
-      autoMode: normalized.autoMode,
-    }
-  );
-}
-
-export function removeUserMemoryEntry(memory, category, index) {
-  const normalized = normalizeUserMemory(memory);
-  if (!normalized[category]) return normalized;
-
-  return {
-    ...normalized,
-    [category]: normalized[category].filter((_, itemIndex) => itemIndex !== index),
-  };
-}
-
-/* ── Explicit memory commands ("remember that …" / "forget …") ────────────── */
 
 const REMEMBER_RE = /^(?:please\s+)?remember(?:\s+that)?[:,]?\s+(.{3,240})$/i;
 const FORGET_RE = /^(?:please\s+)?forget(?:\s+about)?[:,]?\s+(.{2,240})$/i;
@@ -584,71 +595,64 @@ export function extractMemoryFromImport(source) {
   return mergeUserMemory(DEFAULT_USER_MEMORY, normalized);
 }
 
-export function parseStructuredAIResponse(text) {
-  if (!text || typeof text !== "string") return normalizeUserMemory(DEFAULT_USER_MEMORY);
+const RELEVANCE_STOPWORDS = new Set(
+  "the a an and or but for with without from into onto this that these those is are was were be been being have has had do does did will would can could should may might must not no yes you your yours i me my mine we our ours it its they them their what which who whom how when where why please tell give make want need like just also very really about".split(
+    " "
+  )
+);
 
-  const result = { preferences: [], coding: [], context: [] };
+function tokenizeForRelevance(text) {
+  return new Set(
+    String(text || "")
+      .toLowerCase()
+      .split(/[^a-z0-9+#]+/)
+      .filter((w) => w.length >= 3 && !RELEVANCE_STOPWORDS.has(w))
+  );
+}
 
-  const SECTION_PATTERNS = [
-    { id: "preferences", pattern: /^preferences?(\s+memory)?:?\s*$/i },
-    { id: "coding", pattern: /^coding(\s+style)?:?\s*$/i },
-    { id: "context", pattern: /^context(\s+memory)?:?\s*$/i },
-  ];
+/**
+ * Score one memory entry against the current message tokens.
+ * Returns 0..1-ish overlap ratio (relative to the smaller token set).
+ */
+export function scoreMemoryRelevance(entry, contextTokens) {
+  if (!contextTokens || contextTokens.size === 0) return 0;
+  const entryTokens = tokenizeForRelevance(entry);
+  if (entryTokens.size === 0) return 0;
+  let hits = 0;
+  for (const t of entryTokens) if (contextTokens.has(t)) hits += 1;
+  return hits / Math.min(entryTokens.size, contextTokens.size);
+}
 
-  let currentSection = null;
+/**
+ * Pick the memory entries worth injecting for the current message.
+ * - preferences/coding: broadly applicable style defaults — always kept (capped).
+ * - context: project/goal facts — ranked by relevance to the message; falls
+ *   back to the most recent few when the message carries no usable signal.
+ */
+export function selectRelevantMemory(memory, contextText, opts = {}) {
+  const normalized = normalizeUserMemory(memory);
+  const maxStyle = Number.isFinite(opts.maxStyle) ? opts.maxStyle : 6;
+  const maxContext = Number.isFinite(opts.maxContext) ? opts.maxContext : 4;
+  const tokens = tokenizeForRelevance(contextText);
 
-  for (const line of text.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-
-    let sectionMatched = false;
-    for (const { id, pattern } of SECTION_PATTERNS) {
-      if (pattern.test(trimmed)) {
-        currentSection = id;
-        sectionMatched = true;
-        break;
-      }
-    }
-    if (sectionMatched) continue;
-
-    if (currentSection) {
-      const match = trimmed.match(/^(?:[-*•]|\d+[.)]) +(.+)/);
-      if (match) {
-        const entry = cleanEntry(match[1]);
-        if (entry && !isSensitiveMemoryText(entry)) {
-          result[currentSection].push(entry);
-        }
-      }
-    }
+  const context = normalized.context || [];
+  let pickedContext;
+  if (tokens.size === 0 || context.length <= maxContext) {
+    pickedContext = context.slice(-maxContext); // newest entries live at the end
+  } else {
+    const scored = context.map((entry, i) => ({ entry, i, score: scoreMemoryRelevance(entry, tokens) }));
+    const relevant = scored.filter((s) => s.score > 0.15);
+    const base = relevant.length > 0 ? relevant : scored.slice(-maxContext);
+    pickedContext = base
+      .sort((a, b) => b.score - a.score || b.i - a.i) // relevance, then recency
+      .slice(0, maxContext)
+      .sort((a, b) => a.i - b.i) // restore stored order for a stable prompt
+      .map((s) => s.entry);
   }
 
-  return mergeUserMemory(DEFAULT_USER_MEMORY, result);
-}
-
-function buildMemorySection(title, entries) {
-  if (!entries.length) return "";
-  return `${title}:\n${entries.map((entry) => `- ${entry}`).join("\n")}`;
-}
-
-export function buildSystemPromptWithMemory(basePrompt, memory) {
-  const normalized = normalizeUserMemory(memory);
-  const sections = [
-    buildMemorySection("User Preferences", normalized.preferences),
-    buildMemorySection("Coding Style", normalized.coding),
-    buildMemorySection("Context Memory", normalized.context),
-  ].filter(Boolean);
-
-  if (!sections.length) return basePrompt;
-
-  const memoryBlock = [
-    "## User Memory",
-    "You MUST follow these remembered user preferences unless the latest user message explicitly overrides them.",
-    "Use this memory to adapt answer length, explanation style, coding defaults, and project context.",
-    "Do not mention the memory unless it is directly relevant to the answer.",
-    "",
-    ...sections,
-  ].join("\n");
-
-  const prompt = cleanEntry(basePrompt) ? String(basePrompt).trim() : "";
-  return prompt ? `${prompt}\n\n${memoryBlock}` : memoryBlock;
+  return {
+    preferences: (normalized.preferences || []).slice(0, maxStyle),
+    coding: (normalized.coding || []).slice(0, maxStyle),
+    context: pickedContext,
+  };
 }

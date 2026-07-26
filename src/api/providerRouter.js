@@ -15,8 +15,30 @@ import { fetchModels as fetchAnthropicModels, streamMessage as streamAnthropic }
 import { fetchModels as fetchHFModels, streamMessage as streamHF, generateImage as generateImageHF, IMAGE_GEN_MODELS as HF_IMAGE_MODELS } from "./huggingface";
 import { fetchModels as fetchOllamaModels, streamMessage as streamOllama } from "./ollama";
 import { fetchModels as fetchNvidiaModels, streamMessage as streamNvidia } from "./nvidia";
+import { supportsVision } from "../utils/smartModelSelect";
+import { isModelUnavailable } from "../utils/rateLimiter";
 
 export { fetchCredits };
+
+// ── Bundled local runtime (Electron-managed Ollama on loopback) ──────────────
+
+const LOCAL_RUNTIME_URL = "http://127.0.0.1:11434";
+
+/** True when the value already points at a local/loopback endpoint. */
+function isLocalUrlValue(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return false;
+  return /^(https?:\/\/)?(127\.0\.0\.1|localhost|\[::1\]|0\.0\.0\.0)([:/]|$)/i.test(raw);
+}
+
+/** True when running inside Electron with the local runtime bridge exposed. */
+function hasLocalRuntimeBridge() {
+  try {
+    return typeof window !== "undefined" && !!window.electronAPI?.localStatus;
+  } catch {
+    return false;
+  }
+}
 
 export function toSelectionId(model) {
   if (!model) return "";
@@ -41,6 +63,7 @@ export const PROVIDER_META = {
   huggingface: { label: "HuggingFace",      color: "#f5a623", hasSuggestions: true  },
   ollama:      { label: "Ollama",           color: "#22c55e", hasSuggestions: true  },
   nvidia:      { label: "Nvidia NIM",       color: "#76b900", hasSuggestions: false },
+  local:       { label: "Local",            color: "#38bdf8", hasSuggestions: false },
 };
 
 export function providerLabel(provider) {
@@ -69,7 +92,7 @@ function inferImageOutputCapability(model) {
  * @returns {Promise<Array>} Flat array of model objects with `_provider` set
  */
 export async function fetchAllModels(providerKeys) {
-  const providerOrder = ["openrouter", "openai", "anthropic", "huggingface", "ollama", "nvidia"];
+  const providerOrder = ["openrouter", "openai", "anthropic", "huggingface", "ollama", "nvidia", "local"];
   const results = await Promise.allSettled([
     providerKeys?.openrouter
       ? fetchOpenRouterModels(providerKeys.openrouter).then((ms) =>
@@ -87,6 +110,17 @@ export async function fetchAllModels(providerKeys) {
     fetchHFModels(providerKeys?.huggingface || ""),
     providerKeys?.ollama      ? fetchOllamaModels(providerKeys.ollama)                                                                       : Promise.resolve([]),
     providerKeys?.nvidia      ? fetchNvidiaModels(providerKeys.nvidia)                                                                       : Promise.resolve([]),
+    // Bundled local runtime: always merged when running under Electron, unless
+    // the Ollama slot already points at a local URL (avoids duplicate entries).
+    hasLocalRuntimeBridge() && !isLocalUrlValue(providerKeys?.ollama)
+      ? fetchOllamaModels(LOCAL_RUNTIME_URL)
+          .then((ms) =>
+            ms
+              .filter((m) => !m._isImageGen)
+              .map((m) => ({ ...m, _provider: "local", _isLocal: true }))
+          )
+          .catch(() => []) // runtime not serving — nothing to merge
+      : Promise.resolve([]),
   ]);
 
   results.forEach((result, index) => {
@@ -154,7 +188,8 @@ export async function routeImageGen(providerKeys, model, prompt) {
  */
 export async function routeStream(providerKeys, model, messages, opts = {}) {
   const provider = model?._provider || "openrouter";
-  const key = providerKeys?.[provider];
+  // Local models always stream against the bundled loopback runtime — no key needed.
+  const key = provider === "local" ? LOCAL_RUNTIME_URL : providerKeys?.[provider];
 
   if (!key) {
     throw new Error(`No API key configured for ${providerLabel(provider)}.`);
@@ -166,6 +201,7 @@ export async function routeStream(providerKeys, model, messages, opts = {}) {
     case "anthropic":   return streamAnthropic(key, model.id, messages, opts);
     case "huggingface": return streamHF(key, model.id, messages, opts);
     case "ollama":      return streamOllama(key, model.id, messages, opts);
+    case "local":       return streamOllama(LOCAL_RUNTIME_URL, model.id, messages, opts);
     case "nvidia":      return streamNvidia(key, model.id, messages, opts);
     default:            throw new Error(`Unknown provider: ${provider}`);
   }
@@ -176,12 +212,19 @@ export async function routeStream(providerKeys, model, messages, opts = {}) {
 /**
  * When a provider fails, suggest an equivalent model from another active provider.
  *
- * @param {Array}  models       - Full combined model list
- * @param {string} failedId     - Model ID that failed
+ * The pick is capability-aware (a vision task never falls back to a text-only
+ * model) and health-aware (models currently rate-limited / cooling down are
+ * skipped when a healthy alternative exists), so a failover lands on a model
+ * that can actually handle the same turn.
+ *
+ * @param {Array}  models       - Full combined model list (already value/rank-ordered upstream)
+ * @param {string} failedId     - Model ID/selection that failed
  * @param {object} providerKeys - Active provider keys
+ * @param {object} [opts]
+ * @param {boolean} [opts.needsVision] - The turn carries an image; require image input
  * @returns {{ model: object, message: string } | null}
  */
-export function suggestFallbackAcrossProviders(models, failedId, providerKeys) {
+export function suggestFallbackAcrossProviders(models, failedId, providerKeys, opts = {}) {
   const failed = findModelBySelection(models, failedId);
   if (!failed) return null;
 
@@ -193,14 +236,20 @@ export function suggestFallbackAcrossProviders(models, failedId, providerKeys) {
 
   if (activeProviders.length === 0) return null;
 
-  // Find a similarly-capable model from another active provider
-  const candidates = models.filter(
+  // Candidates from any *other* active provider…
+  let candidates = models.filter(
     (m) => m._provider !== failedProvider && activeProviders.includes(m._provider)
   );
+  // …that can actually handle the turn (don't hand an image to a text-only model).
+  if (opts.needsVision) candidates = candidates.filter((m) => supportsVision(m));
 
   if (candidates.length === 0) return null;
 
-  const pick = candidates[0];
+  // Prefer a model that isn't itself rate-limited; only fall through to a
+  // cooling-down one if nothing healthier is available.
+  const healthy = candidates.filter((m) => !isModelUnavailable(m._selectionId || m.id));
+  const pick = healthy[0] || candidates[0];
+
   return {
     model: pick,
     message: `${providerLabel(failedProvider)} is unavailable. Try ${pick.name || pick.id} via ${providerLabel(pick._provider)}?`,

@@ -5,8 +5,9 @@ const os = require("os");
 const { spawn } = require("child_process");
 const https = require("https");
 const http = require("http");
-const { URL: NodeURL } = require("url");
+const { URL: NodeURL, pathToFileURL } = require("url");
 const Store = require("electron-store");
+const localRuntime = require("./localruntime");
 // electron-updater is lazy-required inside setupAutoUpdater so it initializes
 // after app.whenReady() — importing at top level causes a crash in dev mode.
 let autoUpdater;
@@ -171,31 +172,66 @@ function createWindow() {
   Menu.setApplicationMenu(null);
 
   // ── CSP: restrict what the renderer can load/connect to ────────────────────
-  // Also inject CORS headers for API domains that don't provide them (e.g. Nvidia NIM)
+  // Also inject CORS headers for API domains so fetch() works with webSecurity
+  // enabled (some providers, e.g. Nvidia NIM, don't send CORS headers at all).
+  const API_CORS_HOSTS = [
+    "openrouter.ai",
+    "api.openai.com",
+    "api.anthropic.com",
+    "router.huggingface.co",
+    "huggingface.co",
+    "ollama.com",
+    "integrate.api.nvidia.com",
+    "ai.api.nvidia.com",
+  ];
+
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     const responseHeaders = { ...details.responseHeaders };
+    let statusLine; // only set when we need to force a preflight to succeed
 
-    // Nvidia NIM API doesn't send CORS headers — inject them so fetch() works
-    const url = (details.url || "").toLowerCase();
-    if (url.includes("integrate.api.nvidia.com") || url.includes("ai.api.nvidia.com")) {
+    let hostname = "";
+    try { hostname = new URL(details.url).hostname.toLowerCase(); } catch { /* ignore */ }
+
+    const isApiHost = API_CORS_HOSTS.some(
+      (h) => hostname === h || hostname.endsWith("." + h)
+    );
+
+    if (isApiHost) {
+      // Replace (don't duplicate) any CORS headers the server sent
+      for (const key of Object.keys(responseHeaders)) {
+        if (/^access-control-/i.test(key)) delete responseHeaders[key];
+      }
       responseHeaders["Access-Control-Allow-Origin"] = ["*"];
-      responseHeaders["Access-Control-Allow-Headers"] = ["Content-Type, Authorization"];
+      // NOTE: Authorization is NOT covered by the "*" wildcard per spec — list explicitly
+      responseHeaders["Access-Control-Allow-Headers"] = [
+        "authorization, content-type, accept, x-api-key, anthropic-version, " +
+        "anthropic-dangerous-direct-browser-access, http-referer, x-title",
+      ];
       responseHeaders["Access-Control-Allow-Methods"] = ["GET, POST, PUT, DELETE, OPTIONS"];
+      responseHeaders["Access-Control-Max-Age"] = ["86400"];
+      // Some APIs reject OPTIONS (404/405) — force the preflight to succeed
+      if (details.method === "OPTIONS") statusLine = "HTTP/1.1 204 No Content";
     }
+
+    // Dev server needs its HMR websocket + inline runtime; packaged build stays strict
+    const devConnect = app.isPackaged
+      ? ""
+      : " ws://localhost:4123 ws://127.0.0.1:4123 http://localhost:4123";
+    const scriptSrc = app.isPackaged ? "'self'" : "'self' 'unsafe-inline'";
 
     responseHeaders["Content-Security-Policy"] = [
       "default-src 'self'; " +
-      "script-src 'self'; " +
+      `script-src ${scriptSrc}; ` +
       "style-src 'self' 'unsafe-inline'; " +
       "img-src 'self' data: blob: https:; " +
-      "connect-src https://openrouter.ai https://api.openai.com https://api.anthropic.com https://router.huggingface.co https://huggingface.co https://ollama.com http://127.0.0.1:11434 http://localhost:11434 https://integrate.api.nvidia.com https://ai.api.nvidia.com; " +
+      "connect-src https://openrouter.ai https://api.openai.com https://api.anthropic.com https://router.huggingface.co https://huggingface.co https://ollama.com http://127.0.0.1:11434 http://localhost:11434 https://integrate.api.nvidia.com https://ai.api.nvidia.com" + devConnect + "; " +
       "font-src 'self' data:; " +
       "media-src blob:; " +
       "object-src 'none'; " +
       "base-uri 'none';",
     ];
 
-    callback({ responseHeaders });
+    callback(statusLine ? { responseHeaders, statusLine } : { responseHeaders });
   });
 
   // ── Block all permission requests (camera, mic, geolocation, etc.) ──────────
@@ -205,8 +241,10 @@ function createWindow() {
 
   const win = new BrowserWindow({
     title: "KritakaPrajna",
-    width: 1000,
-    height: 700,
+    width: 1200,
+    height: 780,
+    minWidth: 760,
+    minHeight: 540,
     frame: false,
     autoHideMenuBar: true,
     icon: path.join(__dirname, "../assets/logo.png"),
@@ -216,18 +254,30 @@ function createWindow() {
       sandbox: true,
       preload: path.join(__dirname, "preload.js"),
       backgroundThrottling: false,
-      webSecurity: false, // Allow cross-origin API calls (Nvidia NIM lacks CORS headers)
+      webSecurity: true, // CORS handled via onHeadersReceived shim for API hosts
     },
   });
 
   mainWindow = win;
 
   // ── Block renderer from navigating away from the app ────────────────────────
+  // Guard robustly: a loose startsWith("file://") would allow file:///C:/Windows/…
+  // and startsWith("http://localhost:4123") would match localhost:4123.evil.com.
   win.webContents.on("will-navigate", (event, url) => {
-    const appUrl = app.isPackaged ? "file://" : "http://localhost:3000";
-    if (!url.startsWith(appUrl)) {
-      event.preventDefault();
+    let allowed = false;
+    try {
+      const target = new NodeURL(url);
+      if (app.isPackaged) {
+        // Only files inside the packaged build directory.
+        const buildRoot = pathToFileURL(path.join(__dirname, "..", "build") + path.sep).href;
+        allowed = target.protocol === "file:" && url.startsWith(buildRoot);
+      } else {
+        allowed = target.origin === "http://localhost:4123";
+      }
+    } catch {
+      allowed = false;
     }
+    if (!allowed) event.preventDefault();
   });
 
   // ── Block new windows / popups ───────────────────────────────────────────────
@@ -236,7 +286,7 @@ function createWindow() {
   if (app.isPackaged) {
     win.loadFile(path.join(__dirname, "../build/index.html"));
   } else {
-    win.loadURL("http://localhost:3000");
+    win.loadURL("http://localhost:4123");
   }
 }
 
@@ -330,101 +380,171 @@ ipcMain.handle("read-file", async (_event, filePath) => {
 });
 
 // ── IPC: extract text from PDF (buffer — works for any user-selected file) ───
-ipcMain.handle("extract-pdf-text-buffer", async (_event, arrayBuffer) => {
+// pdf-parse v2 exports a { PDFParse } class (there is NO callable default —
+// the old v1 `pdfParse(buffer)` call silently threw and returned {text:null},
+// which is why attached PDFs never reached the model). v2 handles Node env +
+// per-line breaks internally, so no DOMMatrix polyfill / custom pagerender.
+async function pdfBufferToText(buffer) {
+  const { PDFParse } = require("pdf-parse");
+  const parser = new PDFParse({ data: new Uint8Array(buffer) });
+  try {
+    const res = await parser.getText();
+    return { text: res.text || "", pages: res.total || 0 };
+  } finally {
+    try { await parser.destroy(); } catch { /* best-effort cleanup */ }
+  }
+}
+
+// ── IPC: extract text from ANY uploaded file (buffer) ───────────────────────
+// Universal reader so attachments of any type reach the model. Dispatches by
+// extension/mime: PDF (pdf-parse v2), OOXML docx/pptx/xlsx (dependency-free zip
+// via built-in zlib + XML strip), and text/code/markdown/csv/json/etc. Binary
+// files that can't be decoded return a clear error instead of garbage.
+const FILE_TEXT_CAP = 500000;               // max characters of extracted text
+const FILE_BYTES_CAP = 20 * 1024 * 1024;    // 20 MB raw upload ceiling
+
+const TEXT_EXTS = new Set([
+  "txt","text","md","markdown","rst","log","csv","tsv","json","json5","jsonl",
+  "ndjson","yaml","yml","toml","ini","cfg","conf","env","properties","xml","html",
+  "htm","xhtml","svg","css","scss","sass","less","js","jsx","mjs","cjs","ts","tsx",
+  "py","pyw","rb","php","java","kt","kts","go","rs","c","h","cc","cpp","cxx","hpp",
+  "cs","swift","m","mm","scala","clj","cljs","edn","ex","exs","erl","hs","lua","pl",
+  "pm","r","jl","dart","sh","bash","zsh","fish","ps1","psm1","bat","cmd","sql","gql",
+  "graphql","proto","tex","bib","srt","vtt","po","pot","diff","patch","gitignore",
+  "dockerfile","makefile","cmake","gradle","asm","vue","svelte","astro","tf","adoc",
+]);
+
+function looksBinary(buf) {
+  const n = Math.min(buf.length, 8000);
+  if (n === 0) return false;
+  let suspicious = 0;
+  for (let i = 0; i < n; i++) {
+    const b = buf[i];
+    if (b === 0) return true;                          // NUL byte -> binary
+    if (b < 9 || (b > 13 && b < 32)) suspicious++;
+  }
+  return suspicious / n > 0.3;
+}
+
+function decodeText(buf) {
+  let b = buf;
+  if (b.length >= 3 && b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf) b = b.subarray(3); // strip BOM
+  return b.toString("utf8");
+}
+
+// Minimal dependency-free ZIP reader (central-directory based) for OOXML files.
+function zipEntries(buf) {
+  const EOCD = 0x06054b50, CEN = 0x02014b50;
+  let eocd = -1;
+  const min = Math.max(0, buf.length - 22 - 65536);
+  for (let i = buf.length - 22; i >= min; i--) {
+    if (buf.readUInt32LE(i) === EOCD) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("not a zip archive");
+  const count = buf.readUInt16LE(eocd + 10);
+  let p = buf.readUInt32LE(eocd + 16);
+  const out = [];
+  for (let n = 0; n < count && p + 46 <= buf.length; n++) {
+    if (buf.readUInt32LE(p) !== CEN) break;
+    const method = buf.readUInt16LE(p + 10);
+    const compSize = buf.readUInt32LE(p + 20);
+    const nameLen = buf.readUInt16LE(p + 28);
+    const extraLen = buf.readUInt16LE(p + 30);
+    const commentLen = buf.readUInt16LE(p + 32);
+    const localOff = buf.readUInt32LE(p + 42);
+    const name = buf.toString("utf8", p + 46, p + 46 + nameLen);
+    out.push({ name, method, compSize, localOff });
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return out;
+}
+
+function zipRead(buf, entry) {
+  const zlib = require("zlib");
+  const lo = entry.localOff;
+  if (buf.readUInt32LE(lo) !== 0x04034b50) throw new Error("bad local header");
+  const nameLen = buf.readUInt16LE(lo + 26);
+  const extraLen = buf.readUInt16LE(lo + 28);
+  const start = lo + 30 + nameLen + extraLen;
+  const data = buf.subarray(start, start + entry.compSize);
+  if (entry.method === 0) return data;                  // stored
+  if (entry.method === 8) return zlib.inflateRawSync(data); // deflate
+  throw new Error("unsupported zip compression " + entry.method);
+}
+
+function xmlToText(xml) {
+  return xml
+    .replace(/<w:tab\b[^>]*\/?>/g, "\t")
+    .replace(/<w:br\b[^>]*\/?>/g, "\n")
+    .replace(/<\/w:p>/g, "\n")
+    .replace(/<\/a:p>/g, "\n")
+    .replace(/<\/text:p>/g, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(+d));
+}
+
+function ooxmlToText(buf, ext) {
+  const entries = zipEntries(buf);
+  const getXml = (name) => {
+    const e = entries.find((x) => x.name === name);
+    return e ? decodeText(zipRead(buf, e)) : "";
+  };
+  if (ext === "docx") return xmlToText(getXml("word/document.xml"));
+  if (ext === "pptx") {
+    return entries
+      .filter((e) => /^ppt\/slides\/slide\d+\.xml$/.test(e.name))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+      .map((e) => xmlToText(decodeText(zipRead(buf, e))))
+      .join("\n\n");
+  }
+  if (ext === "xlsx") {
+    const shared = getXml("xl/sharedStrings.xml");
+    return (shared.match(/<t[^>]*>([\s\S]*?)<\/t>/g) || []).map((m) => xmlToText(m)).join("\n");
+  }
+  return "";
+}
+
+ipcMain.handle("extract-file-text", async (_event, arrayBuffer, fileName = "", mime = "") => {
   try {
     const buffer = Buffer.from(arrayBuffer);
-    if (buffer.length > MAX_FILE_SIZE) {
-      return { error: "PDF too large (max 5 MB)", text: null };
+    if (buffer.length === 0) return { error: "Empty file", text: null, kind: "text" };
+    if (buffer.length > FILE_BYTES_CAP) {
+      return { error: "File too large (max 20 MB)", text: null, kind: "text" };
     }
-    if (typeof globalThis.DOMMatrix === "undefined") {
-      globalThis.DOMMatrix = class DOMMatrix {
-        constructor(init) {
-          this.a=1;this.b=0;this.c=0;this.d=1;this.e=0;this.f=0;
-          this.m11=1;this.m12=0;this.m13=0;this.m14=0;
-          this.m21=0;this.m22=1;this.m23=0;this.m24=0;
-          this.m31=0;this.m32=0;this.m33=1;this.m34=0;
-          this.m41=0;this.m42=0;this.m43=0;this.m44=1;
-          if (Array.isArray(init) && init.length === 6) {
-            [this.a,this.b,this.c,this.d,this.e,this.f]=init;
-          }
-        }
-        multiply() { return new globalThis.DOMMatrix(); }
-        translate(x=0,y=0) { return new globalThis.DOMMatrix([this.a,this.b,this.c,this.d,this.e+x,this.f+y]); }
-        scale(sx=1,sy=1) { return new globalThis.DOMMatrix([this.a*sx,this.b,this.c,this.d*sy,this.e,this.f]); }
-        rotate() { return new globalThis.DOMMatrix(); }
-        transformPoint(p={}) { return { x: (p.x||0)*this.a+this.e, y: (p.y||0)*this.d+this.f, w: p.w||1 }; }
-        static fromMatrix(m) { return new globalThis.DOMMatrix(); }
-        static fromFloat32Array(a) { return new globalThis.DOMMatrix(Array.from(a)); }
-        static fromFloat64Array(a) { return new globalThis.DOMMatrix(Array.from(a)); }
-      };
-    }
-    const _pdfMod = require("pdf-parse");
-    const pdfParse = typeof _pdfMod === "function" ? _pdfMod : (_pdfMod.default || _pdfMod);
-    const pagerender = (pageData) =>
-      pageData.getTextContent().then((tc) => {
-        let lastY = null, text = "";
-        for (const item of tc.items) {
-          if (lastY !== null && item.transform[5] !== lastY) text += "\n";
-          text += item.str;
-          lastY = item.transform[5];
-        }
-        return text;
-      });
-    const data = await pdfParse(buffer, { pagerender });
-    return { error: null, text: data.text, pages: data.numpages };
-  } catch (err) {
-    return { error: err.message, text: null };
-  }
-});
+    const ext = (fileName.split(".").pop() || "").toLowerCase();
+    const baseName = (fileName.split(/[\\/]/).pop() || "").toLowerCase();
+    let text = "";
+    let kind = "text";
 
-// ── IPC: extract text from PDF ──────────────────────────────────────────────
-ipcMain.handle("extract-pdf-text", async (_event, filePath) => {
-  if (!isPathAllowed(filePath)) return { error: "Access denied: file is outside the opened folder", text: null };
-  try {
-    const stat = await fs.promises.stat(filePath);
-    if (stat.size > MAX_FILE_SIZE) {
-      return { error: "PDF too large (max 5 MB)", text: null };
+    if (ext === "pdf" || mime === "application/pdf") {
+      text = (await pdfBufferToText(buffer)).text;
+      kind = "pdf";
+    } else if (ext === "docx" || ext === "pptx" || ext === "xlsx") {
+      text = ooxmlToText(buffer, ext);
+    } else if (
+      TEXT_EXTS.has(ext) ||
+      TEXT_EXTS.has(baseName) ||                        // e.g. "dockerfile", "makefile"
+      mime.startsWith("text/") ||
+      /(json|xml|csv|yaml|javascript|typescript|markdown)/.test(mime)
+    ) {
+      text = decodeText(buffer);
+    } else if (looksBinary(buffer)) {
+      return { error: `Unsupported binary file (.${ext || "?"})`, text: null, kind: "binary" };
+    } else {
+      text = decodeText(buffer);                        // unknown ext but printable
     }
-    // pdf-parse uses PDF.js which needs DOMMatrix — polyfill it for Node/Electron main process
-    if (typeof globalThis.DOMMatrix === "undefined") {
-      globalThis.DOMMatrix = class DOMMatrix {
-        constructor(init) {
-          this.a=1;this.b=0;this.c=0;this.d=1;this.e=0;this.f=0;
-          this.m11=1;this.m12=0;this.m13=0;this.m14=0;
-          this.m21=0;this.m22=1;this.m23=0;this.m24=0;
-          this.m31=0;this.m32=0;this.m33=1;this.m34=0;
-          this.m41=0;this.m42=0;this.m43=0;this.m44=1;
-          if (Array.isArray(init) && init.length === 6) {
-            [this.a,this.b,this.c,this.d,this.e,this.f]=init;
-          }
-        }
-        multiply() { return new globalThis.DOMMatrix(); }
-        translate(x=0,y=0) { return new globalThis.DOMMatrix([this.a,this.b,this.c,this.d,this.e+x,this.f+y]); }
-        scale(sx=1,sy=1) { return new globalThis.DOMMatrix([this.a*sx,this.b,this.c,this.d*sy,this.e,this.f]); }
-        rotate() { return new globalThis.DOMMatrix(); }
-        transformPoint(p={}) { return { x: (p.x||0)*this.a+this.e, y: (p.y||0)*this.d+this.f, w: p.w||1 }; }
-        static fromMatrix(m) { return new globalThis.DOMMatrix(); }
-        static fromFloat32Array(a) { return new globalThis.DOMMatrix(Array.from(a)); }
-        static fromFloat64Array(a) { return new globalThis.DOMMatrix(Array.from(a)); }
-      };
+
+    let truncated = false;
+    if (text && text.length > FILE_TEXT_CAP) {
+      text = text.slice(0, FILE_TEXT_CAP);
+      truncated = true;
     }
-    const _pdfMod = require("pdf-parse");
-    const pdfParse = typeof _pdfMod === "function" ? _pdfMod : (_pdfMod.default || _pdfMod);
-    const buffer = await fs.promises.readFile(filePath);
-    const pagerender = (pageData) =>
-      pageData.getTextContent().then((tc) => {
-        let lastY = null, text = "";
-        for (const item of tc.items) {
-          if (lastY !== null && item.transform[5] !== lastY) text += "\n";
-          text += item.str;
-          lastY = item.transform[5];
-        }
-        return text;
-      });
-    const data = await pdfParse(buffer, { pagerender });
-    return { error: null, text: data.text, pages: data.numpages };
+    return { error: null, text: text || "", kind, truncated };
   } catch (err) {
-    return { error: err.message, text: null };
+    return { error: err.message, text: null, kind: "text" };
   }
 });
 
@@ -520,12 +640,10 @@ ipcMain.handle("ollama-api-request", async (_event, payload) => {
       return { ok: false, status: 0, error: "Unsupported protocol", text: "" };
     }
 
-    const allowedHost =
-      base.hostname === "ollama.com" ||
-      base.hostname === "localhost" ||
-      base.hostname === "127.0.0.1";
+    const isAllowedOllamaHost = (h) =>
+      h === "ollama.com" || h === "localhost" || h === "127.0.0.1";
 
-    if (!allowedHost) {
+    if (!isAllowedOllamaHost(base.hostname)) {
       return { ok: false, status: 0, error: "Host is not allowed", text: "" };
     }
 
@@ -534,6 +652,16 @@ ipcMain.handle("ollama-api-request", async (_event, payload) => {
       target = new NodeURL(pathPart || "/", base.href);
     } catch {
       return { ok: false, status: 0, error: "Invalid request path", text: "" };
+    }
+
+    // Re-validate the FINAL target. An absolute `path` (e.g. "http://evil/x" or
+    // "http://169.254.169.254/…") makes new URL() discard the base entirely, which
+    // would otherwise bypass the host allowlist checked on `base` above (SSRF).
+    if (target.protocol !== "http:" && target.protocol !== "https:") {
+      return { ok: false, status: 0, error: "Unsupported protocol", text: "" };
+    }
+    if (!isAllowedOllamaHost(target.hostname)) {
+      return { ok: false, status: 0, error: "Host is not allowed", text: "" };
     }
 
     const client = target.protocol === "https:" ? https : http;
@@ -639,10 +767,117 @@ ipcMain.handle("get-platform-info", () => {
 
 // ── IPC: manual update check ────────────────────────────────────────────────
 ipcMain.handle("check-for-updates", () => {
-  autoUpdater?.checkForUpdates().catch(() => {});
+  // setupAutoUpdater only runs for packaged, non-Store builds, so autoUpdater is
+  // absent the rest of the time. Say so rather than leaving the button inert.
+  if (!autoUpdater) {
+    sendUpdateStatus("error", "Updates are only checked in the installed app.");
+    return { ok: false };
+  }
+  autoUpdater.checkForUpdates().catch((err) => {
+    sendUpdateStatus("error", err?.message || "Could not reach GitHub.");
+  });
+  return { ok: true };
 });
 
 ipcMain.handle("get-app-version", () => app.getVersion());
+
+// Only reachable once "update-downloaded" has fired; otherwise there is nothing
+// staged to install and quitAndInstall would just close the app.
+ipcMain.handle("restart-and-install", () => {
+  if (!autoUpdater) return { ok: false };
+  autoUpdater.quitAndInstall();
+  return { ok: true };
+});
+
+// ── IPC: GPU / hardware capability detection ────────────────────────────────
+// Drives the OCR engine policy (local GPU model vs. simple Tesseract).
+// HONEST LIMITATION: a GPU *existing* does NOT prove it can run a 3.3B VLM.
+// We distinguish discrete NVIDIA/AMD from integrated Intel and make a
+// best-effort VRAM estimate. Callers must treat "strong" as "worth offering",
+// never "guaranteed to work", and must NEVER auto-download/auto-run on this alone.
+const GPU_VENDOR_IDS = { 4318: "nvidia", 4098: "amd", 5140: "microsoft", 32902: "intel", 4203: "apple" };
+
+function queryWindowsGpu() {
+  // Win32_VideoController.AdapterRAM is a uint32 (caps at ~4GB), so we also read
+  // the registry qwMemorySize (true VRAM as int64) and prefer it when present.
+  return new Promise((resolve) => {
+    if (process.platform !== "win32") return resolve([]);
+    const { execFile } = require("child_process");
+    const ps = [
+      "$ErrorActionPreference='SilentlyContinue'",
+      "$vc = Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM,DriverVersion,AdapterCompatibility",
+      "$reg = Get-ChildItem 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}' | ForEach-Object { $p = Get-ItemProperty $_.PSPath; if ($p.'HardwareInformation.qwMemorySize') { [PSCustomObject]@{ Name=$p.DriverDesc; VramBytes=[int64]$p.'HardwareInformation.qwMemorySize' } } }",
+      "ConvertTo-Json @{ controllers=@($vc); vram=@($reg) } -Depth 4 -Compress",
+    ].join("; ");
+    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps],
+      { timeout: 8000, windowsHide: true, maxBuffer: 1024 * 1024 }, (err, stdout) => {
+        if (err || !stdout) return resolve([]);
+        try {
+          const parsed = JSON.parse(stdout);
+          const controllers = [].concat(parsed.controllers || []);
+          const vramList = [].concat(parsed.vram || []);
+          resolve(controllers.map((c) => {
+            const m = vramList.find((v) => v.Name && c.Name && v.Name.trim() === c.Name.trim());
+            let vramMB = null;
+            if (m && Number(m.VramBytes) > 0) vramMB = Math.round(Number(m.VramBytes) / (1024 * 1024));
+            else if (Number(c.AdapterRAM) > 0) vramMB = Math.round(Number(c.AdapterRAM) / (1024 * 1024));
+            return { name: c.Name || null, vramMB, driverVersion: c.DriverVersion || null, vendorName: c.AdapterCompatibility || null };
+          }));
+        } catch { resolve([]); }
+      });
+  });
+}
+
+// GPU hardware can't change while the app runs; getGPUInfo("complete") plus
+// the Windows CIM query take seconds, so compute once and replay the result.
+let gpuInfoPromise = null;
+ipcMain.handle("get-gpu-info", () => {
+  if (!gpuInfoPromise) {
+    gpuInfoPromise = collectGpuInfo().catch((e) => {
+      gpuInfoPromise = null; // allow retry after a failure
+      return { ok: false, error: String(e?.message || e) };
+    });
+  }
+  return gpuInfoPromise;
+});
+
+async function collectGpuInfo() {
+  let info = null, featureStatus = null;
+  try { info = await app.getGPUInfo("complete"); } catch {}
+  try { featureStatus = app.getGPUFeatureStatus(); } catch {}
+  const winGpus = await queryWindowsGpu();
+
+  let gpus = (info && Array.isArray(info.gpuDevice) ? info.gpuDevice : []).map((d) => {
+    const vendor = GPU_VENDOR_IDS[d.vendorId] || "unknown";
+    return { vendor, vendorId: d.vendorId ?? null, deviceId: d.deviceId ?? null,
+             active: !!d.active, discrete: vendor === "nvidia" || vendor === "amd" };
+  });
+  if (!gpus.length && winGpus.length) {
+    gpus = winGpus.map((w) => {
+      const n = (w.vendorName || w.name || "").toLowerCase();
+      const vendor = n.includes("nvidia") ? "nvidia" : (n.includes("amd") || n.includes("radeon")) ? "amd"
+                   : n.includes("intel") ? "intel" : "unknown";
+      return { vendor, discrete: vendor === "nvidia" || vendor === "amd" };
+    });
+  }
+  // attach Windows name/VRAM onto matching vendor entries (best-effort)
+  gpus.forEach((dev, i) => {
+    const w = winGpus[i] || winGpus.find((x) => x.vendorName && dev.vendor !== "unknown" && x.vendorName.toLowerCase().includes(dev.vendor));
+    if (w) { dev.name = w.name; dev.vramMB = w.vramMB; dev.driverVersion = w.driverVersion; }
+  });
+
+  return {
+    ok: true,
+    platform: process.platform,
+    totalMemMB: Math.round(os.totalmem() / (1024 * 1024)),
+    cpuCount: (os.cpus() || []).length || null,
+    gpus,
+    windowsRaw: winGpus,
+    glRenderer: (info && info.auxAttributes && info.auxAttributes.glRenderer) || null,
+    glVendor: (info && info.auxAttributes && info.auxAttributes.glVendor) || null,
+    featureStatus,
+  };
+}
 
 // ── IPC: web page fetching ───────────────────────────────────────────────────
 
@@ -652,15 +887,28 @@ const WEB_FETCH_MAX_REDIRECTS = 4;
 const WEB_FETCH_FULL_TEXT_CAP = 12000; // chars sent to AI
 
 function isPrivateHost(hostname) {
+  if (!hostname) return true;
+  let host = String(hostname).toLowerCase().trim();
+  // The URL parser keeps IPv6 literals in brackets ("[::1]") — strip for matching.
+  if (host.startsWith("[") && host.endsWith("]")) host = host.slice(1, -1);
+
+  // Block ALL IPv6 literals. The web-fetch feature only needs public DNS hostnames,
+  // never raw IPv6 literals — and enumerating every private form (::1, fc00::/7 ULA,
+  // fe80:: link-local, and ::ffff: v4-mapped like [::ffff:7f00:1] → 127.0.0.1, which
+  // Node serializes in hex) is error-prone. Blanket-blocking closes the SSRF vector.
+  if (host.includes(":")) return true;
+
+  // IPv4 (decimal/hex/octal/short forms are already normalized to dotted-quad by URL).
   return (
-    hostname === "localhost" ||
-    hostname === "::1" ||
-    /^127\./.test(hostname) ||
-    /^0\./.test(hostname) ||
-    /^10\./.test(hostname) ||
-    /^192\.168\./.test(hostname) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(hostname) ||
-    /^169\.254\./.test(hostname)
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    /^127\./.test(host) ||
+    /^0\./.test(host) ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+    /^169\.254\./.test(host) ||
+    /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host) // 100.64.0.0/10 CGNAT
   );
 }
 
@@ -1998,12 +2246,52 @@ ipcMain.handle("terminal-kill", (_event, id) => {
   return { ok: true };
 });
 
+// ── IPC: local model runtime (bundled Ollama) ───────────────────────────────
+const localModelsDir = () => path.join(app.getPath("userData"), "ollama-models");
+
+ipcMain.handle("local-status", async () => {
+  const res = await localRuntime.status({ resourcesPath: process.resourcesPath });
+  return res && typeof res === "object" ? { ...res, modelsDir: localModelsDir() } : res;
+});
+ipcMain.handle("local-open-models-dir", async () => {
+  const dir = localModelsDir();
+  try {
+    await fs.promises.mkdir(dir, { recursive: true });
+    const { shell } = require("electron");
+    const err = await shell.openPath(dir);
+    return { ok: !err, dir, error: err || undefined };
+  } catch (err) {
+    return { ok: false, dir, error: err?.message || String(err) };
+  }
+});
+ipcMain.handle("local-serve", async (_event, runtimeOptions) =>
+  localRuntime.ensureServe({
+    resourcesPath: process.resourcesPath,
+    modelsDir: localModelsDir(),
+    // Whitelisted in localRuntime.buildRuntimeEnv — safe to forward as-is.
+    runtimeOptions: runtimeOptions && typeof runtimeOptions === "object" ? runtimeOptions : undefined,
+  })
+);
+ipcMain.handle("local-stop", () => localRuntime.stop());
+ipcMain.handle("local-list", async () => localRuntime.listModels());
+ipcMain.handle("local-pull", async (_event, model) =>
+  localRuntime.pull(model, (p) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("local-pull-progress", { model, ...p });
+    }
+  })
+);
+ipcMain.handle("local-delete", async (_event, model) => localRuntime.remove(model));
+
 } // end registerIpcHandlers
 
 // ── Auto-updater setup ──────────────────────────────────────────────────────
 function setupAutoUpdater() {
   autoUpdater = require("electron-updater").autoUpdater;
-  autoUpdater.autoDownload = false;
+  // Fully automatic: fetch it without asking, and install it on quit whether or
+  // not the restart prompt was answered. The only thing left to decide is
+  // whether to restart now, and that question can wait.
+  autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
   autoUpdater.on("checking-for-update", () => {
@@ -2011,20 +2299,8 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on("update-available", (info) => {
+    // No dialog — the download has already started. The rail footer reports it.
     sendUpdateStatus("available", info.version);
-    dialog
-      .showMessageBox(mainWindow, {
-        type: "info",
-        title: "Update Available",
-        message: `A new version (v${info.version}) is available. Download now?`,
-        buttons: ["Download", "Later"],
-        defaultId: 0,
-      })
-      .then(({ response }) => {
-        if (response === 0) {
-          autoUpdater.downloadUpdate();
-        }
-      });
   });
 
   autoUpdater.on("update-not-available", () => {
@@ -2035,31 +2311,36 @@ function setupAutoUpdater() {
     sendUpdateStatus("downloading", Math.round(progress.percent));
   });
 
-  autoUpdater.on("update-downloaded", () => {
-    sendUpdateStatus("downloaded");
+  autoUpdater.on("update-downloaded", (info) => {
+    sendUpdateStatus("downloaded", info?.version || "");
+    // Installed on quit regardless, so this is genuinely optional — a modal
+    // that blocks the window would be the opposite of automatic.
     dialog
       .showMessageBox(mainWindow, {
         type: "info",
-        title: "Update Ready",
-        message: "Update downloaded. The app will restart to install it.",
-        buttons: ["Restart Now", "Later"],
+        title: "Update ready",
+        message: `Version ${info?.version || ""} is installed and will start next time you open the app.`,
+        detail: "Restart now to use it straight away.",
+        buttons: ["Restart now", "Later"],
         defaultId: 0,
+        cancelId: 1,
+        noLink: true,
       })
       .then(({ response }) => {
-        if (response === 0) {
-          autoUpdater.quitAndInstall();
-        }
-      });
+        if (response === 0) autoUpdater.quitAndInstall();
+      })
+      .catch(() => {});
   });
 
   autoUpdater.on("error", (err) => {
     sendUpdateStatus("error", err.message);
   });
 
-  // Check for updates after a short delay
-  setTimeout(() => {
-    autoUpdater.checkForUpdates().catch(() => {});
-  }, 3000);
+  // First check once the window has settled, then keep checking: a long-running
+  // desktop app that only looks at startup can sit months behind.
+  const check = () => autoUpdater.checkForUpdates().catch(() => {});
+  setTimeout(check, 4000);
+  setInterval(check, 6 * 60 * 60 * 1000); // every six hours
 }
 
 function sendUpdateStatus(status, data) {
@@ -2091,5 +2372,10 @@ app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
   }
+});
+
+// Stop the local runtime we spawned (if any) before the app exits.
+app.on("before-quit", () => {
+  try { localRuntime.stop(); } catch {}
 });
 

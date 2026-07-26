@@ -1,6 +1,9 @@
 import React, { memo, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import { PrismLight as SyntaxHighlighter } from "react-syntax-highlighter";
 import jsx from "react-syntax-highlighter/dist/esm/languages/prism/jsx";
 import javascript from "react-syntax-highlighter/dist/esm/languages/prism/javascript";
@@ -72,8 +75,13 @@ const synStyle = {
   deleted: { color: v("tag") },
 };
 
+const CODE_COLLAPSE_LINES = 24;
+
 function CodeBlock({ language, value }) {
   const [copied, setCopied] = useState(false);
+  const lineCount = useMemo(() => value.split("\n").length, [value]);
+  const collapsible = lineCount > CODE_COLLAPSE_LINES;
+  const [expanded, setExpanded] = useState(false);
   const copy = async () => {
     try {
       if (window.electronAPI?.writeClipboardText) await window.electronAPI.writeClipboardText(value);
@@ -89,6 +97,7 @@ function CodeBlock({ language, value }) {
       <div className="flex items-center justify-between px-3.5 h-8 border-b border-line">
         <span className="text-[10.5px] font-mono uppercase tracking-[0.12em] text-faint">
           {language || "code"}
+          {collapsible && <span className="normal-case tracking-normal"> · {lineCount} lines</span>}
         </span>
         <button
           type="button"
@@ -99,12 +108,65 @@ function CodeBlock({ language, value }) {
           {copied ? "Copied" : "Copy"}
         </button>
       </div>
-      <div className="overflow-x-auto px-3.5 py-3">
-        <SyntaxHighlighter language={language || "text"} style={synStyle} PreTag="div">
-          {value}
-        </SyntaxHighlighter>
+      <div className="relative">
+        <div
+          className="overflow-x-auto px-3.5 py-3"
+          style={collapsible && !expanded ? { maxHeight: 264, overflowY: "hidden" } : undefined}
+        >
+          <SyntaxHighlighter language={language || "text"} style={synStyle} PreTag="div">
+            {value}
+          </SyntaxHighlighter>
+        </div>
+        {collapsible && !expanded && (
+          <div
+            className="absolute inset-x-0 bottom-0 h-14 pointer-events-none"
+            style={{ background: "linear-gradient(to bottom, transparent, var(--bg-deep))" }}
+          />
+        )}
       </div>
+      {collapsible && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="pressable w-full flex items-center justify-center gap-1.5 border-t border-line text-[11px] text-dim hover:text-hi py-1.5"
+        >
+          <Icon name="chevronDown" size={12} className={expanded ? "rotate-180" : ""} />
+          {expanded ? "Collapse" : `Show all ${lineCount} lines`}
+        </button>
+      )}
     </div>
+  );
+}
+
+/* Bare syntax-highlighted code — no chrome. Reused by the Files viewer so code
+   files render with the same theme-aware colouring as chat code blocks. */
+export function CodeView({ language, value, showLineNumbers = false }) {
+  return (
+    <SyntaxHighlighter
+      language={language || "text"}
+      style={synStyle}
+      PreTag="div"
+      showLineNumbers={showLineNumbers}
+      lineNumberStyle={{
+        minWidth: "2.75em",
+        paddingRight: "1.25em",
+        textAlign: "right",
+        color: "var(--syn-comment)",
+        opacity: 0.5,
+        userSelect: "none",
+      }}
+      customStyle={{
+        background: "none",
+        margin: 0,
+        padding: "16px",
+        fontSize: "12px",
+        lineHeight: 1.7,
+        minWidth: "min-content",
+      }}
+      codeTagProps={{ style: { fontFamily: "var(--font-mono)" } }}
+    >
+      {value}
+    </SyntaxHighlighter>
   );
 }
 
@@ -237,11 +299,33 @@ const components = {
   },
 };
 
+/* ── Math delimiter normalization ──
+   Models emit \( … \) and \[ … \] delimiters, which remark-math does not
+   parse. Convert them to $ / $$ outside of code fences and inline code so
+   KaTeX picks them up; code segments pass through untouched. */
+function normalizeMathDelimiters(text) {
+  if (!text || (!text.includes("\\(") && !text.includes("\\["))) return text;
+  const segments = text.split(/(```[\s\S]*?```|``[\s\S]*?``|`[^`\n]*`)/g);
+  return segments
+    .map((seg, i) => {
+      if (i % 2 === 1) return seg; // captured code segment — untouched
+      return seg
+        .replace(/\\\[([\s\S]*?)\\\]/g, (_, body) => `\n$$\n${body}\n$$\n`)
+        .replace(/\\\(([\s\S]*?)\\\)/g, (_, body) => `$${body}$`);
+    })
+    .join("");
+}
+
 function Markdown({ children }) {
+  const content = useMemo(() => normalizeMathDelimiters(children || ""), [children]);
   return (
     <div className="markdown-body text-[13.5px]">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {children || ""}
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[[rehypeKatex, { strict: "ignore" }]]}
+        components={components}
+      >
+        {content}
       </ReactMarkdown>
     </div>
   );

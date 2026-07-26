@@ -18,10 +18,30 @@ const K = {
   density: "kp_density",
   costCapMonthly: "kp_cost_cap_monthly",
   autoFailover: "kp_auto_failover",
+  failoverMode: "kp_failover_mode",
+  contextMode: "kp_context_mode",
+  keepFilesInContext: "kp_keep_files_in_context",
+  tokenMode: "kp_token_mode",
+  localRuntime: "kp_local_runtime",
+};
+
+// Advanced local-runtime knobs (mirrors Ollama app / LM Studio). Zero/empty
+// means "runtime default" — buildRuntimeEnv in the main process skips those.
+export const DEFAULT_LOCAL_RUNTIME = {
+  contextLength: 0,      // OLLAMA_CONTEXT_LENGTH (tokens; 0 = runtime default 4096)
+  keepAlive: "",         // OLLAMA_KEEP_ALIVE ("5m", "30m", "-1" = forever)
+  numParallel: 0,        // OLLAMA_NUM_PARALLEL
+  maxLoadedModels: 0,    // OLLAMA_MAX_LOADED_MODELS
+  flashAttention: null,  // OLLAMA_FLASH_ATTENTION (null = runtime default)
+  kvCacheType: "",       // OLLAMA_KV_CACHE_TYPE ("f16" | "q8_0" | "q4_0")
+  // Per-request options (sent in /api/chat `options`, local runtime only):
+  numGpu: null,          // num_gpu — layers offloaded to GPU (0 = CPU only, null = auto)
+  numThread: 0,          // num_thread — CPU threads (0 = runtime default)
 };
 
 export const DEFAULT_SYSTEM_PROMPT = `KritakaPrajna assistant rules:
 - Answer directly and concisely.
+- Match answer length to the request: a greeting or trivial message gets a one-line reply; only long/complex questions get long answers.
 - Do not use reasoning headers like "Approach", "Analyze", "Reason", or "Solve".
 - For code: use fenced code blocks with language tags; keep edits minimal and explain briefly.
 - For terminal commands: always use fenced blocks. Windows -> powershell/cmd, macOS/Linux -> bash/sh.
@@ -50,6 +70,24 @@ export const settingsStore = createStore({
   density: readEnum(K.density, ["comfortable", "compact"], "comfortable"),
   costCapMonthly: Number(readRaw(K.costCapMonthly, 0)) || 0,
   autoFailover: readJSON(K.autoFailover, true) !== false,
+  // How the model reacts when your selected model fails. Migrates from the old
+  // boolean `autoFailover` (false → "never", true → "notify") so upgraders keep
+  // their intent while gaining the transparent "switched from X → Y" path.
+  failoverMode: readEnum(
+    K.failoverMode,
+    ["notify", "never", "silent"],
+    readJSON(K.autoFailover, true) === false ? "never" : "notify"
+  ),
+  // How much of the conversation is sent to the model each turn:
+  //   full  — entire thread, only trimmed when it overflows the model's context (Claude/ChatGPT-like, default)
+  //   smart — recent turns in full + a running summary of older ones
+  //   fixed — only the last `historyWindow` turns
+  contextMode: readEnum(K.contextMode, ["full", "smart", "fixed"], "full"),
+  // Keep uploaded file text readable for the whole chat (protected from history
+  // compression) rather than only on the turn it was attached.
+  keepFilesInContext: readJSON(K.keepFilesInContext, true) !== false,
+  tokenMode: readEnum(K.tokenMode, ["off", "balanced", "aggressive"], "balanced"),
+  localRuntime: { ...DEFAULT_LOCAL_RUNTIME, ...(readJSON(K.localRuntime, {}) || {}) },
 });
 
 /* Adaptive density — reflected as a root attribute so CSS can compact spacing. */
@@ -68,6 +106,9 @@ const RAW_KEYS = new Set([
   "webMode",
   "sendKey",
   "density",
+  "tokenMode",
+  "failoverMode",
+  "contextMode",
 ]);
 
 export function setSetting(name, value) {

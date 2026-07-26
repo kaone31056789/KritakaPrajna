@@ -1,4 +1,5 @@
 import { mapReasoningEffort, supportsReasoningModel } from "../utils/reasoningControls";
+import { parseChatSSE } from "./sse";
 const API_BASE = "https://openrouter.ai/api/v1";
 
 export async function fetchModels(apiKey) {
@@ -38,7 +39,7 @@ export async function streamMessage(
   apiKey,
   model,
   messages,
-  { onChunk, signal, reasoningDepth, maxTokens, temperature, topP } = {}
+  { onChunk, signal, reasoningDepth, maxTokens, temperature, topP, tools, toolChoice } = {}
 ) {
   const maxRetries = 3;
 
@@ -52,6 +53,10 @@ export async function streamMessage(
       temperature: temperature ?? 0.7,
       top_p: topP ?? 0.9,
     };
+    if (Array.isArray(tools) && tools.length) {
+      body.tools = tools;
+      body.tool_choice = toolChoice || "auto";
+    }
     if (supportsReasoningModel({ id: model, _provider: "openrouter" })) {
       body.reasoning = { effort: mapReasoningEffort(reasoningDepth || "balanced") };
     }
@@ -92,48 +97,7 @@ export async function streamMessage(
       throw new Error(`${res.status}: ${detail}`);
     }
 
-    // Read the SSE stream
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let full = "";
-    let buffer = "";
-    let usage = null;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith("data: ")) continue;
-        const payload = trimmed.slice(6);
-        if (payload === "[DONE]") break;
-        try {
-          const json = JSON.parse(payload);
-          const token = json.choices?.[0]?.delta?.content;
-          if (token) {
-            full += token;
-            onChunk?.(full);
-          }
-          // Capture usage from the final chunk (OpenRouter includes it)
-          if (json.usage) {
-            usage = {
-              prompt_tokens: json.usage.prompt_tokens || 0,
-              completion_tokens: json.usage.completion_tokens || 0,
-              cost: json.usage.cost ?? null, // Actual cost from OpenRouter
-            };
-          }
-        } catch {
-          // skip malformed chunks
-        }
-      }
-    }
-
-    return { text: full || "(No response)", usage };
+    return parseChatSSE(res, onChunk, { withCost: true });
   }
 }
 

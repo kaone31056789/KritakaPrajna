@@ -1,13 +1,14 @@
 import React, { useEffect, useMemo, useState, useId } from "react";
-import { motion, animate } from "framer-motion";
+import { motion } from "framer-motion";
 import { useStore } from "../../core/store";
 import { modelsStore, selectModel, modelDisplayName, isFreeModel, formatPrice, contextLabel } from "../../core/models";
 import { advisorStore, refreshSignals, rankModels, PRIORITY_OPTIONS, detectAdvisorTask, adviceReasons } from "../../core/advisor";
 import { settingsStore, setSetting } from "../../core/settings";
 import { providerLabel } from "../../api/providerRouter";
 import { setView } from "../../core/nav";
-import { EASE_OUT } from "../../design/motion";
+import { EASE_OUT, T_SLOW, T } from "../../design/motion";
 import Icon from "../../ui/icons";
+import { CountUp } from "../../ui/textfx";
 import { Segmented, NeuBadge, NeuButton, NeuInput, IconButton, SectionLabel, Spinner, EmptyState } from "../../ui/primitives";
 import { toast } from "../../ui/Toaster";
 import BrandIcon from "../../ui/BrandIcon";
@@ -22,22 +23,6 @@ const TASK_OPTIONS = [
 ];
 
 /** Animated number that counts up from 0 to `value`. */
-function CountUp({ value, duration = 0.9, delay = 0, className }) {
-  const [display, setDisplay] = useState(0);
-
-  useEffect(() => {
-    const controls = animate(0, value, {
-      duration,
-      delay,
-      ease: "easeOut",
-      onUpdate: (v) => setDisplay(Math.round(v)),
-    });
-    return () => controls.stop();
-  }, [value, duration, delay]);
-
-  return <span className={className}>{display}</span>;
-}
-
 /** Circular score gauge with gradient sweep + count-up center. */
 function RingGauge({ score, size = 76, stroke = 7, glow = false, delay = 0 }) {
   const gid = useId().replace(/:/g, "");
@@ -79,8 +64,9 @@ function RingGauge({ score, size = 76, stroke = 7, glow = false, delay = 0 }) {
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <CountUp
-          value={score}
+          to={score}
           delay={delay}
+          separator=""
           className={`font-display font-bold leading-none text-hi ${size >= 90 ? "text-[24px]" : "text-[19px]"}`}
         />
         <span className="text-[8.5px] uppercase tracking-[0.14em] text-faint mt-0.5">score</span>
@@ -115,9 +101,9 @@ function RankCard({ entry, rank, selected, comparing, onCompare }) {
     <motion.div
       variants={{
         initial: { opacity: 0, y: 14 },
-        animate: { opacity: 1, y: 0, transition: { duration: 0.26, ease: EASE_OUT } },
+        animate: { opacity: 1, y: 0, transition: { duration: T_SLOW, ease: EASE_OUT } },
       }}
-      whileHover={{ y: -4, transition: { duration: 0.18, ease: EASE_OUT } }}
+      whileHover={{ y: -4, transition: { duration: T, ease: EASE_OUT } }}
       className={`neu-raised rounded-lg p-5 flex flex-col gap-3.5 relative ${
         selected ? "[box-shadow:var(--neu-raised),0_0_0_1.5px_var(--accent)]" : ""
       }`}
@@ -147,7 +133,7 @@ function RankCard({ entry, rank, selected, comparing, onCompare }) {
         </div>
         <div className="text-right">
           <p className="font-display font-bold text-[22px] leading-none text-accent">
-            <CountUp value={score} />
+            <CountUp to={score} separator="" />
           </p>
           <p className="text-[9px] uppercase tracking-[0.14em] text-faint mt-0.5">score</p>
         </div>
@@ -217,9 +203,9 @@ function PodiumCard({ entry, rank, selected, comparing, onCompare }) {
     <motion.div
       variants={{
         initial: { opacity: 0, y: 18, scale: 0.97 },
-        animate: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.32, ease: EASE_OUT } },
+        animate: { opacity: 1, y: 0, scale: 1, transition: { duration: T_SLOW, ease: EASE_OUT } },
       }}
-      whileHover={{ y: -5, transition: { duration: 0.18, ease: EASE_OUT } }}
+      whileHover={{ y: -5, transition: { duration: T, ease: EASE_OUT } }}
       className={`neu-raised rounded-lg p-5 flex flex-col items-center gap-3.5 relative ${
         isWinner ? "md:order-2 md:-mt-2" : rank === 1 ? "md:order-1" : "md:order-3"
       } ${selected ? "[box-shadow:var(--neu-raised),0_0_0_1.5px_var(--accent)]" : ""}`}
@@ -334,7 +320,7 @@ function ComparePanel({ entries, selectedId, onRemove }) {
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.28, ease: EASE_OUT }}
+      transition={{ duration: T_SLOW, ease: EASE_OUT }}
       className="neu-raised rounded-lg p-5 mb-8 overflow-x-auto"
     >
       <div className="mb-4">
@@ -533,7 +519,7 @@ export default function AdvisorScreen() {
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.28, ease: EASE_OUT }}
+            transition={{ duration: T_SLOW, ease: EASE_OUT }}
             className="neu-raised rounded-lg p-5 mb-7 flex items-start gap-4 relative"
           >
             <BrandIcon model={advice.entry.model} seed={advice.entry.model._selectionId} size={40} glow />

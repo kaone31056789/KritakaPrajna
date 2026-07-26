@@ -1,0 +1,211 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Appearance controls — the CSS half of src/core/appearance.js.
+
+   Everything here keys off a root attribute or a --kp-* variable that the
+   store stamps. Nothing is scoped to the Settings page: a control that only
+   changed its own preview would be a fake control.
+
+   Values are read at point of use (color-mix on var(--surface), not a redefined
+   --surface) so re-applying never compounds on last frame's output.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Density ─────────────────────────────────────────────────────────────── */
+[data-density="spacious"] body { zoom: 1.06; }
+[data-density="spacious"] .msg-block { padding-top: 6px; padding-bottom: 6px; }
+[data-density="spacious"] .markdown-body { line-height: 1.85; }
+
+/* ── Glass: transparency + blur ───────────────────────────────────────────
+   Applied to the raised/inset helpers rather than to --surface itself, so the
+   alpha multiplies the live value instead of replacing it. */
+[data-glass] .neu-raised-sm,
+[data-glass] .neu-raised,
+[data-glass] .neu-raised-lg,
+[data-glass] .app-nav,
+[data-glass] .app-panel {
+  background: color-mix(in srgb, var(--surface) calc(var(--kp-surface-alpha, 1) * 100%), transparent);
+  backdrop-filter: blur(var(--kp-blur, 0px));
+  -webkit-backdrop-filter: blur(var(--kp-blur, 0px));
+}
+
+/* ── Borders ─────────────────────────────────────────────────────────────── */
+[style*="--kp-border-width"] .neu-raised-sm,
+[style*="--kp-border-width"] .neu-raised,
+[style*="--kp-border-width"] .neu-raised-lg {
+  outline: var(--kp-border-width, 1px) solid var(--line);
+  outline-offset: calc(var(--kp-border-width, 1px) * -1);
+}
+
+/* ── Flat: no depth at all, hairlines instead ────────────────────────────── */
+[data-flat="true"] .neu-raised-sm,
+[data-flat="true"] .neu-raised,
+[data-flat="true"] .neu-raised-lg {
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+/* ── Typography ──────────────────────────────────────────────────────────── */
+[style*="--kp-line-height"] body { line-height: var(--kp-line-height); }
+[style*="--kp-letter-spacing"] body { letter-spacing: var(--kp-letter-spacing); }
+[style*="--kp-weight"] body { font-weight: var(--kp-weight); }
+[style*="--kp-heading-scale"] h1 { font-size: calc(1.75rem * var(--kp-heading-scale)); }
+[style*="--kp-heading-scale"] h2 { font-size: calc(1.4rem * var(--kp-heading-scale)); }
+[style*="--kp-heading-scale"] h3 { font-size: calc(1.15rem * var(--kp-heading-scale)); }
+
+/* ── Motion ──────────────────────────────────────────────────────────────
+   "none" is a hard stop, not a slow-down: 0.01ms keeps transitionend firing
+   for code that waits on it, while being invisible. */
+[data-motion="none"] *,
+[data-motion="none"] *::before,
+[data-motion="none"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+[data-motion="none"] .pressable:active { transform: none !important; }
+[data-motion="reduced"] .aurora { animation: none; }
+
+/* Hover strength is a multiplier so a skin's own hover keeps its character. */
+[style*="--kp-hover"] .pressable:hover {
+  filter: brightness(calc(1 + 0.06 * var(--kp-hover, 1)));
+}
+
+/* The OS setting wins over everything the app offers. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── Backgrounds ─────────────────────────────────────────────────────────
+   A layer behind the app rather than a background on body, so brightness and
+   opacity can be tuned without dragging the text with them. */
+.kp-bg-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: var(--kp-bg-opacity, 1);
+  filter: brightness(var(--kp-bg-brightness, 1));
+}
+[data-bg="solid"] .kp-bg-layer { background: none; }
+[data-bg="gradient"] .kp-bg-layer {
+  background: linear-gradient(160deg, var(--bg) 0%, color-mix(in srgb, var(--accent) 12%, var(--bg)) 100%);
+}
+[data-bg="mesh"] .kp-bg-layer {
+  background:
+    radial-gradient(at 18% 12%, color-mix(in srgb, var(--accent) 22%, transparent) 0px, transparent 52%),
+    radial-gradient(at 82% 22%, color-mix(in srgb, var(--info) 18%, transparent) 0px, transparent 50%),
+    radial-gradient(at 62% 88%, color-mix(in srgb, var(--accent-2) 18%, transparent) 0px, transparent 48%),
+    var(--bg);
+}
+[data-bg="image"] .kp-bg-layer {
+  background-image: var(--kp-bg-image);
+  background-size: cover;
+  background-position: center;
+}
+
+/* Noise is a generated texture, not an asset — nothing to download. */
+[style*="--kp-noise"] .kp-bg-layer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: var(--kp-noise, 0);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+}
+
+/* ── Accessibility ───────────────────────────────────────────────────────── */
+[data-contrast="high"] {
+  --text: var(--text-hi);
+  --text-dim: var(--text-hi);
+  --text-faint: var(--text);
+  --line: color-mix(in srgb, var(--text-hi) 45%, transparent);
+  --line-strong: var(--text-hi);
+}
+[data-contrast="high"] .neu-raised-sm,
+[data-contrast="high"] .neu-raised,
+[data-contrast="high"] .neu-raised-lg {
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+
+[data-focus="strong"] :focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+
+/* Colour-blind palettes: shift the status hues apart where they collide.
+   Red/green is the common confusion, so success and error stop relying on it. */
+[data-cvd="protanopia"],
+[data-cvd="deuteranopia"] {
+  --ok: #4d90fe;
+  --ok-soft: rgba(77, 144, 254, 0.14);
+  --err: #f0b428;
+  --err-soft: rgba(240, 180, 40, 0.14);
+}
+[data-cvd="tritanopia"] {
+  --ok: #35b37e;
+  --ok-soft: rgba(53, 179, 126, 0.14);
+  --err: #e0567a;
+  --err-soft: rgba(224, 86, 122, 0.14);
+  --info: #9a6bd8;
+  --info-soft: rgba(154, 107, 216, 0.14);
+}
+
+/* ── Appearance page layout ──────────────────────────────────────────────
+   Columns belong here, not in an inline style: an inline gridTemplateColumns
+   outranks any media query, so the two-column breakpoint could never fire. */
+.kp-appearance-grid {
+  display: grid;
+  gap: 20px;
+  align-items: start;
+  grid-template-columns: minmax(0, 1fr);
+}
+.kp-appearance-aside {
+  min-width: 0;
+  position: static;
+}
+@media (min-width: 1100px) {
+  .kp-appearance-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(360px, 440px);
+  }
+  .kp-appearance-aside {
+    position: sticky;
+    top: 12px;
+    /* The rail sits inside the Settings scroll container, below the app's own
+       title bar — measuring against the full viewport overshoots by that much
+       and pushes the bottom of the panel out of reach. */
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+
+/* ── Theme card / live preview scoping ───────────────────────────────────
+   Skin rules are plain attribute selectors, so a preview element carrying
+   data-skin + data-theme resolves the whole palette on its own subtree.
+   It must not inherit the page's inline overrides, hence the explicit resets. */
+.kp-preview-scope {
+  --kp-blur: 0px;
+  --kp-surface-alpha: 1;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  container-type: inline-size;
+}
+
+/* ── Nav rail icons ──────────────────────────────────────────────────────
+   Tinted with the accent rather than left grey, so the rail reads as part of
+   the theme. color-mix, not a Tailwind opacity modifier: --accent is a hex in
+   a custom property, and Tailwind cannot inject alpha into a bare var(). */
+.icon-idle {
+  color: color-mix(in srgb, var(--accent) 62%, transparent);
+  transition: color var(--t-fast) var(--ease-out);
+}
+.icon-idle:hover,
+.icon-idle:focus-visible {
+  color: var(--accent);
+}

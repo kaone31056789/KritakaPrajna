@@ -10,13 +10,17 @@
     "electron-store": "^8.2.0",
     "electron-updater": "^6.8.3",
     "framer-motion": "^11.18.2",
+    "katex": "^0.18.0",
     "pdf-parse": "^2.4.5",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-markdown": "^10.1.0",
     "react-scripts": "5.0.1",
     "react-syntax-highlighter": "^16.1.1",
-    "remark-gfm": "^4.0.1"
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "tesseract.js": "^5.1.1"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.19",
@@ -32,12 +36,15 @@
     "wait-on": "^7.2.0"
   },
   "scripts": {
-    "start-react": "cross-env BROWSER=none react-scripts start",
-    "start-electron": "wait-on http://localhost:3000 && electron .",
+    "start-react": "cross-env BROWSER=none PORT=4123 react-scripts start",
+    "start-electron": "wait-on http://localhost:4123 && electron .",
     "start": "concurrently \"npm:start-react\" \"npm:start-electron\"",
-    "build": "react-scripts build",
+    "build": "npm run lint:undef && react-scripts build",
     "dist": "npm run build && electron-builder",
-    "test": "react-scripts test"
+    "test": "react-scripts test",
+    "lint:undef": "eslint --no-eslintrc -c .eslintrc.undef.json --ext .js,.jsx src electron",
+    "release": "npm run build && electron-builder --publish always",
+    "release:dry": "npm run build && electron-builder --publish never"
   },
   "build": {
     "productName": "KritakaPrajna",
@@ -61,6 +68,15 @@
     "win": {
       "target": [
         "nsis"
+      ],
+      "extraResources": [
+        {
+          "from": "resources/ollama",
+          "to": "ollama",
+          "filter": [
+            "**/*"
+          ]
+        }
       ],
       "icon": "assets/logo.ico",
       "artifactName": "${productName}-Setup-${version}.${ext}",

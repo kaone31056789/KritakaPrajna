@@ -3,7 +3,7 @@ import { createStore, readRaw, writeRaw } from "./store";
 /* Shell navigation + command palette state. */
 
 const VIEW_KEY = "kp_active_view";
-const VIEWS = ["chat", "agent", "advisor", "settings"];
+const VIEWS = ["chat", "agent", "education", "images", "advisor", "settings"];
 
 export const navStore = createStore({
   view: VIEWS.includes(readRaw(VIEW_KEY, "chat")) ? readRaw(VIEW_KEY, "chat") : "chat",

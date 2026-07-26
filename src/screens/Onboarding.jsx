@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { motion } from "framer-motion";
 import { PROVIDER_META } from "../api/providerRouter";
 import { setProviderKey } from "../core/keys";
-import { EASE_OUT } from "../design/motion";
+import { EASE_OUT, T_SLOW } from "../design/motion";
 import Icon from "../ui/icons";
 import { NeuButton, GradientOrb } from "../ui/primitives";
 import { toast } from "../ui/Toaster";
@@ -26,7 +26,7 @@ function ProviderCard({ id, value, onChange }) {
     <motion.div
       variants={{
         initial: { opacity: 0, y: 14 },
-        animate: { opacity: 1, y: 0, transition: { duration: 0.28, ease: EASE_OUT } },
+        animate: { opacity: 1, y: 0, transition: { duration: T_SLOW, ease: EASE_OUT } },
       }}
       className={`neu-raised rounded-lg p-5 flex flex-col gap-3 ${filled ? "[box-shadow:var(--neu-raised),0_0_0_1.5px_var(--accent-soft)]" : ""}`}
     >

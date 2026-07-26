@@ -1,4 +1,5 @@
 import { routeStream } from "../api/providerRouter";
+import { estimateUsageFromMessages } from "./costTracker";
 
 export const AGENT_TOOL_DEFINITIONS = {
   tools: [
@@ -71,6 +72,7 @@ export const AGENT_TOOL_DEFINITIONS = {
           properties: {
             query: { type: "string", description: "Text or regex pattern to search for" },
             path: { type: "string", description: "Optional subdirectory to limit search" },
+            regex: { type: "boolean", description: "Treat query as a regular expression (default false = literal text)" },
           },
           required: ["query"],
         },
@@ -104,6 +106,95 @@ export const AGENT_TOOL_DEFINITIONS = {
         },
       },
     },
+    {
+      type: "function",
+      function: {
+        name: "apply_patch",
+        description: "Apply multiple search-and-replace edits to one file in a single atomic operation. Preferred over repeated edit_file calls.",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Relative path from workspace root" },
+            edits: {
+              type: "array",
+              description: "Edits applied in order; each old_text must match the current file content exactly",
+              items: {
+                type: "object",
+                properties: {
+                  old_text: { type: "string", description: "Exact text to find in the file" },
+                  new_text: { type: "string", description: "Text to replace it with" },
+                },
+                required: ["old_text", "new_text"],
+              },
+            },
+          },
+          required: ["path", "edits"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "delete_file",
+        description: "Delete a file from the workspace",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Relative path from workspace root" },
+          },
+          required: ["path"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "git_status",
+        description: "Show git working-tree status (branch, staged/modified/untracked files)",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "git_diff",
+        description: "Show git diff of uncommitted changes, optionally limited to one file",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Optional file path to limit the diff" },
+            staged: { type: "boolean", description: "Show staged changes instead of unstaged" },
+          },
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "git_commit",
+        description: "Stage all changes and create a git commit with the given message",
+        parameters: {
+          type: "object",
+          properties: {
+            message: { type: "string", description: "Commit message (imperative, one line)" },
+          },
+          required: ["message"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "run_tests",
+        description: "Run the project's test suite (auto-detected from package.json when no command is given) and report a summary",
+        parameters: {
+          type: "object",
+          properties: {
+            command: { type: "string", description: "Optional explicit test command; defaults to the package.json test script" },
+          },
+        },
+      },
+    },
   ],
 };
 
@@ -132,16 +223,24 @@ When given a task, ALWAYS output a plan first using this exact format:
 Execute each step by calling the appropriate tool. After each tool call, update the step status. Between tool calls, briefly state what you found or did.
 
 ### Step 3: REPORT
-After all steps complete, give a concise summary:
-- What was changed
-- What was created
-- Any follow-up needed
-- Include exact file paths created/edited
-- Include key code snippets in fenced code blocks
+After all steps complete, give a SHORT prose summary (2-4 lines max):
+- Which files you created or edited (exact paths) and what each change does
+- Anything the user should do next
+Do NOT paste the file contents or code back. The user sees every change in the
+Changes tab and can open any file in the Files tab. Echoing code is wasted output.
 
 ## Available Tools
 
-You have these tools. Use them by outputting the exact XML format shown:
+You call tools by writing PLAIN XML directly in your reply — exactly the format shown below.
+CRITICAL tool-call rules:
+- Write the tool call as literal text: \`<tool name="...">\` ... \`</tool>\`. Nothing else wraps it.
+- Do NOT use any special function-calling tokens, channels, or JSON envelopes. No \`function\`, no separator symbols, no \`\`\`json blocks around calls.
+- Emit ONE tool call per reply, then STOP and wait for the tool result before continuing.
+- Do NOT write your private reasoning in the reply. No <think> blocks. Output only: a plan (if needed), short status lines, tool calls, and the final report.
+- To CREATE or CHANGE a file you MUST call write_file or edit_file. Code or file contents you TYPE in your reply are DISCARDED — never saved, just wasted output. A markdown \`\`\` code block is NOT a file write and changes nothing on disk.
+- Put the real code INSIDE the \`<param name="content">\` of a write_file call (or in old_text / new_text of edit_file). Never paste code anywhere else.
+
+Use them by outputting the exact XML format shown:
 
 ### read_file
 Read a file's contents. ALWAYS read before editing.
@@ -191,16 +290,45 @@ Search the internet for docs, solutions, or info.
 <param name="query">react context api tutorial</param>
 </tool>
 
+### apply_patch
+Apply several search-and-replace edits to ONE file atomically. Prefer this over
+multiple edit_file calls on the same file. edits is a JSON array.
+<tool name="apply_patch">
+<param name="path">src/App.jsx</param>
+<param name="edits">[{"old_text":"exact old","new_text":"replacement"}]</param>
+</tool>
+
+### git_status / git_diff
+Inspect the repo state before and after changes.
+<tool name="git_status">
+</tool>
+<tool name="git_diff">
+<param name="path">optional/file.js</param>
+</tool>
+
+### git_commit
+Stage everything and commit with a message.
+<tool name="git_commit">
+<param name="message">Add dark mode toggle</param>
+</tool>
+
+### run_tests
+Run the project's test suite (defaults to the package.json test script).
+<tool name="run_tests">
+<param name="command">npm test</param>
+</tool>
+
 ## Permission Categories
 
 Each tool call falls into a permission category. In "Ask" mode, approvals are only for major/high-risk actions. In "Auto" mode, all actions execute immediately.
 
 | Category | Tools | Risk |
 |----------|-------|------|
-| READ | read_file, list_directory, search_files, search_web | Safe - no changes |
+| READ | read_file, list_directory, search_files, search_web, git_status, git_diff | Safe - no changes |
 | CREATE | write_file (new files) | Medium - adds files |
-| EDIT | edit_file, write_file (existing) | Medium - modifies files |
-| TERMINAL | run_command | High - runs commands |
+| EDIT | edit_file, apply_patch, write_file (existing) | Medium - modifies files |
+| VCS | git_commit | Medium - records a commit |
+| TERMINAL | run_command, run_tests | High - runs commands |
 | DELETE | delete_file | High - removes files |
 
 READ actions ALWAYS execute without asking, even in "Ask" mode.
@@ -238,17 +366,24 @@ When outputting a tool call that needs permission, wrap it like this:
 
 ## Communication Style
 
-- Be concise. No filler phrases.
-- Lead with action, not preamble.
-- Use code blocks with language tags.
-- Between tool calls, give one-line status updates.
+- Be concise. No filler phrases. Lead with action, not preamble.
+- NEVER paste file contents, code blocks, or diffs into your reply. Code belongs ONLY inside a write_file / edit_file tool call. The user sees changes in the Changes tab.
+- Between tool calls, give a short one-line status of what you are doing and why (e.g. "Reading index.html to see the current markup.").
+- When the whole task is done, end with a brief plain-language summary — no code.
 `;
 
 const DEFAULT_MAX_ITERATIONS = 20;
 const DEFAULT_COMMAND_TIMEOUT_MS = 30000;
 const MAX_TOOL_RESULT_CHARS = 24000;
 
-const READ_TOOLS = new Set(["read_file", "list_directory", "search_files", "search_web"]);
+const READ_TOOLS = new Set([
+  "read_file",
+  "list_directory",
+  "search_files",
+  "search_web",
+  "git_status",
+  "git_diff",
+]);
 const HIGH_RISK_PERMISSION_CATEGORIES = new Set(["TERMINAL", "DELETE"]);
 
 const TOOL_CATEGORY_MAP = {
@@ -256,11 +391,35 @@ const TOOL_CATEGORY_MAP = {
   list_directory: "READ",
   search_files: "READ",
   search_web: "READ",
+  git_status: "READ",
+  git_diff: "READ",
   write_file: "CREATE",
   edit_file: "EDIT",
+  apply_patch: "EDIT",
+  git_commit: "VCS",
+  run_tests: "TERMINAL",
   run_command: "TERMINAL",
   delete_file: "DELETE",
 };
+
+// In-loop context compaction: older tool results get truncated hard — the
+// model already acted on them, so a stub is enough. Keeps multi-iteration
+// runs inside the context window without an extra summarization call.
+const COMPACT_KEEP_RECENT = 8;
+const COMPACT_TOOL_RESULT_CHARS = 600;
+
+function compactConversation(conversation) {
+  if (!Array.isArray(conversation) || conversation.length <= COMPACT_KEEP_RECENT) return;
+  for (let i = 0; i < conversation.length - COMPACT_KEEP_RECENT; i++) {
+    const msg = conversation[i];
+    const text = typeof msg?.content === "string" ? msg.content : "";
+    const isToolResult =
+      msg?.role === "tool" || (msg?.role === "user" && text.startsWith("[Tool result"));
+    if (isToolResult && text.length > COMPACT_TOOL_RESULT_CHARS) {
+      msg.content = `${text.slice(0, COMPACT_TOOL_RESULT_CHARS)}\n…[compacted — re-read the file if you need the full content]`;
+    }
+  }
+}
 
 function safeString(value) {
   if (value == null) return "";
@@ -458,6 +617,227 @@ function firstNonEmpty(values) {
   return "";
 }
 
+// Known tool names — used to recognise native/JSON tool calls regardless of wrapper format.
+const KNOWN_TOOL_NAMES = new Set([
+  "read_file",
+  "write_file",
+  "edit_file",
+  "apply_patch",
+  "list_directory",
+  "search_files",
+  "run_command",
+  "run_tests",
+  "search_web",
+  "delete_file",
+  "git_status",
+  "git_diff",
+  "git_commit",
+]);
+
+// Strip model protocol/control tokens (DeepSeek, Qwen, Llama, GPT-OSS, etc.) and
+// hidden reasoning so they never execute or leak into the user-visible output.
+// Examples removed: <｜tool▁sep｜>, <|tool_calls_begin|>, <|python_tag|>, <think>…</think>.
+export function stripAgentNoise(value) {
+  let out = String(value ?? "");
+
+  // Remove closed reasoning blocks entirely (the user does not want to see them).
+  out = out.replace(/<think>[\s\S]*?<\/think>/gi, "");
+  out = out.replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, "");
+  // Stray reasoning tags from truncated streams.
+  out = out.replace(/<\/?think>/gi, "").replace(/<\/?reasoning>/gi, "");
+
+  // Remove <｜…｜> / <|…|> style special tokens (fullwidth ｜ U+FF5C or ASCII |,
+  // fullwidth ▁ U+2581 or underscores/spaces inside).
+  out = out.replace(/<\s*[｜|][^<>]*?[｜|]\s*>/g, "");
+  // Remove common bare control tokens that some models emit without <> wrappers.
+  out = out.replace(/<\/?(?:tool_calls?|tool_call|tool_sep|python_tag|channel|message|eot_id|eom_id|end_of_turn|start_header_id|end_header_id|im_start|im_end|s)\b[^>]*>/gi, "");
+  out = out.replace(/[｜▁]/g, "");
+
+  return out;
+}
+
+// Strip any residual agent-protocol tags (<plan>, <permission>, <tool>, <step>,
+// <param>) from prose before it's shown to the user. Well-formed blocks are
+// parsed into structured actions upstream; this catches truncated or stray tags
+// from cut-off streams so raw markup never leaks into the message bubble.
+export function stripProtocolTags(value) {
+  let out = String(value ?? "");
+  // Whole closed blocks first (inner is non-greedy so adjacent blocks survive).
+  out = out.replace(/<plan>[\s\S]*?<\/plan>/gi, "");
+  out = out.replace(/<permission\b[^>]*>[\s\S]*?<\/permission>/gi, "");
+  out = out.replace(/<tool\b[^>]*>[\s\S]*?<\/tool>/gi, "");
+  out = out.replace(/<step\b[^>]*>[\s\S]*?<\/step>/gi, "");
+  // Any leftover stray open/close tags from a truncated stream.
+  out = out.replace(/<\/?(?:plan|permission|tool|step|param)\b[^>]*>/gi, "");
+  return out.trim();
+}
+
+// Convert a params object into the app's canonical <param> XML.
+function paramsObjectToXml(paramsObject) {
+  if (!paramsObject || typeof paramsObject !== "object") return "";
+  return Object.entries(paramsObject)
+    .map(([key, val]) => {
+      const value = typeof val === "string" ? val : safeString(val);
+      return `<param name="${key}">${value}</param>`;
+    })
+    .join("\n");
+}
+
+// Some models return arguments as a JSON string/object. Normalise to <param> XML.
+function jsonArgsToParamXml(jsonLike) {
+  let obj = jsonLike;
+  if (typeof jsonLike === "string") {
+    const trimmed = jsonLike.trim();
+    if (!trimmed) return "";
+    try {
+      obj = JSON.parse(trimmed);
+    } catch {
+      return "";
+    }
+  }
+  return paramsObjectToXml(obj);
+}
+
+// Pull a balanced {...} object out of `text` starting at/after `from`, respecting
+// string literals and escapes so braces inside strings don't terminate it early.
+function extractBalancedBraces(text, from = 0) {
+  const s = String(text);
+  const start = s.indexOf("{", from);
+  if (start === -1) return null;
+  let depth = 0;
+  let inStr = false;
+  let quote = "";
+  for (let i = start; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (ch === "\\") { i++; continue; }
+      if (ch === quote) inStr = false;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") { inStr = true; quote = ch; continue; }
+    if (ch === "{") depth++;
+    else if (ch === "}" && --depth === 0) return { json: s.slice(start, i + 1), end: i + 1 };
+  }
+  return null;
+}
+
+// Harmony / Kimi / OpenAI "functions." namespace calls emitted as plain text, e.g.
+//   functions.read_file:0{"path":"index.html"}
+//   functions.write_file({"path":"a","content":"<html>{}</html>"})
+//   to=functions.run_command <|message|>{"command":"ls"}
+// The ":id", wrapping () and harmony <|…|> glue are optional; the JSON is
+// brace-matched so nested braces / multi-line content survive intact.
+function rewriteNamespacedCalls(text) {
+  const nameRe = /\b(?:functions|tools|tool|multi_tool_use|namespace)[._]([A-Za-z0-9_]+)/g;
+  let out = "";
+  let last = 0;
+  let m;
+  while ((m = nameRe.exec(text)) !== null) {
+    const name = m[1];
+    if (!KNOWN_TOOL_NAMES.has(name)) continue;
+    const after = m.index + m[0].length;
+    const window = text.slice(after, after + 80);
+    const braceOffset = window.indexOf("{");
+    if (braceOffset === -1) continue;
+    const glue = window.slice(0, braceOffset);
+    // Only benign glue may sit between the name and its JSON args.
+    if (!/^(?:[\s:=()|｜▁<>.\d]|json|to|constrain|commentary|channel|message)*$/i.test(glue)) continue;
+    const extracted = extractBalancedBraces(text, after);
+    if (!extracted) continue;
+    out += text.slice(last, m.index);
+    out += `\n<tool name="${name}">\n${jsonArgsToParamXml(extracted.json)}\n</tool>\n`;
+    let end = extracted.end;
+    if (text[end] === ")") end++;
+    last = end;
+    nameRe.lastIndex = end;
+  }
+  return out + text.slice(last);
+}
+
+// Last-resort: a bare, un-fenced OpenAI-style JSON tool object on its own, e.g.
+//   {"name":"list_directory","arguments":{"path":"."}}
+// Only used when no <tool> block was produced by the other normalizers, so it
+// never touches JSON that legitimately lives inside write_file content.
+function rewriteBareJsonCalls(text) {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    const brace = text.indexOf("{", i);
+    if (brace === -1) { out += text.slice(i); break; }
+    const extracted = extractBalancedBraces(text, brace);
+    if (!extracted) { out += text.slice(i, brace + 1); i = brace + 1; continue; }
+    let handled = false;
+    try {
+      const obj = JSON.parse(extracted.json);
+      const toolName = String(obj.name || obj.tool || obj.tool_name || obj.function || "").trim();
+      const args = obj.arguments ?? obj.parameters ?? obj.params ?? obj.args ?? obj.input;
+      if (toolName && KNOWN_TOOL_NAMES.has(toolName) && args !== undefined) {
+        out += text.slice(i, brace) + `\n<tool name="${toolName}">\n${jsonArgsToParamXml(args)}\n</tool>\n`;
+        i = extracted.end;
+        handled = true;
+      }
+    } catch { /* not a tool-call object — leave as-is */ }
+    if (!handled) { out += text.slice(i, brace + 1); i = brace + 1; }
+  }
+  return out;
+}
+
+// Rewrite native/alternate tool-call encodings into the canonical
+// <tool name="X"><param .../></tool> format so a single parser handles everything.
+export function normalizeToolCallFormats(rawText) {
+  let text = String(rawText || "");
+
+  // 1) DeepSeek/Qwen native:  function<｜tool▁sep｜>NAME <args…>  (args = <param> tags or ```json or {json})
+  const nativeCall = /function\s*<\s*[｜|][^<>]*[｜|]\s*>\s*([A-Za-z0-9_]+)([\s\S]*?)(?=<\s*[｜|][^<>]*[｜|]\s*>|function\s*<\s*[｜|]|$)/g;
+  text = text.replace(nativeCall, (_whole, name, body) => {
+    const toolName = String(name || "").trim();
+    if (!toolName) return "";
+    const bodyText = String(body || "");
+
+    if (/<param\s+name=/i.test(bodyText)) {
+      const cleanBody = bodyText.replace(/<\/?tool\b[^>]*>/gi, "").trim();
+      return `\n<tool name="${toolName}">\n${cleanBody}\n</tool>\n`;
+    }
+
+    let jsonStr = "";
+    const fence = bodyText.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fence) jsonStr = fence[1];
+    else {
+      const brace = bodyText.match(/\{[\s\S]*\}/);
+      if (brace) jsonStr = brace[0];
+    }
+    const paramXml = jsonArgsToParamXml(jsonStr);
+    return `\n<tool name="${toolName}">\n${paramXml}\n</tool>\n`;
+  });
+
+  // 2) OpenAI-style JSON tool call in a fenced block:
+  //    {"name":"write_file","arguments":{...}}  or  {"tool":"...","parameters":{...}}
+  const jsonToolFence = /```(?:json)?\s*(\{[\s\S]*?\})\s*```/gi;
+  text = text.replace(jsonToolFence, (whole, jsonStr) => {
+    try {
+      const obj = JSON.parse(jsonStr);
+      const toolName = String(obj.name || obj.tool || obj.tool_name || "").trim();
+      if (!toolName || !KNOWN_TOOL_NAMES.has(toolName)) return whole;
+      const args = obj.arguments || obj.parameters || obj.params || obj.args || {};
+      const paramXml = paramsObjectToXml(typeof args === "string" ? (() => { try { return JSON.parse(args); } catch { return {}; } })() : args);
+      return `\n<tool name="${toolName}">\n${paramXml}\n</tool>\n`;
+    } catch {
+      return whole;
+    }
+  });
+
+  // 3) Harmony / Kimi / OpenAI "functions.NAME" namespace calls leaked as plain text.
+  text = rewriteNamespacedCalls(text);
+
+  // 4) Bare, un-fenced JSON tool object (GPT-style fallback) — only when nothing
+  //    above already produced a <tool> block, so file content is never touched.
+  if (!/<tool\s+name=/i.test(text)) {
+    text = rewriteBareJsonCalls(text);
+  }
+
+  return text;
+}
+
 function parseToolCall(xmlText) {
   const text = String(xmlText || "");
   const nameMatch = text.match(/<tool\s+name="([^"]+)">/i);
@@ -480,7 +860,9 @@ function parseToolCall(xmlText) {
 
 export function parseAgentResponse(rawText) {
   const blocks = [];
-  let remaining = String(rawText || "").trim();
+  // Normalise any native/JSON tool-call encodings, then strip control/reasoning noise
+  // so the parser only sees clean plans, tool calls, and prose.
+  let remaining = stripAgentNoise(normalizeToolCallFormats(rawText)).trim();
 
   while (remaining.length > 0) {
     const planMatch = remaining.match(/^<plan>([\s\S]*?)<\/plan>/i);
@@ -539,10 +921,10 @@ export function getPermissionCategory(toolCall) {
 }
 
 export function needsPermission(toolCall, autoExecute, explicitCategory = "") {
-  const category = explicitCategory || getPermissionCategory(toolCall);
-  if (category === "READ") return false;
-  if (autoExecute) return false;
-  return HIGH_RISK_PERMISSION_CATEGORIES.has(String(category || "").toUpperCase());
+  const category = String(explicitCategory || getPermissionCategory(toolCall) || "").toUpperCase();
+  if (category === "READ") return false; // reads never mutate — always safe, never prompt
+  if (autoExecute) return false;         // auto-approve ON: execute everything without asking
+  return true;                           // ask mode: confirm every mutating action (CREATE/EDIT/TERMINAL/DELETE/unknown)
 }
 
 export class PermissionManager {
@@ -677,6 +1059,7 @@ function describeToolTarget(toolCall) {
     params.path,
     params.command,
     params.query,
+    params.message,
     tool,
   ]);
 }
@@ -1024,10 +1407,15 @@ export class ToolExecutor {
           const relative = String(params.path || "").trim();
           const cwd = relative ? this.resolvePath(relative) : this.workspacePath;
 
+          const useRegex = params.regex === true || String(params.regex || "").toLowerCase() === "true";
           const isWindows = this.platform.includes("win");
           const command = isWindows
-            ? `findstr /s /n /i /c:"${escapeWindowsFindstrQuery(query)}" *`
-            : `grep -RIn '${escapeBashSingleQuoted(query)}' .`;
+            ? (useRegex
+                ? `findstr /s /n /r /c:"${escapeWindowsFindstrQuery(query)}" *`
+                : `findstr /s /n /i /c:"${escapeWindowsFindstrQuery(query)}" *`)
+            : (useRegex
+                ? `grep -RInE '${escapeBashSingleQuoted(query)}' .`
+                : `grep -RIn '${escapeBashSingleQuoted(query)}' .`);
 
           const run = await this.runCommand(command, cwd);
           if (!run.success) {
@@ -1070,6 +1458,146 @@ export class ToolExecutor {
           };
         }
 
+        case "apply_patch": {
+          const filePath = await this.resolveFilePathForRead(params.path);
+          const readResult = await this.electronAPI?.readFile?.(filePath);
+          if (!readResult || readResult.error) {
+            return { success: false, error: String(readResult?.error || "Failed to read file before patching.") };
+          }
+
+          let edits = params.edits;
+          if (typeof edits === "string") {
+            try { edits = JSON.parse(edits); } catch {
+              return { success: false, error: "apply_patch edits must be a JSON array of {old_text,new_text} objects." };
+            }
+          }
+          if (!Array.isArray(edits) || edits.length === 0) {
+            return { success: false, error: "apply_patch requires a non-empty edits array." };
+          }
+
+          const original = String(readResult.content || "");
+          let updated = original;
+          for (let i = 0; i < edits.length; i++) {
+            const oldText = String(edits[i]?.old_text || "");
+            const newText = normalizeEscapedMultiline(edits[i]?.new_text ?? "");
+            if (!oldText) {
+              return { success: false, error: `apply_patch edit #${i + 1} is missing old_text.` };
+            }
+            if (!updated.includes(oldText)) {
+              return {
+                success: false,
+                error: `apply_patch edit #${i + 1}: old_text not found in ${params.path} — no changes were applied. Read the file to get exact current content.`,
+              };
+            }
+            updated = updated.replace(oldText, newText);
+          }
+
+          const writeResult = await this.electronAPI?.writeFile?.(filePath, updated);
+          if (!writeResult || writeResult.success !== true) {
+            return { success: false, error: String(writeResult?.error || "Failed to write patched file.") };
+          }
+
+          const relativePath = this.toWorkspaceRelative(filePath);
+          const stats = computeLineChangeStats(original, updated);
+          return {
+            success: true,
+            result: `File patched: ${relativePath} (${edits.length} edit${edits.length === 1 ? "" : "s"})`,
+            meta: { tool: "apply_patch", path: relativePath, created: false, ...stats },
+          };
+        }
+
+        case "delete_file": {
+          const filePath = await this.resolveFilePathForRead(params.path);
+          const relativePath = this.toWorkspaceRelative(filePath);
+          if (this.electronAPI?.deleteFile) {
+            const result = await this.electronAPI.deleteFile(filePath);
+            if (!result || (result.success !== true && result.ok !== true)) {
+              return { success: false, error: String(result?.error || "Failed to delete file.") };
+            }
+          } else {
+            const isWindows = this.platform.includes("win");
+            const command = isWindows
+              ? `del /f /q "${filePath}"`
+              : `rm -f '${escapeBashSingleQuoted(filePath)}'`;
+            const run = await this.runCommand(command, this.workspacePath);
+            if (!run.success) {
+              return { success: false, error: run.error || "Failed to delete file." };
+            }
+          }
+          return {
+            success: true,
+            result: `File deleted: ${relativePath}`,
+            meta: { tool: "delete_file", path: relativePath, deleted: true },
+          };
+        }
+
+        case "git_status": {
+          const run = await this.runCommand("git status --porcelain=v1 -b", this.workspacePath);
+          if (!run.success) {
+            return { success: false, error: run.error || "git status failed (is this a git repository?)." };
+          }
+          return { success: true, result: truncateText(String(run.result || "(clean)")) };
+        }
+
+        case "git_diff": {
+          const staged = params.staged === true || String(params.staged || "").toLowerCase() === "true";
+          const target = String(params.path || "").trim();
+          const command = `git diff${staged ? " --staged" : ""}${target ? ` -- "${target}"` : ""}`;
+          const run = await this.runCommand(command, this.workspacePath);
+          if (!run.success) {
+            return { success: false, error: run.error || "git diff failed." };
+          }
+          return { success: true, result: truncateText(String(run.result || "(no changes)")) };
+        }
+
+        case "git_commit": {
+          const message = String(params.message || "").trim().replace(/"/g, "'");
+          if (!message) return { success: false, error: "git_commit requires message." };
+
+          const add = await this.runCommand("git add -A", this.workspacePath);
+          if (!add.success) {
+            return { success: false, error: add.error || "git add failed." };
+          }
+
+          const commit = await this.runCommand(`git commit -m "${message}"`, this.workspacePath);
+          if (!commit.success) {
+            return { success: false, error: commit.error || "git commit failed (nothing to commit?)." };
+          }
+          return { success: true, result: truncateText(String(commit.result || "Commit created.")) };
+        }
+
+        case "run_tests": {
+          let command = String(params.command || "").trim();
+          if (!command) {
+            const pkgRead = await this.electronAPI?.readFile?.(this.resolvePath("package.json"));
+            if (pkgRead && !pkgRead.error) {
+              try {
+                const pkg = JSON.parse(String(pkgRead.content || "{}"));
+                if (pkg?.scripts?.test) command = "npm test";
+              } catch {}
+            }
+          }
+          if (!command) {
+            return {
+              success: false,
+              error: "No test command found — package.json has no test script. Pass command explicitly.",
+            };
+          }
+
+          const run = await this.runCommand(command, this.workspacePath);
+          const output = String((run.success ? run.result : run.error) || "");
+          const summaryLines = output
+            .split("\n")
+            .filter((line) => /\b(pass(ed|ing)?|fail(ed|ing)?|tests?:|suites?:|snapshots?:|assertions?)\b|✓|✗/i.test(line))
+            .slice(-12);
+          const summary = summaryLines.join("\n").trim();
+
+          if (!run.success) {
+            return { success: false, error: truncateText(`Tests FAILED.\n${summary || output}`) };
+          }
+          return { success: true, result: truncateText(`Tests passed.\n${summary || output || "(no output)"}`) };
+        }
+
         default:
           return { success: false, error: `Unknown tool: ${tool}` };
       }
@@ -1091,6 +1619,8 @@ export class AgentLoop {
     autoExecute = false,
     maxIterations = DEFAULT_MAX_ITERATIONS,
     commandTimeoutMs = DEFAULT_COMMAND_TIMEOUT_MS,
+    useNativeTools = true,
+    selfVerify = true,
     requestPermission,
     onStatus,
     onPlan,
@@ -1098,6 +1628,8 @@ export class AgentLoop {
     onText,
     onToolExecution,
     onTerminalLine,
+    onUsage,
+    onCheckpoint,
     signal,
   }) {
     this.model = model;
@@ -1109,6 +1641,8 @@ export class AgentLoop {
     this.executionMode = executionMode === "direct" ? "direct" : "plan_first";
     this.autoExecute = !!autoExecute;
     this.maxIterations = Math.max(1, Number(maxIterations) || DEFAULT_MAX_ITERATIONS);
+    this.useNativeTools = useNativeTools !== false;
+    this.selfVerify = selfVerify !== false;
     this.requestPermission = requestPermission;
     this.onStatus = onStatus;
     this.onPlan = onPlan;
@@ -1116,7 +1650,15 @@ export class AgentLoop {
     this.onText = onText;
     this.onToolExecution = onToolExecution;
     this.onTerminalLine = onTerminalLine;
+    this.onUsage = onUsage;
+    this.onCheckpoint = onCheckpoint;
     this.signal = signal;
+
+    // Per-run recovery state: consecutive failure counts per tool+target, and
+    // the git checkpoint hash captured before the first mutation of a run.
+    this._failCounts = new Map();
+    this._checkpointDone = false;
+    this.checkpoint = null;
 
     this.permissions = new PermissionManager();
     this.permissions.setMode(this.autoExecute ? "auto" : "ask");
@@ -1133,6 +1675,30 @@ export class AgentLoop {
   assertNotAborted() {
     if (this.signal?.aborted) {
       throw new Error("Agent run cancelled.");
+    }
+  }
+
+  // Capture a git snapshot of the working tree (tracked + untracked via a
+  // temporary stage) BEFORE the first mutating tool runs, so a bad run can be
+  // rolled back with `git checkout <hash> -- .`. Returns the commit hash, or
+  // null when the workspace is not a git repo / git is unavailable.
+  async createCheckpoint() {
+    try {
+      const add = await this.toolExecutor.runCommand("git add -A", this.workspacePath);
+      if (!add?.success) return null;
+
+      const stash = await this.toolExecutor.runCommand('git stash create "agent checkpoint"', this.workspacePath);
+      await this.toolExecutor.runCommand("git reset", this.workspacePath);
+
+      const hash = String(stash?.result || "").trim().split(/\s+/)[0] || "";
+      if (/^[0-9a-f]{7,40}$/i.test(hash)) return hash;
+
+      // Clean tree — nothing to stash, HEAD itself is the checkpoint.
+      const head = await this.toolExecutor.runCommand("git rev-parse HEAD", this.workspacePath);
+      const headHash = String(head?.result || "").trim().split(/\s+/)[0] || "";
+      return /^[0-9a-f]{7,40}$/i.test(headHash) ? headHash : null;
+    } catch {
+      return null;
     }
   }
 
@@ -1181,7 +1747,7 @@ export class AgentLoop {
       return { success: false, error: "No workspace selected for Agent mode." };
     }
 
-    const systemPrompt = await buildAgentSystemPrompt({
+    const basePrompt = await buildAgentSystemPrompt({
       workspacePath: this.workspacePath,
       electronAPI: this.electronAPI,
       osName: this.osName,
@@ -1189,12 +1755,26 @@ export class AgentLoop {
       executionMode: this.executionMode,
     });
 
+    // Native function calling: OpenAI-compatible providers accept a `tools`
+    // array and stream structured tool_calls back — far more reliable than
+    // parsing XML out of prose. Other providers keep the XML text protocol.
+    const provider = String(this.model?._provider || "openrouter");
+    const nativeToolsActive =
+      this.useNativeTools && ["openrouter", "openai", "nvidia"].includes(provider);
+
+    const systemPrompt = nativeToolsActive
+      ? `${basePrompt}\n\n## Native Tool Calling Active\nThis session uses the platform's native function-calling interface. Do NOT write XML <tool> blocks — issue real function calls through the API instead. The XML examples above document each tool's purpose and parameters only. You may issue several READ tool calls (read_file, list_directory, search_files, search_web, git_status, git_diff) in one turn; they execute in parallel.`
+      : basePrompt;
+
     const conversation = normalizeMessagesForAgent(contextMessages);
     conversation.push({ role: "user", content: prompt });
 
     let iterations = 0;
     let sawPlan = false;
-    let planApproved = this.executionMode === "direct";
+    let codeNudges = 0;
+    let mutationCount = 0;
+    let verifyPassDone = false;
+    const maxCodeNudges = 2;
 
     while (iterations < this.maxIterations) {
       this.assertNotAborted();
@@ -1202,27 +1782,117 @@ export class AgentLoop {
 
       this.onStatus?.(`Agent iteration ${iterations}/${this.maxIterations}`);
 
+      // Keep long sessions inside the context window before each model turn.
+      compactConversation(conversation);
+
       const response = await routeStream(
         this.providerKeys,
         this.model,
         [{ role: "system", content: systemPrompt }, ...conversation],
         {
           signal: this.signal,
-          maxTokens: 1800,
+          maxTokens: 8192,
           temperature: 0.2,
           topP: 0.9,
+          tools: nativeToolsActive ? AGENT_TOOL_DEFINITIONS.tools : undefined,
         }
       );
 
+      const nativeCalls = Array.isArray(response?.tool_calls) ? response.tool_calls : [];
       const rawText = String(response?.text || "").trim();
-      if (!rawText) {
+
+      // Report token usage for this turn so the UI can show a running cost.
+      // Providers that omit `usage` fall back to a length-based estimate.
+      const turnUsage = response?.usage && (response.usage.prompt_tokens || response.usage.completion_tokens)
+        ? response.usage
+        : estimateUsageFromMessages(
+            [{ role: "system", content: systemPrompt }, ...conversation],
+            rawText
+          );
+      this.onUsage?.(turnUsage);
+
+      if (!rawText && nativeCalls.length === 0) {
         return { success: false, error: "Model returned an empty response." };
       }
 
-      conversation.push({ role: "assistant", content: rawText });
+      // Clean version for display + context: no protocol tokens, no hidden reasoning.
+      const cleanText = stripAgentNoise(normalizeToolCallFormats(rawText)).trim();
+
+      if (nativeCalls.length > 0) {
+        // Echo the structured tool_calls back so the provider accepts the
+        // following role:"tool" result messages.
+        conversation.push({
+          role: "assistant",
+          content: cleanText || rawText || "",
+          tool_calls: nativeCalls,
+        });
+      } else {
+        conversation.push({ role: "assistant", content: cleanText || rawText });
+      }
 
       const blocks = parseAgentResponse(rawText);
-      const parsedBlocks = blocks.length > 0 ? blocks : [{ type: "text", content: rawText }];
+      let parsedBlocks = blocks.length > 0
+        ? blocks
+        : (cleanText ? [{ type: "text", content: cleanText }] : []);
+
+      if (nativeCalls.length > 0) {
+        const nativeBlocks = nativeCalls.map((call, index) => {
+          let params = {};
+          let parseError = null;
+          const rawArgs = String(call?.function?.arguments || "").trim();
+          if (rawArgs) {
+            try {
+              const parsed = JSON.parse(rawArgs);
+              if (parsed && typeof parsed === "object") params = parsed;
+            } catch (err) {
+              parseError = String(err?.message || err);
+            }
+          }
+          return {
+            type: "tool_call",
+            tool: String(call?.function?.name || "").trim(),
+            params,
+            permission: null,
+            nativeId: call?.id || `call_${iterations}_${index}`,
+            parseError,
+          };
+        });
+        // Keep text-derived narration/plan blocks, but native calls are the
+        // source of truth for tools — drop any XML duplicates.
+        parsedBlocks = [
+          ...parsedBlocks.filter((b) => b.type !== "tool_call"),
+          ...nativeBlocks,
+        ];
+      }
+
+      // Every native call id must get a matching role:"tool" reply, otherwise
+      // the provider rejects the next turn.
+      const pushToolResult = (block, text) => {
+        if (block?.nativeId) {
+          conversation.push({ role: "tool", tool_call_id: block.nativeId, content: text });
+        } else {
+          conversation.push({ role: "user", content: text });
+        }
+      };
+
+      // A batch of read-only calls (common in native mode) runs concurrently.
+      const toolBlocks = parsedBlocks.filter((b) => b.type === "tool_call");
+      const parallelResults = new Map();
+      if (
+        toolBlocks.length > 1 &&
+        toolBlocks.every((b) => !b.parseError && getPermissionCategory(b) === "READ")
+      ) {
+        this.onStatus?.(`Running ${toolBlocks.length} read-only tools in parallel`);
+        const settled = await Promise.all(
+          toolBlocks.map((b) =>
+            this.toolExecutor.execute(b).catch((err) => ({
+              success: false,
+              error: String(err?.message || err || "Tool execution failed."),
+            }))
+          )
+        );
+        toolBlocks.forEach((b, i) => parallelResults.set(b, settled[i]));
+      }
 
       let hasToolCalls = false;
       let finalTextParts = [];
@@ -1240,12 +1910,31 @@ export class AgentLoop {
           if (steps.length > 0) {
             sawPlan = true;
             this.onPlan?.(steps);
+
+            // Plan-first: stop the run here and hand the plan back for review.
+            // The user reviews (and can edit) the plan, then explicitly approves;
+            // execution runs as a separate direct-mode pass. This replaces the
+            // old "gate at first write" so the approval always happens up front,
+            // with the plan clearly presented — never mid-execution.
+            if (this.executionMode === "plan_first") {
+              return {
+                success: true,
+                finalText: firstNonEmpty([
+                  finalTextParts.join("\n\n").trim(),
+                  "Plan ready for review.",
+                ]),
+                iterations,
+                hadPlan: true,
+                awaitingApproval: true,
+                planSteps: steps,
+              };
+            }
           }
           continue;
         }
 
         if (block.type === "text") {
-          const text = String(block.content || "").trim();
+          const text = stripProtocolTags(block.content || "");
           if (text) {
             finalTextParts.push(text);
             this.onText?.(text);
@@ -1256,6 +1945,17 @@ export class AgentLoop {
         if (block.type !== "tool_call") continue;
 
         hasToolCalls = true;
+
+        // Native call arrived with malformed JSON arguments — bounce it back
+        // instead of executing garbage.
+        if (block.parseError) {
+          pushToolResult(
+            block,
+            `[Tool result for ${block.tool || "unknown"}]: Error.\nInvalid JSON arguments: ${block.parseError}. Re-issue the call with valid JSON.`
+          );
+          continue;
+        }
+
         const stepLabel = `${block.tool}(${describeToolTarget(block) || ""})`;
         this.onStep?.({ step: "Executing tool", details: stepLabel });
 
@@ -1270,28 +1970,29 @@ export class AgentLoop {
           block.tool,
         ]);
 
-        if (!planApproved && this.executionMode === "plan_first" && category !== "READ") {
-          const gate = await this.requestPermissionIfNeeded({
-            toolCall: { tool: "plan_execution", params: { target: "Execute generated plan" } },
-            category: "PLAN",
-            target: "Execute generated plan",
-            stepLabel: "Approve plan execution",
-          });
-
-          if (!gate.allowed) {
-            return {
-              success: true,
-              finalText: "Plan generated. Execution is waiting for approval.",
-              iterations,
-            };
-          }
-
-          planApproved = true;
+        // Plan-first safety net: never mutate on the first pass. If the model
+        // jumped straight to a non-READ tool call without emitting a plan block,
+        // hand the run back for review anyway (with whatever narration we have)
+        // instead of executing or popping a mid-run "plan execution" gate. The
+        // approved plan is executed later as a separate direct-mode pass.
+        if (this.executionMode === "plan_first" && category !== "READ") {
+          return {
+            success: true,
+            finalText: firstNonEmpty([
+              finalTextParts.join("\n\n").trim(),
+              "Plan ready for review.",
+            ]),
+            iterations,
+            hadPlan: sawPlan,
+            awaitingApproval: true,
+            planSteps: [],
+          };
         }
 
-        const shouldAsk = this.executionMode === "plan_first"
-          ? false
-          : needsPermission(block, this.autoExecute, category);
+        // Auto-approve gates every mutating action regardless of plan_first/direct.
+        // The plan approval only greenlights *starting* the run; the toggle governs
+        // whether each individual write/edit/command still needs a yes.
+        const shouldAsk = needsPermission(block, this.autoExecute, category);
         let effectiveCall = block;
 
         if (shouldAsk) {
@@ -1304,10 +2005,7 @@ export class AgentLoop {
 
           if (!permissionResult.allowed) {
             const denyResult = `Action denied by user: ${block.tool} on ${target}`;
-            conversation.push({
-              role: "user",
-              content: `[Tool result for ${block.tool}]: ${denyResult}`,
-            });
+            pushToolResult(block, `[Tool result for ${block.tool}]: ${denyResult}`);
             this.onToolExecution?.({
               tool: block.tool,
               category,
@@ -1337,13 +2035,39 @@ export class AgentLoop {
           text: `Executing ${effectiveCall.tool}`,
         });
 
-        const result = await this.toolExecutor.execute(effectiveCall);
+        // First mutation of the run: snapshot the workspace for rollback.
+        if (!this._checkpointDone && category !== "READ") {
+          this._checkpointDone = true;
+          this.onStatus?.("Creating git checkpoint before first change…");
+          this.checkpoint = await this.createCheckpoint();
+          if (this.checkpoint) this.onCheckpoint?.(this.checkpoint);
+        }
+
+        const result = parallelResults.has(block)
+          ? parallelResults.get(block)
+          : await this.toolExecutor.execute(effectiveCall);
+
+        if (result.success && category !== "READ") mutationCount += 1;
+
+        // Error-recovery memory: repeating an identical failing call is the
+        // most common weak-model loop — force a strategy change instead.
+        const failKey = `${effectiveCall.tool}:${target}`;
+        let recoveryHint = "";
+        if (!result.success) {
+          const failures = (this._failCounts.get(failKey) || 0) + 1;
+          this._failCounts.set(failKey, failures);
+          if (failures >= 2) {
+            recoveryHint = `\n[Recovery hint]: this exact call has failed ${failures} times. Do NOT repeat it verbatim — change approach: re-read the file for exact text, try a different tool (apply_patch/write_file), or adjust the command.`;
+          }
+        } else {
+          this._failCounts.delete(failKey);
+        }
 
         const resultText = result.success
           ? `[Tool result for ${effectiveCall.tool}]: Success.\n${truncateText(result.result || "")}`
-          : `[Tool result for ${effectiveCall.tool}]: Error.\n${truncateText(result.error || "")}`;
+          : `[Tool result for ${effectiveCall.tool}]: Error.\n${truncateText(result.error || "")}${recoveryHint}`;
 
-        conversation.push({ role: "user", content: resultText });
+        pushToolResult(block, resultText);
 
         this.onToolExecution?.({
           tool: effectiveCall.tool,
@@ -1356,16 +2080,59 @@ export class AgentLoop {
       }
 
       if (!hasToolCalls) {
+        // Safety net for weaker models: if the reply pasted a fenced code block
+        // but never called write_file/edit_file, nothing was saved to disk. Don't
+        // end the run — nudge it (up to maxCodeNudges) to re-issue the code as a
+        // real tool call. Only in an executing pass (plan_first review text is
+        // allowed to be prose without tools).
+        if (
+          this.executionMode !== "plan_first" &&
+          codeNudges < maxCodeNudges &&
+          rawText.includes("```")
+        ) {
+          codeNudges += 1;
+          this.onStatus?.("Model pasted code without a write_file call — asking it to use the tool.");
+          conversation.push({
+            role: "user",
+            content:
+              "You pasted code in your reply but did NOT call a tool, so NOTHING was written to disk. " +
+              "Code typed in a message is discarded. Re-issue that code now as a single write_file tool " +
+              'call, with the FULL file content inside <param name="content">. Do not paste code again. ' +
+              "If the file was already written by an earlier tool call, reply DONE with a one-line summary (no code).",
+          });
+          continue;
+        }
+
         const finalText = firstNonEmpty([
           finalTextParts.join("\n\n").trim(),
+          cleanText,
           rawText,
         ]);
+
+        // Self-verify: when an executing pass made changes, force one review
+        // turn before accepting the model's "done".
+        if (
+          this.selfVerify &&
+          !verifyPassDone &&
+          mutationCount > 0 &&
+          iterations < this.maxIterations
+        ) {
+          verifyPassDone = true;
+          this.onStatus?.("Verification pass: reviewing changes before finishing.");
+          conversation.push({
+            role: "user",
+            content:
+              "Verification pass before finishing: re-read the file(s) you changed and confirm the edits are correct and complete. If a fast check exists (build/test/lint), run it. If everything is correct, reply with your final summary; otherwise fix the problems now.",
+          });
+          continue;
+        }
 
         return {
           success: true,
           finalText,
           iterations,
           hadPlan: sawPlan,
+          checkpoint: this.checkpoint,
         };
       }
     }

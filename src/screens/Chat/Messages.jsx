@@ -2,16 +2,92 @@ import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { useStore } from "../../core/store";
 import { chatsStore, getActiveChat, setActiveChat } from "../../core/chats";
-import { sendStore, regenerateMessage, editAndResend, extractText, sendMessage } from "../../core/send";
+import { sendStore, regenerateMessage, editAndResend, extractText, sendMessage, splitReasoning } from "../../core/send";
 import { modelsStore, selectModel } from "../../core/models";
 import { formatCost } from "../../utils/costTracker";
-import { EASE_OUT } from "../../design/motion";
+import { EASE_OUT, T } from "../../design/motion";
 import Icon from "../../ui/icons";
 import { GradientOrb, IconButton, EmptyState, NeuButton } from "../../ui/primitives";
 import BrandIcon from "../../ui/BrandIcon";
 import Markdown from "../../ui/Markdown";
+import Reasoning from "./Reasoning";
 import { toast } from "../../ui/Toaster";
 import { LogoMark } from "../../ui/Logo";
+
+/* Open a link in the system browser (Electron) or a new tab (web). */
+function openUrl(url) {
+  if (!url) return;
+  if (window.electronAPI?.openExternal) window.electronAPI.openExternal(url);
+  else window.open(url, "_blank", "noopener");
+}
+
+function hostOf(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+/* Turn inline [1], [2]… citations into clickable links pointing at the matching
+   web source, so a reader can tap a citation to open the article (ChatGPT-style).
+   Code spans/blocks are split out first and left untouched — we never rewrite
+   a "[0]" that lives inside code. Footnote refs ([^1]) and existing links are
+   naturally skipped by the number-only pattern. */
+function linkifyCitations(text, sources) {
+  if (!text || !sources?.length) return text;
+  const max = sources.length;
+  return text
+    .split(/(```[\s\S]*?```|`[^`]*`)/g)
+    .map((seg, i) => {
+      if (i % 2 === 1) return seg; // captured code span/block
+      return seg.replace(/\[(\d{1,2})\]/g, (m, n) => {
+        const idx = parseInt(n, 10);
+        const url = idx >= 1 && idx <= max ? sources[idx - 1]?.url : null;
+        return url ? `[[${idx}]](${url})` : m;
+      });
+    })
+    .join("");
+}
+
+/* ── Web sources — clickable citation chips under an answer.
+   Numbered to match the inline [1], [2]… references so you can tap through
+   to the original article. */
+function Sources({ sources }) {
+  if (!sources?.length) return null;
+  return (
+    <div className="mt-2.5 flex flex-col gap-1.5">
+      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-faint">
+        <Icon name="globe" size={11} className="text-info" />
+        Sources
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {sources.map((s, i) => (
+          <button
+            key={`${s.url}-${i}`}
+            type="button"
+            onClick={() => openUrl(s.url)}
+            title={s.title ? `${s.title}\n${s.url}` : s.url}
+            className="pressable group/src flex items-center gap-1.5 max-w-[260px] pl-1.5 pr-2.5 h-7 rounded-full bg-deep [box-shadow:var(--neu-inset-sm)] text-[11px] text-dim hover:text-hi"
+            style={{ transition: "box-shadow 150ms var(--ease-out), color 150ms var(--ease-out)" }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.boxShadow = "var(--neu-inset-sm), 0 0 0 1px var(--accent)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.boxShadow = "var(--neu-inset-sm)";
+            }}
+          >
+            <span className="w-4 h-4 rounded-full bg-surface flex items-center justify-center text-[9px] font-bold text-accent shrink-0 tabular-nums">
+              {i + 1}
+            </span>
+            <span className="truncate">{hostOf(s.url) || s.title || "source"}</span>
+            <Icon name="arrowUpRight" size={10} className="text-faint shrink-0 opacity-0 group-hover/src:opacity-100" />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 async function copyText(text) {
   try {
@@ -79,10 +155,11 @@ function decodeError(err) {
 function UserMessage({ chatId, index, message }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
-  const text = extractText(message);
+  const text = message._displayText ?? extractText(message);
   const images = Array.isArray(message.content)
     ? message.content.filter((p) => p.type === "image_url").map((p) => p.image_url?.url)
     : [];
+  const files = Array.isArray(message._attachments) ? message._attachments : [];
 
   return (
     <div className="msg-block enter-rise flex justify-end pl-14 group">
@@ -91,6 +168,20 @@ function UserMessage({ chatId, index, message }) {
           <div className="flex gap-2 flex-wrap justify-end">
             {images.map((src, i) => (
               <img key={i} src={src} alt="attachment" className="max-h-40 rounded-sm [box-shadow:var(--neu-raised-sm)]" />
+            ))}
+          </div>
+        )}
+        {files.length > 0 && (
+          <div className="flex gap-2 flex-wrap justify-end">
+            {files.map((f, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-2 px-3 py-2 rounded-md text-[12px] text-faint [box-shadow:var(--neu-raised-sm)] max-w-[220px]"
+                title={f.name}
+              >
+                <Icon name="file" className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">{f.name}</span>
+              </div>
             ))}
           </div>
         )}
@@ -141,6 +232,8 @@ function UserMessage({ chatId, index, message }) {
 function AssistantMessage({ chatId, index, message, busy, grouped }) {
   const meta = message._meta;
   const text = extractText(message);
+  const { reasoning, answer, pending } = splitReasoning(text);
+  const isThinking = !!message.streaming && pending;
 
   const orbSeed = meta ? `${meta.provider}::${meta.modelId}` : "kp-assistant";
   const brandModel = meta
@@ -224,10 +317,23 @@ function AssistantMessage({ chatId, index, message, busy, grouped }) {
               {message._images?.map((src, i) => (
                 <img key={i} src={src} alt="generated" className="max-w-full rounded-sm mb-2 [box-shadow:var(--neu-raised-sm)]" />
               ))}
-              <Markdown>{text}</Markdown>
-              {message.streaming && (
+              {message.streaming && !text && (
+                <span className="flex items-center gap-1.5 py-1" role="status" aria-label="Thinking">
+                  {[0, 1, 2].map((i) => (
+                    <span key={i} className="think-dot" style={{ animationDelay: `${i * 180}ms` }} />
+                  ))}
+                </span>
+              )}
+              {reasoning && <Reasoning text={reasoning} thinking={isThinking} />}
+              {answer && (
+                <Markdown>
+                  {meta?.webSources?.length ? linkifyCitations(answer, meta.webSources) : answer}
+                </Markdown>
+              )}
+              {message.streaming && !pending && answer && (
                 <span className="inline-block w-[7px] h-[15px] ml-1 align-text-bottom rounded-[2px] bg-accent animate-breathe" />
               )}
+              {!message.streaming && meta?.webSources?.length > 0 && <Sources sources={meta.webSources} />}
             </>
           )}
         </div>
@@ -242,6 +348,14 @@ function AssistantMessage({ chatId, index, message, busy, grouped }) {
                   size={12}
                 />
                 <span className="truncate max-w-[180px]">{meta.modelName}</span>
+                {meta.failoverFrom && (
+                  <span
+                    className="flex items-center gap-0.5 text-info"
+                    title={`${meta.failoverFrom} was unavailable — automatically switched to ${meta.modelName} to answer this turn`}
+                  >
+                    <Icon name="refresh" size={10} /> from {meta.failoverFrom}
+                  </span>
+                )}
                 {typeof meta.elapsedMs === "number" && <span>· {(meta.elapsedMs / 1000).toFixed(1)}s</span>}
                 {meta.cost > 0 && <span>· {formatCost(meta.cost)}</span>}
                 {meta.webSources?.length > 0 && (
@@ -249,11 +363,24 @@ function AssistantMessage({ chatId, index, message, busy, grouped }) {
                     <Icon name="globe" size={10} /> {meta.webSources.length}
                   </span>
                 )}
+                {meta.memoryUsed && (
+                  <span className="flex items-center gap-0.5" title="Personalised with your saved memory">
+                    <Icon name="bookmark" size={10} /> Memory
+                  </span>
+                )}
+                {meta.tokenSavings?.saved > 0 && (
+                  <span
+                    className="flex items-center gap-0.5"
+                    title={`Token optimizer (${meta.tokenSavings.mode}): trimmed ~${meta.tokenSavings.saved} tokens before send — ${meta.tokenSavings.compressed} compressed, ${meta.tokenSavings.dropped} dropped`}
+                  >
+                    · ↓{meta.tokenSavings.saved} tok
+                  </span>
+                )}
               </span>
             )}
             {timeOf(message) && <span className="text-[10.5px] text-faint">{timeOf(message)}</span>}
             <span className="flex gap-0.5">
-              <IconButton name="copy" size={13} label="Copy" onClick={() => copyText(text)} />
+              <IconButton name="copy" size={13} label="Copy" onClick={() => copyText(answer || text)} />
               <IconButton name="refresh" size={13} label="Regenerate" disabled={busy} onClick={() => regenerateMessage(chatId, index)} />
             </span>
           </div>
@@ -283,7 +410,7 @@ function greeting() {
 
 const riseIn = {
   initial: { opacity: 0, y: 10 },
-  animate: { opacity: 1, y: 0, transition: { duration: 0.22, ease: EASE_OUT } },
+  animate: { opacity: 1, y: 0, transition: { duration: T, ease: EASE_OUT } },
 };
 
 function Empty({ onPick }) {
@@ -401,7 +528,7 @@ export default function Messages() {
 
   return (
     <div ref={scrollRef} className="h-full overflow-y-auto">
-      <div className="max-w-[768px] mx-auto flex flex-col px-6 py-7">
+      <div className="chat-col flex flex-col px-6 py-7">
         {messages.map((m, i) => {
           const prev = messages[i - 1];
           const newDay = !!(m.ts && prev?.ts && new Date(m.ts).toDateString() !== new Date(prev.ts).toDateString());

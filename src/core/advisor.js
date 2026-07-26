@@ -1,7 +1,8 @@
 import { createStore } from "./store";
 import { getModelHealth } from "../utils/rateLimiter";
-import { supportsTask, detectTaskType } from "../utils/smartModelSelect";
-import { loadLiveRankingSignals } from "../utils/advisorRanking";
+import { detectTaskType, supportsVision, supportsImageGeneration, supportsText } from "../utils/smartModelSelect";
+import { supportsReasoningModel } from "../utils/reasoningControls";
+import { loadLiveRankingSignals, refreshOpenRouterRankings } from "../utils/advisorRanking";
 import { rankInfoFor, usageScore } from "./rankings";
 import { isFreeModel } from "./models";
 
@@ -11,17 +12,32 @@ import { isFreeModel } from "./models";
 export const advisorStore = createStore({
   signals: null, // { hfRepoSignals, orPopularity, sources, freshness }
   signalsLoading: false,
+  lastRankingsRefresh: null, // summary from the last live OpenRouter refresh
 });
 
-export async function refreshSignals(models) {
-  if (advisorStore.get().signalsLoading) return;
+export async function refreshSignals(models, { providers = null, force = false } = {}) {
+  if (advisorStore.get().signalsLoading) return null;
   advisorStore.set({ signalsLoading: true });
   try {
+    // "Update anytime": pull the REAL OpenRouter usage rankings before
+    // (re)loading signals, so the advisor scores off live data instead of the
+    // heuristic deriveORPopularity proxy. No-ops without an OpenRouter key.
+    let refresh = null;
+    if (force && providers?.openrouter) {
+      refresh = await refreshOpenRouterRankings({ models, providers, force: true });
+    }
     const signals = await loadLiveRankingSignals(models);
-    advisorStore.set({ signals, signalsLoading: false });
+    advisorStore.set({ signals, signalsLoading: false, lastRankingsRefresh: refresh });
+    return refresh;
   } catch {
     advisorStore.set({ signals: null, signalsLoading: false });
+    return null;
   }
+}
+
+/** "Update anytime" trigger for the UI — force-pulls live OpenRouter rankings. */
+export async function refreshRankings(models, providers) {
+  return refreshSignals(models, { providers, force: true });
 }
 
 /* Ability tiers — newer / stronger families rank higher so scores actually
@@ -49,6 +65,42 @@ function tieBreak(id) {
   return h % 6;
 }
 
+/* Category-specific capability signals. */
+const CODING_HINTS = /coder|codestral|devstral|code[- ]?llama|starcoder|codex|composer|codegemma|codeqwen/i;
+const REASONING_HINTS = /\br1\b|qwq|reason|think|exaone[- ]?deep|\bo[134][- ]?(mini|preview)?\b/i;
+const STRONG_VISION_HINTS = /gpt-4o|gpt-5|gemini|claude|qwen[- ]?[\d.]*[- ]?vl|pixtral|llama[- ]?4|internvl/i;
+
+/** Hard eligibility gate — models that can't do the task never appear. */
+export function taskEligible(model, task) {
+  if (task === "text-to-image") return !!model._isImageGen || supportsImageGeneration(model);
+  if (model._isImageGen) return false; // image gens can't chat/code/reason
+  if (task === "vision") return supportsVision(model);
+  return supportsText(model);
+}
+
+/** Per-category boost so the ranking reflects the task, not just raw ability. */
+function taskCapabilityBoost(model, task, name) {
+  switch (task) {
+    case "coding": {
+      let b = 0;
+      if (CODING_HINTS.test(name)) b += 14;
+      if (supportsReasoningModel(model)) b += 4; // reasoning helps hard coding tasks
+      return b;
+    }
+    case "reasoning": {
+      let b = 0;
+      if (supportsReasoningModel(model)) b += 14;
+      if (REASONING_HINTS.test(name)) b += 6;
+      return Math.min(18, b);
+    }
+    case "vision":
+      // Pool is already vision-only; favour proven VL families.
+      return STRONG_VISION_HINTS.test(name) ? 10 : 0;
+    default:
+      return 0;
+  }
+}
+
 function capabilityScore(model, task) {
   const name = `${model.id} ${model.name || ""}`;
   let score = abilityBase(name);
@@ -63,7 +115,7 @@ function capabilityScore(model, task) {
   else if (ctx >= 32_000) score += 8;
   else if (ctx >= 8_000) score += 4;
 
-  if (task && task !== "general" && supportsTask(model, task)) score += 15;
+  score += taskCapabilityBoost(model, task, name);
   return Math.min(100, score + tieBreak(String(model.id || "")));
 }
 
@@ -161,8 +213,10 @@ export function adviceReasons(entry, task = "general") {
   if (rankInfo?.rank && rankInfo.rank <= 10) reasons.push(`#${rankInfo.rank} on OpenRouter this week`);
   else if (rankInfo?.trendPct > 0) reasons.push(`Usage trending up ${rankInfo.trendPct}% this week`);
   if (live > 0) reasons.push("Boosted by live community signals");
-  if (task === "coding" && supportsTask(entry.model, "coding")) reasons.push("Tuned for code generation");
-  if (task === "vision" && supportsTask(entry.model, "vision")) reasons.push("Accepts image input");
+  const modelName = `${model.id} ${model.name || ""}`;
+  if (task === "coding" && CODING_HINTS.test(modelName)) reasons.push("Tuned for code generation");
+  if (task === "reasoning" && supportsReasoningModel(model)) reasons.push("Native step-by-step reasoning support");
+  if (task === "vision" && supportsVision(model)) reasons.push("Accepts image input");
   return reasons.slice(0, 4);
 }
 
@@ -170,7 +224,7 @@ export function rankModels(models, { task = "general", priority = "balanced", li
   const w = WEIGHTS[priority] || WEIGHTS.balanced;
   const signals = advisorStore.get().signals;
 
-  const pool = models.filter((m) => !m._isImageGen || task === "text-to-image");
+  const pool = models.filter((m) => taskEligible(m, task));
 
   return pool
     .map((model) => {
